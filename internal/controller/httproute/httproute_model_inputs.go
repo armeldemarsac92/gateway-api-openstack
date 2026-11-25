@@ -52,7 +52,7 @@ type routeModelInputs struct {
 	input                     model.Input
 	logical                   model.Gateway
 	externalAuth              map[*model.HTTPExternalAuth]routeExternalAuthObservation
-	externalAuthCapability    model.Diagnostic
+	backendClientCertificate  func(context.Context, *gatewayv1.Gateway) cloud.BackendClientCertificate
 	backendTLSAvailability    map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor        *backendtls.GatewayAncestor
 	clusterTrustBundles       *backendtls.ClusterTrustBundles
@@ -311,7 +311,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	if err != nil {
 		return nil, err
 	}
-	inputs.externalAuthCapability = r.externalAuthCapability(ctx, inputs.externalAuth)
+	r.checkExternalAuthCapabilities(ctx, inputs.externalAuth)
 	return inputs, ctx.Err()
 }
 
@@ -349,6 +349,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.HTTPRequestMirror = r.Config.HTTPRequestMirror
 	input.CheckRouteExternalAuth = r.routeExternalAuthRulesEnabled()
 	input.RouteExternalAuth = r.Config.RouteExternalAuthEnabled()
+	input.RouteExternalAuthGRPC = r.Config.RouteExternalAuthGRPCEnabled()
 	input.WeightedHTTPTargets = r.Config.WeightedHTTPTargets
 	input.HTTPCORS = r.Config.HTTPCORS
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
@@ -406,6 +407,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 		gateway: gateway, input: input, logical: logical,
 		backendTLSAncestor: ancestor, clusterTrustBundles: r.Config.ClusterTrustBundles,
 		xBackendClientCertificates: r.XBackendClientCertificates,
+		backendClientCertificate:   r.BackendClientCertificateForGateway,
 	}, nil
 }
 

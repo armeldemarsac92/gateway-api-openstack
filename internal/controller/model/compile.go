@@ -213,7 +213,7 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 		kind := HTTPProfileRouteKind(route)
 		ordinaryHTTP := kind == HTTPRouteKind
 		if ordinaryHTTP && input.CheckRouteExternalAuth && HasHTTPRouteExternalAuth(rule) {
-			compiled.ExternalAuth, compiled.ExternalAuthDiagnostic = NormalizeHTTPRouteExternalAuth(rule, input.RouteExternalAuth, input.WeightedHTTPTargets)
+			compiled.ExternalAuth, compiled.ExternalAuthDiagnostic = NormalizeHTTPRouteExternalAuth(rule, input.RouteExternalAuth, input.RouteExternalAuthGRPC, input.WeightedHTTPTargets)
 			rule.Filters = nil
 			if compiled.ExternalAuthDiagnostic != nil {
 				// Preserve the rule's matches for local rejection.

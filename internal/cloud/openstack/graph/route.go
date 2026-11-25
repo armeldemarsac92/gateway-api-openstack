@@ -71,7 +71,7 @@ type desiredPolicy struct {
 	requestURLRewrite        *octavia.RequestURLRewrite
 	requestPolicy            *cloud.HTTPRequestPolicy
 	externalAuth             *cloud.ListenerExternalAuth
-	resolvedExternalAuth     *octavia.ListenerHTTPExternalAuth
+	resolvedExternalAuth     *octavia.PolicyExternalAuth
 	requestMirrors           []desiredHTTPMirror
 	resolvedRequestMirrors   []octavia.HTTPRequestMirror
 	requestCORS              *cloud.HTTPCORS
@@ -612,7 +612,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			return err
 		}
 		if match.ExternalAuth != nil {
-			if !p.routeExternalAuth || !p.fixedHTTPResponses || r.spec.GRPC || r.redirect ||
+			if !p.routeAuthorizerEnabled(*match.ExternalAuth) || !p.fixedHTTPResponses || r.spec.GRPC || r.redirect ||
 				len(match.RequestHeaderOperations) != 0 || len(match.ResponseHeaderOperations) != 0 ||
 				match.CORS != nil || match.URLRewrite != nil || match.RequestPolicy != nil || len(match.RequestMirrors) != 0 ||
 				slices.ContainsFunc(targetFilters, func(target octavia.WeightedHTTPTarget) bool {

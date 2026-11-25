@@ -380,6 +380,37 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 				require.Equal(t, newClient, untouched["tls_container_ref"])
 			}
 		})
+		t.Run("rotate only the stale gRPC authorizer identity", func(t *testing.T) {
+			oldName, oldMonitor := pool["name"], pool["healthmonitor_id"]
+			defer func() { pool["name"], pool["healthmonitor_id"] = oldName, oldMonitor }()
+			pool["name"], pool["healthmonitor_id"] = grpcAuthPoolNamePrefix+"revoked", nil
+			pool["tags"] = append(safetyGatewayTags(t, id, rolePool), grpcAuthPoolTag, backendTLSManagedTag, backendTLSClientTag)
+			pool["admin_state_up"], pool["tls_container_ref"] = true, oldClient
+			member["tags"] = append(safetyGatewayTags(t, id, roleMember), grpcAuthPoolTag)
+			memberIDs = []map[string]string{{"id": "member-1"}}
+			current := maps.Clone(pool)
+			current["id"], current["name"], current["tls_container_ref"] = "current-authorizer", grpcAuthPoolNamePrefix+"current", newClient
+			lb["pools"] = []map[string]string{{"id": "pool-1"}, {"id": "current-authorizer"}}
+			reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, current}}
+			spec.Gateway.XBackendClientWithdrawals = nil
+			spec.Gateway.Spec.ScopedListeners = nil
+			spec.Gateway.BackendClientCertificate = cloud.BackendClientCertificate{Reference: newClient}
+
+			for _, expected := range []string{"disable", "drain", "forget-client"} {
+				writes = nil
+				result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+				require.NoError(t, err)
+				require.True(t, result.Outcome.MutationSubmitted)
+				require.Equal(t, []string{expected}, writes)
+			}
+			writes = nil
+			result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+			require.NoError(t, err)
+			require.Equal(t, cloud.OutcomeReady, result.Outcome.State)
+			require.Empty(t, writes)
+			require.Equal(t, true, current["admin_state_up"])
+			require.Equal(t, newClient, current["tls_container_ref"])
+		})
 	})
 	require.Equal(t, false, pool["admin_state_up"])
 	require.Nil(t, pool["tls_container_ref"])

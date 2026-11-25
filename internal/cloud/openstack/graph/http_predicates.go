@@ -153,6 +153,7 @@ type guardedHTTPListener struct {
 	obsoleteIDs                   map[string]bool
 	unsettledDesired              bool
 	additionalCapabilities        map[string]bool
+	maxAuthBodyBytes              int32
 }
 
 // protectHTTPPredicateTraffic uses the same verified listener and policy inventory
@@ -447,6 +448,9 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 			mark(port, func(state *guardedHTTPListener) {
 				state.desired, state.unsettled = true, state.unsettled || !settled
 				state.unsettledDesired = state.unsettledDesired || !settled
+				if isRouteAuthorizerCapability(predicate.capability) && wanted.externalAuth != nil {
+					state.maxAuthBodyBytes = max(state.maxAuthBodyBytes, wanted.externalAuth.ForwardBodyMaxSize)
+				}
 				if predicate.additionalCapabilities != nil {
 					for _, capability := range predicate.additionalCapabilities(wanted) {
 						if state.additionalCapabilities == nil {

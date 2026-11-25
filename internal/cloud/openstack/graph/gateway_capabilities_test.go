@@ -47,7 +47,7 @@ func TestHTTPListenerWritesRequireEffectiveProviderCapabilities(t *testing.T) {
 		{name: "explicit null", fixed: true, capabilityReply: `{"gateway_capabilities":null}`},
 		{name: "fixed supported", fixed: true, capabilityReply: `{"gateway_capabilities":["fixed_http_responses_v1"]}`, wantWrite: true},
 		{name: "weighted missing fixed", fixed: true, weighted: true, capabilityReply: `{"gateway_capabilities":["weighted_http_targets_v1"]}`},
-		{name: "weighted missing weighted", fixed: true, weighted: true, capabilityReply: `{"gateway_capabilities":["fixed_http_responses_v1"]}`},
+		{name: "listener fallback needs only fixed responses when weighted mode is enabled", fixed: true, weighted: true, capabilityReply: `{"gateway_capabilities":["fixed_http_responses_v1"]}`, wantWrite: true},
 		{name: "weighted supported", fixed: true, weighted: true, capabilityReply: `{"gateway_capabilities":["fixed_http_responses_v1","weighted_http_targets_v1"]}`, wantWrite: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {

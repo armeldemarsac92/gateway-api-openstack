@@ -1,0 +1,34 @@
+{
+  "sourceRevision": "13a6870cb63abafa131527b7b1b67048d962cd57",
+  "sourceTree": "4794552a3ece9e1a6ee009751c8c46f60eb8678a",
+  "controllerImage": "sha256:3c4eb3b1be49b95133f447be47b107a56730d3046b1dd995895108bf5e5f713b",
+  "managerSHA256": "503fb37ac7f738c3e1fe55853423472bff8966c67c0fd44ca6a203e9c7dcb3f1",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "HAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+  "adapterSHA256": "4dd3095799f67fc6bdfb2e5b0bd11c2880d979b065ab2fa267536bb46eac51c7",
+  "providerRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-l7policy-grpc-auth-transition-e62a57c49177",
+  "requestBodyProviderRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-l7policy-external-auth-forward-body-110450db6487",
+  "octavia": {
+    "sha256": "33cc7ef8de6f0372e711ce4a7b1f23bf6a8b07a34c30808b7ff442e9b4c82f90",
+    "revision": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543"
+  },
+  "octaviaLib": {
+    "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+    "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33"
+  },
+  "grpcAuthorization": {
+    "standard.json": "4bfc735dfed30a3abce16f457eb0e043da6b97480d9cd21e98b555ac9f6b12b5",
+    "grant.json": "38f0af340bb9ecea2680adb9c42fa40db5beb462014a4ea07e31927bf9464dea",
+    "identity.json": "9dc9560d85e9c8d13955ac0497948a1412021d5b25c934c59da80d78ed288687"
+  },
+  "forwardBody": {
+    "standard.json": "f8cb3919093ab1380193f99831ce5e6aa1bbdf1656ee5885ca16bead54d73bca",
+    "experimental.json": "700634af4ef5a1c2adbf9588941d4b420c121eeeb6f0f6cd5d500668ccc5dc9c"
+  },
+  "boundary": [
+    "Local Kubernetes API server and etcd with the upstream v1.7.0 CRDs.",
+    "Installed Octavia WSGI and SQL, Amphora renderer, native HAProxy, and local HTTP and Envoy v3 peers.",
+    "Keystone, Neutron, worker delivery and Amphora agent transport used local fixtures.",
+    "Deployed Hibiscus region and full Amphora boot remain unqualified."
+  ]
+}

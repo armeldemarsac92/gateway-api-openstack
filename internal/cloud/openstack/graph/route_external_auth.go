@@ -18,43 +18,125 @@ package graph
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"maps"
 	"net/netip"
 	"slices"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
-	"golang.org/x/net/http/httpguts"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
 const routeExternalAuthTag = "gw-api-route-http-external-auth-v1"
+const grpcAuthPoolTag = "gw-api-grpc-auth-pool-v1"
+const grpcAuthPoolNamePrefix = "gateway-api-grpc-auth-"
+const grpcAuthWithdrawalTag = "gw-api-grpc-auth-withdrawal-v1"
 
-var routeExternalAuthPolicy = protectedHTTPPredicate{
-	capability: octavia.GatewayCapabilityPolicyExternalAuth,
-	label:      "HTTPRoute external authorization",
-	required:   func(wanted desiredPolicy) bool { return wanted.externalAuth != nil },
-	observed:   observedRoutePolicy.hasExternalAuth,
-	settled:    desiredPolicy.externalAuthMatches,
-	additionalCapabilities: func(policy desiredPolicy) []string {
-		if policy.weighted {
-			return []string{octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses}
+var routeExternalAuthPolicy = routeAuthorizerPredicate(octavia.GatewayCapabilityPolicyExternalAuth, "")
+var routeExternalAuthGRPCPolicy = routeAuthorizerPredicate(octavia.GatewayCapabilityPolicyExternalAuthGRPC, cloud.ExternalAuthProtocolGRPC)
+
+func isRouteAuthorizerCapability(capability string) bool {
+	return capability == octavia.GatewayCapabilityPolicyExternalAuth || capability == octavia.GatewayCapabilityPolicyExternalAuthGRPC
+}
+
+func routeAuthorizerPredicate(capability, protocol string) protectedHTTPPredicate {
+	return protectedHTTPPredicate{
+		capability: capability,
+		label:      "HTTPRoute external authorization",
+		required: func(wanted desiredPolicy) bool {
+			return wanted.externalAuth != nil && wanted.externalAuth.Protocol == protocol
+		},
+		observed: func(observed observedRoutePolicy) bool {
+			return protocol == cloud.ExternalAuthProtocolGRPC && observed.unverifiedGRPCAuthorizerWithdrawal() ||
+				observed.hasExternalAuth() && (observed.externalAuth == nil || observed.externalAuth.Protocol == protocol)
+		},
+		settled: desiredPolicy.externalAuthMatches,
+		additionalCapabilities: func(policy desiredPolicy) []string {
+			return routeAuthorizerCapabilities(*policy.externalAuth, policy.weighted)[1:]
+		},
+	}
+}
+
+func (p *Provider) routeAuthorizerEnabled(auth cloud.ListenerExternalAuth) bool {
+	switch auth.Protocol {
+	case "":
+		return p.routeExternalAuth
+	case cloud.ExternalAuthProtocolGRPC:
+		return p.routeExternalAuthGRPC
+	default:
+		return false
+	}
+}
+
+func routeAuthorizerCapabilities(auth cloud.ListenerExternalAuth, weighted bool) []string {
+	required := []string{octavia.GatewayCapabilityPolicyExternalAuth, octavia.GatewayCapabilityFixedHTTPResponses}
+	if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
+		required = grpcAuthorizerCapabilities(auth.BackendTLS)
+	}
+	if auth.ForwardBodyMaxSize > 0 {
+		required = append(required, octavia.GatewayCapabilityPolicyExternalAuthForwardBody)
+	}
+	if weighted {
+		required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets)
+	}
+	return required
+}
+
+func grpcAuthorizerCapabilities(tls *cloud.BackendTLSValidation) []string {
+	required := []string{octavia.GatewayCapabilityPolicyExternalAuthGRPC, octavia.GatewayCapabilityFixedHTTPResponses}
+	if tls == nil {
+		return append(required, octavia.GatewayCapabilityBackendH2C)
+	}
+	required = append(required, backendTLSCapabilities(true, len(tls.SubjectAltNames) != 0)...)
+	if tls.Trust == cloud.BackendTLSTrustSystem {
+		required = append(required, octavia.GatewayCapabilityBackendTLSSystemCA)
+	}
+	return required
+}
+
+func routeAuthorizerPoolName(port int, auth cloud.ListenerExternalAuth, certificate string) string {
+	if auth.Protocol != cloud.ExternalAuthProtocolGRPC {
+		return listenerAuthPoolName(port, auth)
+	}
+	key := fmt.Appendf(nil, "%d:%s:%d", port, auth.ServiceUID, auth.ServicePort)
+	if tls := auth.BackendTLS; tls != nil {
+		key = fmt.Appendf(key, "|%s|%s|%v", tls.Hostname, backendTLSRevisionTag(tls), tls.SubjectAltNames)
+		if certificate != "" {
+			key = fmt.Appendf(key, "|%s", certificate)
 		}
-		return nil
-	},
+	}
+	digest := sha256.Sum256(key)
+	return fmt.Sprintf("%s%x", grpcAuthPoolNamePrefix, digest[:16])
+}
+
+func routeAuthorizerPoolTag(protocol string) string {
+	if protocol == cloud.ExternalAuthProtocolGRPC {
+		return grpcAuthPoolTag
+	}
+	return listenerAuthPoolTag
 }
 
 func validateRouteAuthorizer(auth cloud.ListenerExternalAuth) error {
+	if auth.ForwardBodyMaxSize < 0 || auth.Protocol == cloud.ExternalAuthProtocolGRPC && auth.ForwardBodyMaxSize > cloud.MaxGRPCExternalAuthBodySize {
+		return errors.New("HTTPRoute authorization request body limit is outside the supported protocol range")
+	}
+	if auth.Protocol == cloud.ExternalAuthProtocolGRPC && (auth.PathPrefix != "" || len(auth.AllowedResponseHeaders) != 0) ||
+		auth.BackendTLS != nil && (auth.Protocol != cloud.ExternalAuthProtocolGRPC || !auth.BackendTLS.RequireH2 || auth.BackendTLS.Denied || !validBackendTLS(auth.BackendTLS)) {
+		return errors.New("invalid HTTPRoute authorization protocol or transport")
+	}
 	if auth.ServiceUID == "" || auth.MemberSubnetID == "" || auth.ServicePort < 1 || auth.ServicePort > 65535 ||
 		len(auth.Members) == 0 || !cloud.ValidExternalAuthPathPrefix(auth.PathPrefix) {
 		return errors.New("HTTPRoute authorization requires a resolved Service, port, endpoints and valid path prefix")
 	}
-	for _, headers := range [][]string{auth.AllowedRequestHeaders, auth.AllowedResponseHeaders} {
-		if len(headers) > 64 || slices.ContainsFunc(headers, func(name string) bool { return len(name) > 256 || !httpguts.ValidHeaderFieldName(name) }) {
-			return errors.New("invalid HTTPRoute authorization header allowlist")
-		}
+	if !cloud.ValidExternalAuthHeaders(auth.AllowedRequestHeaders, auth.Protocol == cloud.ExternalAuthProtocolGRPC) ||
+		!cloud.ValidExternalAuthHeaders(auth.AllowedResponseHeaders, false) {
+		return errors.New("invalid HTTPRoute authorization header allowlist")
 	}
 	for _, member := range auth.Members {
 		ip, err := netip.ParseAddr(member.Address)
@@ -65,13 +147,18 @@ func validateRouteAuthorizer(auth cloud.ListenerExternalAuth) error {
 	return nil
 }
 
-func policyAuthorizer(poolID string, auth cloud.ListenerExternalAuth) *octavia.ListenerHTTPExternalAuth {
-	return &octavia.ListenerHTTPExternalAuth{PoolID: poolID, PathPrefix: auth.PathPrefix,
+func policyAuthorizer(poolID string, auth cloud.ListenerExternalAuth) *octavia.PolicyExternalAuth {
+	return &octavia.PolicyExternalAuth{Protocol: auth.Protocol, PoolID: poolID, PathPrefix: auth.PathPrefix, ForwardBodyMaxSize: auth.ForwardBodyMaxSize,
 		AllowedRequestHeaders: auth.AllowedRequestHeaders, AllowedResponseHeaders: auth.AllowedResponseHeaders}
 }
 
 func (observed observedRoutePolicy) hasExternalAuth() bool {
 	return observed.externalAuthPresent || observed.externalAuthTagged
+}
+
+func (observed observedRoutePolicy) unverifiedGRPCAuthorizerWithdrawal() bool {
+	return slices.Contains(observed.policy.Tags, grpcAuthWithdrawalTag) &&
+		(!observed.fixedResponse || !observed.targetObserved || !observedForwardPolicySettled(observed))
 }
 
 func (observed observedRoutePolicy) externalAuthReadable() bool {
@@ -84,7 +171,8 @@ func (wanted desiredPolicy) externalAuthMatches(observed observedRoutePolicy) bo
 	}
 	a, b := wanted.resolvedExternalAuth, observed.externalAuth
 	return a != nil && b != nil && observed.externalAuthTagged && observed.externalAuthReported && observed.externalAuthPresent &&
-		a.PoolID == b.PoolID && a.PathPrefix == b.PathPrefix && slices.Equal(a.AllowedRequestHeaders, b.AllowedRequestHeaders) &&
+		a.Protocol == b.Protocol && a.PoolID == b.PoolID && a.PathPrefix == b.PathPrefix && a.ForwardBodyMaxSize == b.ForwardBodyMaxSize &&
+		slices.Equal(a.AllowedRequestHeaders, b.AllowedRequestHeaders) &&
 		slices.Equal(a.AllowedResponseHeaders, b.AllowedResponseHeaders)
 }
 
@@ -104,7 +192,7 @@ func (d desiredGatewayGraph) routeAuthorizers() map[string]*cloud.ListenerExtern
 					if pools == nil {
 						pools = make(map[string]*cloud.ListenerExternalAuth)
 					}
-					pools[listenerAuthPoolName(port, *policy.externalAuth)] = policy.externalAuth
+					pools[routeAuthorizerPoolName(port, *policy.externalAuth, d.spec.Gateway.BackendClientCertificate.Reference)] = policy.externalAuth
 				}
 			}
 		}
@@ -112,7 +200,7 @@ func (d desiredGatewayGraph) routeAuthorizers() map[string]*cloud.ListenerExtern
 	return pools
 }
 
-func (actual *observedGatewayGraph) planRouteAuthPools(wanted map[string]*cloud.ListenerExternalAuth, owned map[string]observedAuthPool, referenced map[string]bool, allObserved bool) {
+func (p *Provider) planRouteAuthPools(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph, wanted map[string]*cloud.ListenerExternalAuth, owned map[string]observedAuthPool, referenced map[string]bool, allObserved bool) {
 	if len(wanted) == 0 {
 		return
 	}
@@ -120,13 +208,116 @@ func (actual *observedGatewayGraph) planRouteAuthPools(wanted map[string]*cloud.
 	for _, name := range slices.Sorted(maps.Keys(wanted)) {
 		pool := owned[name]
 		canRemove := allObserved && !referenced[pool.pool.ID] && len(pool.pool.Listeners) == 0
-		ready, step := listenerAuthPoolPlan(*wanted[name], name, pool, canRemove)
+		auth := wanted[name]
+		var ready bool
+		var step *graphMutation
+		if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
+			ready, step = p.planGRPCAuthorizerPool(ctx, desired, *actual, auth, name, pool, canRemove)
+		} else {
+			ready, step = listenerAuthPoolPlan(*auth, name, pool, canRemove)
+		}
 		if ready {
 			actual.routeAuthPools[name] = pool.pool.ID
 		} else if step != nil && actual.routeAuthPoolMutation == nil {
 			actual.routeAuthPoolMutation = step
 		}
 	}
+}
+
+func (p *Provider) planGRPCAuthorizerPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, auth *cloud.ListenerExternalAuth,
+	name string, pool observedAuthPool, canRemove bool) (bool, *graphMutation) {
+	tls := auth.BackendTLS
+	client := desired.spec.Gateway.BackendClientCertificate
+	if !p.routeExternalAuthGRPC || tls != nil && (!p.backendTLSPolicy || !p.poolALPN || client.Denied) ||
+		p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, grpcAuthorizerCapabilities(tls)) != nil {
+		return false, nil
+	}
+
+	change := listenerFilterMutation{grpcAuth: auth}
+	if tls != nil && (tls.Trust == cloud.BackendTLSTrustReference || client.Reference != "") && !desired.spec.Gateway.BackendCAOwned {
+		if desired.spec.Gateway.ClaimBackendCA == nil {
+			return false, nil
+		}
+		change.claimCA = true
+		return false, &graphMutation{kind: graphListenerFiltersMutation, listenerFilters: change,
+			message: "Reserving ownership of the gRPC authorizer trust or client identity"}
+	}
+	if tls != nil && tls.Trust == cloud.BackendTLSTrustReference {
+		if p.backendCA == nil {
+			return false, nil
+		}
+		revision, err := p.backendCA.Find(ctx, desired.spec.Identity.GatewayUID, tls.CAConfigMapUID, tls.CADigest, pool.pool.CATLSContainerRef)
+		if err != nil {
+			return false, nil
+		}
+		if revision.Reference() == "" {
+			change.publishCA = true
+			return false, &graphMutation{kind: graphListenerFiltersMutation, listenerFilters: change,
+				message: "Publishing the gRPC authorizer CA to Barbican"}
+		}
+		if revision.Digest() != tls.CADigest {
+			return false, nil
+		}
+		change.caReference = revision.Reference()
+	}
+
+	if pool.pool.ID != "" {
+		if pool.pool.ProvisioningStatus == "ACTIVE" && !pool.admin || strings.HasPrefix(pool.pool.ProvisioningStatus, "PENDING_") {
+			return false, nil
+		}
+		if pool.pool.ProvisioningStatus == "ERROR" || !grpcAuthorizerTransportMatches(pool, tls, change.caReference, client.Reference) {
+			if canRemove {
+				return false, listenerAuthPoolRemoval(pool)
+			}
+			return false, nil
+		}
+		if tls != nil && tls.Trust == cloud.BackendTLSTrustSystem && !pool.tls.SystemCAApplied() {
+			return false, nil
+		}
+	}
+	ready, step := listenerAuthPoolPlan(*auth, name, pool, canRemove)
+	if step != nil && step.kind == graphListenerFiltersMutation {
+		step.listenerFilters.grpcAuth = auth
+		step.listenerFilters.caReference = change.caReference
+	}
+	return ready, step
+}
+
+func grpcAuthorizerTransportMatches(observed observedAuthPool, tls *cloud.BackendTLSValidation, caRef, clientRef string) bool {
+	pool, current := observed.pool, observed.tls
+	if pool.Protocol != cloud.ListenerProtocolHTTP || !current.EnabledObserved {
+		return false
+	}
+	if tls == nil {
+		return current.H2CObserved && observed.h2c && !hasBackendTLSSettings(pool, current) && len(pool.ALPNProtocols) == 0
+	}
+	trustMatches := caRef != "" && pool.CATLSContainerRef == caRef && !hasUnclearedSystemCA(pool, current)
+	if tls.Trust == cloud.BackendTLSTrustSystem {
+		trustMatches = configuredSystemCA(pool, current) && slices.Contains(pool.Tags, backendTLSSystemCATag)
+	}
+	return trustMatches && current.Complete() && pool.TLSEnabled && !observed.h2c && current.Hostname == tls.Hostname &&
+		current.RequireH2Observed && current.RequireH2 && current.ALPNObserved && slices.Equal(pool.ALPNProtocols, []string{xBackendHTTP2ALPN}) &&
+		pool.TLSContainerRef == clientRef && slices.Contains(pool.Tags, backendTLSClientTag) == (clientRef != "") &&
+		pool.CRLContainerRef == "" && slices.Contains(pool.Tags, backendTLSRevisionTag(tls)) &&
+		!differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) &&
+		backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, observedRouteGraph{pool: &pool, backendTLS: current})
+}
+
+func grpcAuthorizerPoolCreate(opts pools.CreateOpts, tls *cloud.BackendTLSValidation, caRef, clientRef string) octavia.CreatePoolOpts {
+	if tls == nil {
+		return octavia.CreatePoolOpts{CreateOpts: opts, BackendH2C: true}
+	}
+	opts.TLSEnabled = true
+	opts.CATLSContainerRef = caRef
+	opts.TLSContainerRef = clientRef
+	opts.ALPNProtocols = []string{xBackendHTTP2ALPN}
+	systemCA := tls.Trust == cloud.BackendTLSTrustSystem
+	opts.Tags = backendTLSTags(opts.Tags, true, backendTLSRevisionTag(tls), clientRef != "", len(tls.SubjectAltNames) != 0)
+	if systemCA {
+		opts.Tags = append(opts.Tags, backendTLSSystemCATag)
+	}
+	return octavia.CreatePoolOpts{CreateOpts: opts, BackendTLSHostname: tls.Hostname, BackendTLSSubjectAltNames: tls.SubjectAltNames,
+		BackendTLSRequireH2: true, BackendTLSSystemCA: systemCA}
 }
 
 func (actual *observedGatewayGraph) authListeners() []listeners.Listener {
@@ -139,8 +330,8 @@ func (actual *observedGatewayGraph) authListeners() []listeners.Listener {
 // Pool.listeners includes authorization references even for a disabled policy.
 // Keep them until the complete policy collection proves that the last reference
 // was removed, including during a listener or route opt-out.
-func (p *Provider) observeRouteAuthReferences(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph) (map[string]map[string]bool, error) {
-	refs := make(map[string]map[string]bool)
+func (p *Provider) observeRouteAuthReferences(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph) (map[string]map[string]string, error) {
+	refs := make(map[string]map[string]string)
 	for _, listener := range actual.authListeners() {
 		if len(listener.L7Policies) == 0 && listener.L7Policies != nil {
 			continue
@@ -175,9 +366,13 @@ func (p *Provider) observeRouteAuthReferences(ctx context.Context, desired desir
 			if row.ExternalAuth != nil {
 				id := row.ExternalAuth.PoolID
 				if refs[id] == nil {
-					refs[id] = make(map[string]bool)
+					refs[id] = make(map[string]string)
 				}
-				refs[id][listener.ID] = true
+				tag := routeAuthorizerPoolTag(row.ExternalAuth.Protocol)
+				if previous := refs[id][listener.ID]; previous != "" && previous != tag {
+					return nil, fmt.Errorf("%w: HTTPRoute authorization protocols share a pool", cloud.ErrOwnershipConflict)
+				}
+				refs[id][listener.ID] = tag
 			}
 		}
 	}
@@ -190,10 +385,160 @@ func incompleteRouteAuthInventory(listenerID, policyID string, cause error) erro
 }
 
 func (p *Provider) protectRouteAuthTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
-	return p.protectHTTPURLPolicyTraffic(ctx, desired, actual, plan, result, routeExternalAuthPolicy, p.routeExternalAuth,
-		func(_ desiredRoute, step routeMutation) bool {
-			return step.policy.externalAuth != nil && (step.kind == routeMutationCreatePolicy || step.kind == routeMutationEnablePolicy)
-		})
+	for _, guard := range []struct {
+		predicate protectedHTTPPredicate
+		enabled   bool
+	}{
+		{routeExternalAuthPolicy, p.routeExternalAuth},
+		{routeExternalAuthGRPCPolicy, p.routeExternalAuthGRPC},
+	} {
+		plan = p.protectHTTPURLPolicyTraffic(ctx, desired, actual, plan, result, guard.predicate, guard.enabled,
+			func(_ desiredRoute, step routeMutation) bool {
+				return guard.predicate.required(step.policy) && (step.kind == routeMutationCreatePolicy || step.kind == routeMutationEnablePolicy)
+			})
+		if isHTTPListenerWithdrawal(plan) {
+			break
+		}
+	}
+	return plan
+}
+
+// An atomic fixed response preserves the position and predicates of one
+// revoked policy. Prove the rest of the table identical so that an ordinary
+// route being moved, removed or replaced cannot alter which policy wins.
+func (p *Provider) planGRPCAuthorizerWithdrawal(desired desiredGatewayGraph, actual observedGatewayGraph,
+	listener listeners.Listener, state guardedHTTPListener) (graphMutation, bool) {
+	if !desired.fixedHTTPResponses || actual.addressReadError != nil || actual.httpPools == nil ||
+		actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" ||
+		listener.ProvisioningStatus != "ACTIVE" || !actual.adminObserved[listener.ID] || !listener.AdminStateUp ||
+		listener.DefaultPoolID != "" || listener.L7Policies == nil || len(state.obsoleteIDs) != 1 {
+		return graphMutation{}, false
+	}
+	parts, observed, owners := httpPlanningParts(desired, actual)
+	type wantedPolicy struct {
+		part   int
+		policy desiredPolicy
+	}
+	positions := make(map[int32]wantedPolicy)
+	for index, part := range parts.routes {
+		if parts.spec.Routes[index].Disposition != cloud.GraphEnsure || httpURLPolicyRoutePort(desired, part) != listener.ProtocolPort {
+			continue
+		}
+		for _, policy := range part.policies {
+			if _, duplicate := positions[policy.position]; policy.position <= 0 || duplicate {
+				return graphMutation{}, false
+			}
+			positions[policy.position] = wantedPolicy{index, policy}
+		}
+	}
+	if len(positions) != len(listener.L7Policies) {
+		return graphMutation{}, false
+	}
+	references := make(map[string]bool, len(listener.L7Policies))
+	for _, ref := range listener.L7Policies {
+		if ref.ID == "" || references[ref.ID] {
+			return graphMutation{}, false
+		}
+		references[ref.ID] = true
+	}
+	var withdrawal graphMutation
+	for index, part := range observed.routes {
+		for _, old := range part.policies {
+			if old.policy.ListenerID != listener.ID {
+				continue
+			}
+			wanted, exists := positions[old.policy.Position]
+			if !exists || !references[old.policy.ID] || old.policy.ProjectID != p.projectID ||
+				!old.policy.AdminStateUp || !observedForwardPolicySettled(old) || old.initialRulesPartial ||
+				!desired.routes[owners[index]].identity.MatchesRoute(old.policy.Tags, old.role) {
+				return graphMutation{}, false
+			}
+			delete(positions, old.policy.Position)
+			delete(references, old.policy.ID)
+			replacement := parts.routes[wanted.part]
+			if !state.obsoleteIDs[old.policy.ID] {
+				if wanted.part != index || !isolatedPolicyMatches(replacement, part, wanted.policy, old) {
+					return graphMutation{}, false
+				}
+				continue
+			}
+			if owners[index] != owners[wanted.part] ||
+				!p.canReplaceGRPCAuthorizer(actual, listener, old, replacement, wanted.policy) {
+				return graphMutation{}, false
+			}
+			tags := slices.DeleteFunc(slices.Clone(old.policy.Tags), func(tag string) bool { return tag == routeExternalAuthTag })
+			withdrawal = graphMutation{kind: graphRouteMutation, listenerID: listener.ID, routeIndex: owners[index], backendKey: replacement.backendKey,
+				route: routeMutation{kind: routeMutationSetPolicyTarget, id: old.policy.ID, externalAuthUpdate: &octavia.PolicyExternalAuthUpdate{},
+					policyTags: append(tags, grpcAuthWithdrawalTag), withdrawHTTPPolicy: true},
+				withdrawHTTPPolicy: true, message: "Replacing the revoked gRPC authorizer with a fixed HTTP response"}
+		}
+	}
+	return withdrawal, withdrawal.route.id != "" && len(references) == 0
+}
+
+func (p *Provider) canReplaceGRPCAuthorizer(actual observedGatewayGraph, listener listeners.Listener,
+	old observedRoutePolicy, replacement desiredRoute, wanted desiredPolicy) bool {
+	policy, auth := old.policy, old.externalAuth
+	if policy.Action != string(l7policies.ActionRedirectToPool) || policy.RedirectPoolID == "" || !old.targetObserved ||
+		!old.versioned || len(old.rules) == 0 ||
+		!old.externalAuthReported || !old.externalAuthTagged || !old.externalAuthPresent ||
+		auth == nil || auth.Protocol != cloud.ExternalAuthProtocolGRPC ||
+		old.hasHTTPRequestPolicy() || old.hasRequestURLRewrite() || old.hasRequestCORS() ||
+		len(old.requestHeaderOperations) != 0 || len(old.responseHeaderOperations) != 0 ||
+		old.requestMirrorsUnknown || old.hasRequestMirrors() ||
+		replacement.backendKey == "" || !replacement.rejectsWithoutForwarding() ||
+		len(wanted.responseHeaderOperations) != 0 || wanted.requestCORS != nil ||
+		wanted.httpsListenerHostname != old.httpsListenerHostname ||
+		!observedHTTPPredicateMatches(old, rulesFor(wanted, replacement.hostnameRuleValue)) {
+		return false
+	}
+	// The complete pool inventory proves that this is an authorization pool,
+	// and the policy inventory proves that no other policy will keep using it.
+	// Its current admin state does not establish what Amphora is serving.
+	for _, observation := range actual.httpPools.auth {
+		pool := observation.pool
+		if pool.ID != auth.PoolID {
+			continue
+		}
+		return isGRPCAuthPool(pool) && pool.ProjectID == p.projectID &&
+			slices.Equal(pool.Listeners, []pools.ListenerID{{ID: listener.ID}}) &&
+			soleGRPCAuthorizerConsumer(actual.routes, auth.PoolID)
+	}
+	return false
+}
+
+func soleGRPCAuthorizerConsumer(routes []observedRouteGraph, poolID string) bool {
+	consumers := 0
+	for _, route := range routes {
+		for _, part := range route.parts() {
+			for _, policy := range part.policies {
+				if policy.externalAuth != nil && policy.externalAuth.PoolID == poolID {
+					consumers++
+				}
+			}
+		}
+	}
+	return consumers == 1
+}
+
+func (p *Provider) closeAfterFailedGRPCAuthorizerWithdrawal(ctx context.Context, desired desiredGatewayGraph,
+	actual observedGatewayGraph, step graphMutation, result *cloud.GatewayGraphResult, cause error) error {
+	listener := actual.policyListener(actual.routes[step.routeIndex], step.route.id)
+	if listener != nil {
+		if validate := desired.spec.ValidateMutation; validate != nil {
+			if err := validate(ctx); err != nil {
+				return errors.Join(cause, err)
+			}
+		}
+		close := closeGuardedHTTPListener(*listener, "Closing the listener after Octavia could not withdraw the gRPC authorizer")
+		if err := p.executeGraphMutation(ctx, desired, actual, close); err == nil {
+			p.recordGraphMutationOutcome(result, close)
+			return nil
+		} else {
+			cause = errors.Join(cause, err)
+		}
+	}
+	return &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: cause}
 }
 
 // A fixed response can replace an obsolete authorization policy while its
