@@ -193,10 +193,10 @@ const MaxTCPRoundRobinMembers = 4095
 type RouteGraphNode struct {
 	Disposition GraphDisposition
 	Spec        RouteSpec
-	// RetainScopedListenerPorts limits which existing defaults may remain on a
-	// preserved pool in a full TCP or UDP Gateway election. A nil set grants no
-	// authority to change those associations.
-	RetainScopedListenerPorts []int
+	// RetainListenerPorts names the existing defaults a preserved TCP or UDP
+	// pool can keep after readback. An empty, non-nil list withdraws all defaults
+	// in a scoped election.
+	RetainListenerPorts []int
 	// WaitForHTTPPolicyRemoval guards Gateway readiness while an attached peer
 	// with no current desired model still owns a policy on the HTTP frontend.
 	// Only the route's durable detach checkpoint authorizes its deletion.

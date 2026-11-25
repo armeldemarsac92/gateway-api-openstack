@@ -206,6 +206,29 @@ func TestGatewayCountsUnreportedAcceptedParentAtRouteStatusLimit(t *testing.T) {
 	require.EqualValues(t, 2, got.counts[listener.Name])
 }
 
+func TestGatewayCountsUnreportedExplicitUDPParentAtRouteStatusLimit(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	listener := &gateway.Spec.Listeners[0]
+	listener.Protocol = gatewayv1.UDPProtocolType
+	currentRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &listener.Name}
+	route := &gatewayv1.UDPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "dns", Generation: 1},
+		Spec: gatewayv1.UDPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{
+			ParentRefs: []gatewayv1.ParentReference{currentRef, {Name: "other-gateway"}},
+		}},
+	}
+	for i := range controller.RouteParentStatusLimit {
+		ref := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("foreign-%d", i))}
+		route.Status.Parents = append(route.Status.Parents, gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: "foreign.example/controller"})
+	}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(route).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+	got, err := r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{listener})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, got.counts[listener.Name])
+}
+
 func TestGatewayReportsGRPCBackendTLSAncestorLimitUntilRouteRecovers(t *testing.T) {
 	cfg := testConfig()
 	cfg.BackendTLSPolicy, cfg.BackendH2C, cfg.FixedHTTPResponses = true, true, true
@@ -274,7 +297,7 @@ func TestGatewayReportsTerminatingTLSRouteBackendTLSAncestorLimit(t *testing.T) 
 	status := func() *metav1.Condition {
 		t.Helper()
 		require.NoError(t, r.setGatewayListenerStatuses(t.Context(), gateway, &listener, metav1.ConditionTrue,
-			gatewayv1.GatewayReasonProgrammed, gatewayv1.ListenerReasonProgrammed, "Ready", "Ready", true, nil))
+			gatewayv1.GatewayReasonProgrammed, gatewayv1.ListenerReasonProgrammed, "Ready", "Ready", true, gatewayListenerStatusOptions{}))
 		require.EqualValues(t, 1, gateway.Status.Listeners[0].AttachedRoutes)
 		return meta.FindStatusCondition(gateway.Status.Conditions, cfg.Domain()+"/BackendTLSPoliciesReady")
 	}

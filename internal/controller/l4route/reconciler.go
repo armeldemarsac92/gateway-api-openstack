@@ -268,14 +268,6 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	if !r.Config.DefaultGatewaysEnabled() && len(route.parentRefs) != 1 {
-		for i := range plan.parents {
-			plan.parents[i].listeners = nil
-			plan.parents[i].rejected = model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("%s forwarding supports exactly one Gateway parentRef", r.protocol())}
-		}
-		plan.detach = bound
-		return plan, nil
-	}
 	parent := parents[0]
 	parent.listeners = nil
 	for _, selected := range parents {
@@ -644,9 +636,7 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 	}
 	identity := plan.desired.Identity
 	request := route.graphRequest(identity, graph.Ensure, plan.parent.gateway)
-	if r.protocol() == gatewayv1.TCPProtocolType && len(plan.desired.ScopedListenerPorts) != 0 {
-		request.ForwardingTarget = plan.target
-	}
+	request.ForwardingTarget = plan.target
 	result, err := r.Writer.ReconcileGraph(ctx, request)
 	if err != nil {
 		if errors.Is(err, controller.ErrGraphInputChanged) || errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {

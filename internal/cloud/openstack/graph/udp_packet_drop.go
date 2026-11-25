@@ -119,6 +119,7 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		route, node := desired.routes[index], desired.spec.Routes[index]
 		managed := observed.udpDropPool()
 		wantDrop := desired.spec.Gateway.Disposition == cloud.GraphEnsure && node.Disposition == cloud.GraphEnsure && route.spec.UDPPacketDrop != nil
+		retainDrop := node.Disposition == cloud.GraphPreserve && len(node.RetainListenerPorts) != 0 && route.spec.UDPPacketDrop != nil
 		if desired.spec.Gateway.Disposition == cloud.GraphPreserve && node.Disposition != cloud.GraphDelete {
 			continue
 		}
@@ -138,6 +139,22 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		if !pending && !failed && (observed.backendProvisioningIssue(true, true) != "" ||
 			slices.ContainsFunc(owned, func(listener listeners.Listener) bool { return listener.ProvisioningStatus != "ACTIVE" })) {
 			continue
+		}
+
+		if retainDrop && !pending && !failed && actual.addressReadError == nil && actual.loadBalancer.AdminStateUp &&
+			len(owned) == 1 && owned[0].AdminStateUp && slices.Contains(node.RetainListenerPorts, owned[0].ProtocolPort) {
+			ready, err := retainedTransportBackendReady(route, observed, actual)
+			if err != nil {
+				return cloud.GatewayGraphResult{}, true, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
+			}
+			if ready {
+				err := p.validateUDPPacketDropSecurity(ctx, desired, route, owned[0].ProtocolPort)
+				if err == nil {
+					continue
+				}
+				result, handled, deleteErr := p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP default after security validation failed")
+				return result, handled, errors.Join(err, deleteErr)
+			}
 		}
 
 		switch {

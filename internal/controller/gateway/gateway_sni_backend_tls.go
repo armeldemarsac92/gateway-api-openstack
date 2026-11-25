@@ -74,7 +74,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 	candidates := map[types.NamespacedName]bool{}
 	includeDefaults := false
 	for _, route := range routes {
-		if !route.DeletionTimestamp.IsZero() || !r.Config.DefaultGatewaysEnabled() && len(route.Spec.ParentRefs) != 1 {
+		if !route.DeletionTimestamp.IsZero() {
 			continue
 		}
 		for key := range TLSRouteBackendServiceRefs(&route) {
@@ -137,7 +137,9 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 			!controller.GatewayClassSupportsInstalledVersion(&class) {
 			continue
 		}
-		if err := r.validateBoundSNITopology(parent, listeners[0]); err != nil {
+		// Binding establishes Endpoint eligibility and triggers the policy watch.
+		topology, err := controller.StoredGatewayTopology(r.Config, parent)
+		if err != nil || validateSNITopology(listeners[0], topology) != nil {
 			continue
 		}
 		snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listeners[0], listeners: listeners}
@@ -164,6 +166,46 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 		}
 	}
 	return ancestors, nil
+}
+
+type unreportedSNIAttachment struct {
+	route   client.ObjectKey
+	section gatewayv1.SectionName
+}
+
+// A saturated TLSRoute status can omit an accepted parent. Use the same
+// hostname election and backend resolution as the SNI graph for that section.
+func (r *Reconciler) observeUnreportedSNIAncestorLimit(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener, routes []gatewayv1.TLSRoute, unreported map[unreportedSNIAttachment]struct{}) (bool, error) {
+	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
+	if err != nil || validateSNITopology(listeners[0], topology) != nil {
+		return false, nil
+	}
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: listeners[0], listeners: listeners, topology: topology}
+	observation, err := r.admitSNIRoutes(ctx, snapshot, routes)
+	if err != nil {
+		return false, err
+	}
+	owners := observation.hostnameOwners()
+	tls := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
+	mixed := mixedTLSBinding(r.Config, gateway, snapshot.listener.Port)
+	for i := range observation {
+		entry := &observation[i]
+		key := unreportedSNIAttachment{route: client.ObjectKeyFromObject(entry.route), section: entry.listener.Name}
+		if _, needed := unreported[key]; !needed || entry.acceptedReason != gatewayv1.RouteReasonAccepted {
+			continue
+		}
+		entry.retainOwnedHostnames(owners, i)
+		if len(entry.hostnames) == 0 {
+			continue
+		}
+		if err := r.resolveSNIBackend(ctx, snapshot, entry, tls, mixed); err != nil {
+			return false, err
+		}
+		if entry.resolvedReason == backendtls.AncestorLimitReason {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func sniHasMultipleActiveBackends(refs []gatewayv1.BackendRef) bool {

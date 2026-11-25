@@ -116,6 +116,37 @@ func newUDPPacketDropProvider(f *tcpGraphFixture) *Provider {
 	return newTestProvider(f.t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{UDPPacketDrop: true})
 }
 
+func TestUDPPacketDropRetainsOnlyTheObservedWeightedPool(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	provider := newUDPPacketDropProvider(f)
+	f.settleTransportGraph(provider)
+	node := &f.spec.Routes[0]
+	node.Spec.HealthMonitor = cloud.HealthMonitorConfig{}
+	node.Spec.UDPPacketDrop = &cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	node.Spec.Members = []cloud.Member{{Address: "10.1.2.3", Port: 8080, Weight: 1}}
+	for range 4 {
+		f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+		f.reconcile(provider)
+	}
+	pool := f.inventory[tcpPool]
+	pool["provisioning_status"] = "ACTIVE"
+	f.settleTransportGraph(provider)
+
+	node.Disposition = cloud.GraphPreserve
+	node.RetainListenerPorts = node.Spec.ScopedListenerPorts
+	before := len(f.writes)
+	f.reconcile(provider)
+	if len(f.writes) != before || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+		t.Fatalf("the active weighted UDP pool was not retained: writes %v", f.writes[before:])
+	}
+	pool["udp_packet_drop"] = map[string]any{"numerator": 0, "denominator": 1}
+	f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"DELETE " + tcpPool}) ||
+		f.inventory[tcpListener]["default_pool_id"] != nil || f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("the drifted drop profile did not withdraw only its own pool: writes %v", f.writes[before:])
+	}
+}
+
 func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
 	f := newUDPPacketDropFixture(t)
 	route := &f.spec.Routes[0].Spec
