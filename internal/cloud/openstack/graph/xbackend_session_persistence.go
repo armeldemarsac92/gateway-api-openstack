@@ -109,7 +109,7 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 			case part.sessionCookieDeadline != nil:
 				part.sessionCookieCapability = timed()
 				if current != nil && current.pool != nil {
-					part.cookieReadbackPending = !part.cookieDeadlineMatches(*current) ||
+					part.cookieReadbackPending = current.pool.ProvisioningStatus != "ACTIVE" || !part.cookieDeadlineMatches(*current) ||
 						current.pool.Persistence != (pools.SessionPersistence{Type: httpCookiePersistence, CookieName: part.sessionCookieName})
 				}
 			case part.sessionCookieName != "":
@@ -165,21 +165,20 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 		return nil, nil
 	case pool.Protocol != cloud.ListenerProtocolHTTP:
 		return nil, errXBackendCookieUnverified
-	case issue == nil && pool.Persistence == wanted && managed == needsCookie && timed == needsDeadline &&
-		desired.cookieDeadlineMatches(observed) && observed.backendTLS.AdminObserved:
-		return nil, nil
-	case pool.ProvisioningStatus != "ACTIVE" && pool.ProvisioningStatus != "ERROR":
-		return nil, errXBackendCookieUnverified
-	}
-	if pool.ProvisioningStatus == "ERROR" {
+	case pool.ProvisioningStatus == "ERROR":
 		if observed.backendTLS.AdminObserved {
 			// Octavia locks member writes on ERROR pools but permits a
-			// pool PUT. Keep the current admin state and predicate. Retry the
-			// drain after independently observing an ACTIVE pool.
+			// pool PUT. Keep the current admin state and predicate. Verify
+			// the pool and any pending cookie change after it is ACTIVE.
 			return &routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID,
 				poolAdmin: boolPointer(pool.AdminStateUp), retry: true}, nil
 		}
 		return nil, errXBackendCookieUnverified
+	case pool.ProvisioningStatus != "ACTIVE":
+		return nil, errXBackendCookieUnverified
+	case issue == nil && pool.Persistence == wanted && managed == needsCookie && timed == needsDeadline &&
+		desired.cookieDeadlineMatches(observed) && observed.backendTLS.AdminObserved:
+		return nil, nil
 	}
 	if len(observed.members) != 0 {
 		// A disabled stock HTTP pool can drop the direct L7 match in

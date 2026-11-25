@@ -370,6 +370,169 @@ func TestXBackendCookieErrorPoolRecoversAfterHealthyWorkAndWithdrawal(t *testing
 	require.True(t, drain.xBackendCookieDrain)
 }
 
+func TestXBackendCookieDeadlineRecoversWhenPoolReadbackStillMatches(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora", "ACTIVE"
+	actual.listener.ProvisioningStatus = "ACTIVE"
+	parts := desired.routes[0].httpParts
+	healthy, wanted, rule := &parts[0], &parts[1], &parts[2]
+	wanted.xBackend, wanted.sessionCookieName = true, "reports_session"
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 60000, Scope: strings.Repeat("a", 64)}
+	graphs := actual.routes[0].httpParts
+	failed := graphs[wanted.backendKey]
+
+	status, retries := "ERROR", 0
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /lbaas/providers/amphora/gateway_capabilities":
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{
+				octavia.GatewayCapabilityHTTPCookieName, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout,
+			}})
+		case "GET /lbaas/pools":
+			safetyWriteJSON(t, w, map[string]any{"pools": []any{map[string]any{
+				"id": "pool-remote", "protocol": "HTTP", "lb_algorithm": "ROUND_ROBIN",
+				"admin_state_up": true, "provisioning_status": status,
+				"tags": []string{xBackendCookieTag, xBackendCookieDeadlineTag},
+				"session_persistence": map[string]any{
+					"type": "HTTP_COOKIE", "cookie_name": "reports_session",
+					"cookie_absolute_timeout_ms": 60000, "cookie_scope": wanted.sessionCookieDeadline.Scope,
+				},
+			}}})
+		case "PUT /lbaas/pools/pool-remote":
+			var request struct {
+				Pool map[string]bool `json:"pool"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			require.Equal(t, map[string]bool{"admin_state_up": true}, request.Pool)
+			retries++
+			safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "pool-remote", "provisioning_status": "PENDING_UPDATE"}})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{XBackendSessionPersistence: true})
+	read := func() {
+		t.Helper()
+		inventory, err := p.octavia.ListPoolInventory(t.Context(), pools.ListOpts{})
+		require.NoError(t, err)
+		require.Len(t, inventory.Items, 1)
+		failed.pool = &inventory.Items[0]
+		failed.backendTLS = inventory.BackendTLS[failed.pool.ID]
+		failed.cookieDeadline = inventory.CookieDeadline[failed.pool.ID]
+		require.Equal(t, wanted.sessionCookieDeadline, failed.cookieDeadline.Value)
+		require.Equal(t, status, failed.pool.ProvisioningStatus)
+		require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	}
+	plan := func() ([]graphMutation, cloud.RouteResult) {
+		t.Helper()
+		steps, result, err := p.buildGatewayGraphPlan(desired, actual)
+		require.NoError(t, err)
+		require.Len(t, result.Routes, 1)
+		return steps, result.Routes[0].Result
+	}
+
+	read()
+	steps, result := plan()
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
+	policy := &graphs[rule.backendKey].policies[0]
+	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], fixedWeightedHTTPTarget(1)}, *steps[0].route.weightedTargets)
+	policy.weightedTargets = *steps[0].route.weightedTargets
+	require.Equal(t, cloud.OutcomeProgressing, result.Outcome.State)
+	require.Equal(t, cloud.SessionPersistenceDeadlineReadbackUnverified, result.BackendSessionPersistenceIssue)
+
+	healthyPool := graphs[healthy.backendKey]
+	members := healthyPool.members
+	healthyPool.members = nil
+	steps, _ = plan()
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationCreateMember, steps[0].route.kind)
+	healthyPool.members = members
+
+	steps, _ = plan()
+	require.NotEmpty(t, steps)
+	recovery := steps[0].route
+	require.Equal(t, routeMutationSetXBackendCookie, recovery.kind)
+	require.True(t, recovery.retry)
+	require.NoError(t, p.executeRouteMutation(t.Context(), *wanted, recovery))
+	require.Equal(t, 1, retries)
+
+	status = "PENDING_UPDATE"
+	read()
+	steps, result = plan()
+	require.Empty(t, steps)
+	require.Equal(t, cloud.OutcomeProgressing, result.Outcome.State)
+	require.Equal(t, cloud.SessionPersistenceDeadlineReadbackUnverified, result.BackendSessionPersistenceIssue)
+
+	status = "ACTIVE"
+	read()
+	steps, result = plan()
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
+	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], {Weight: 1, PoolID: failed.pool.ID}}, *steps[0].route.weightedTargets)
+	policy.weightedTargets = *steps[0].route.weightedTargets
+	steps, result = plan()
+	require.Empty(t, steps)
+	require.Equal(t, cloud.OutcomeReady, result.Outcome.State, "%+v", result.Outcome)
+	require.Equal(t, cloud.SessionPersistenceAvailable, result.BackendSessionPersistenceIssue)
+}
+
+func TestXBackendCookieDeadlineUnavailableDoesNotBlockOtherRoutes(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora", "ACTIVE"
+	actual.listener.ProvisioningStatus = "ACTIVE"
+	wanted := &desired.routes[0].httpParts[1]
+	wanted.xBackend, wanted.sessionCookieName = true, "reports_session"
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 60000, Scope: strings.Repeat("b", 64)}
+	named := actual.routes[0].httpParts[wanted.backendKey]
+	named.members = nil
+
+	peer, peerObserved := convergedRoutePlanFixture()
+	peer.spec.Identity.RouteName = "healthy-peer"
+	peer.policies[0].path, peer.policies[0].position = "/peer", 2
+	desired.routes = append(desired.routes, peer)
+	desired.spec.Routes = append(desired.spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphEnsure})
+	actual.routes = append(actual.routes, observedRouteGraph{})
+
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "GET /lbaas/providers/amphora/gateway_capabilities", r.Method+" "+r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{octavia.GatewayCapabilityHTTPCookieName}})
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{XBackendSessionPersistence: true})
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	steps, result, err := p.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.Len(t, result.Routes, 2)
+	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, result.Routes[0].Result.BackendSessionPersistenceIssue)
+	require.Equal(t, cloud.OutcomeProgressing, result.Routes[0].Result.Outcome.State)
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
+	policy := &actual.routes[0].httpParts[desired.routes[0].httpParts[2].backendKey].policies[0]
+	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], fixedWeightedHTTPTarget(1)}, *steps[0].route.weightedTargets)
+	policy.weightedTargets = *steps[0].route.weightedTargets
+
+	steps, result, err = p.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.NotEmpty(t, steps)
+	require.Equal(t, 1, steps[0].routeIndex)
+	require.Equal(t, routeMutationCreatePool, steps[0].route.kind)
+	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, result.Routes[0].Result.BackendSessionPersistenceIssue)
+
+	peerObserved.pool.ID, peerObserved.pool.ProvisioningStatus = "pool-peer", "ACTIVE"
+	peerPolicy := &peerObserved.policies[0]
+	peerPolicy.policy.ID, peerPolicy.policy.RedirectPoolID = "policy-peer", peerObserved.pool.ID
+	peerPolicy.policy.ListenerID, peerPolicy.policy.Position = actual.listener.ID, peer.policies[0].position
+	peerPolicy.rules[0].rule.Value = peer.policies[0].path
+	actual.routes[1] = peerObserved
+	steps, result, err = p.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.Empty(t, steps)
+	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, result.Routes[0].Result.BackendSessionPersistenceIssue)
+	require.Equal(t, cloud.SessionPersistenceAvailable, result.Routes[1].Result.BackendSessionPersistenceIssue)
+	require.Equal(t, cloud.OutcomeReady, result.Routes[1].Result.Outcome.State)
+}
+
 func TestXBackendCookieBusyParentSkipsCapabilityObservation(t *testing.T) {
 	desired, actual := weightedPlanFixture()
 	part := &desired.routes[0].httpParts[1]

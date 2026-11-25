@@ -71,7 +71,7 @@ func xBackendCookieCondition(status metav1.ConditionStatus, reason, message stri
 	case cloud.SessionPersistenceDeadlineUnverified:
 		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP session cookie absoluteTimeout could not be verified"
 	case cloud.SessionPersistenceDeadlineReadbackUnverified:
-		return metav1.ConditionUnknown, "Pending", "Octavia pool readback does not verify the requested XBackend HTTP session cookie absoluteTimeout and scope"
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed an ACTIVE pool with the requested XBackend HTTP session cookie absoluteTimeout and scope"
 	case cloud.SessionPersistenceUnsupported:
 		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "The regional Octavia provider does not advertise http_cookie_name_v1"
 	case cloud.SessionPersistenceDeadlineUnsupported:
