@@ -26,11 +26,11 @@ patches:
         path: /rules/-
         value:
           apiGroups: ["gateway.networking.x-k8s.io"]
-          resources: ["xbackends", "xbackendtrafficpolicies"]
+          resources: ["xbackends", "xbackendtrafficpolicies", "xtelemetrypolicies"]
           verbs: ["get", "list", "watch"]
       - op: add
         path: /rules/-
         value:
           apiGroups: ["gateway.networking.x-k8s.io"]
-          resources: ["xbackends/status", "xbackendtrafficpolicies/status"]
+          resources: ["xbackends/status", "xbackendtrafficpolicies/status", "xtelemetrypolicies/status"]
           verbs: ["patch"]

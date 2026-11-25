@@ -117,7 +117,7 @@ func run(ctx context.Context) error {
 	var frontendClientValidation, clusterTrustBundles bool
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
-	var httpRequestPolicy, backendRetryBudget bool
+	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
 	var httpRequestMirror bool
 	var httpCORS, listenerFilters bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
@@ -149,6 +149,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
+	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
 	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
 	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia L7 HTTP request mirroring capability")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
@@ -228,6 +229,7 @@ func run(ctx context.Context) error {
 		ResponseHeaderModifier:        responseHeaderModifier,
 		BackendH2C:                    backendH2C,
 		BackendRetryBudget:            backendRetryBudget,
+		TelemetryPolicy:               telemetryPolicy,
 		BackendTLSPolicy:              backendTLSPolicy,
 		OperatorHTTPS:                 certificateMap != "",
 		HTTPSListenerIsolation:        httpsListenerIsolation,
@@ -460,7 +462,7 @@ func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config, istioAmb
 		availableResources = append(availableResources, resource.Name)
 	}
 	requiredResources := []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"}
-	if cfg.BackendTLSPolicy || cfg.TLSRoutesEnabled() {
+	if cfg.BackendTLSPolicy || cfg.TLSRoutesEnabled() || cfg.TelemetryPolicyEnabled() {
 		requiredResources = append(requiredResources, "backendtlspolicies")
 	}
 	if cfg.TLSRoutesEnabled() {
@@ -474,6 +476,9 @@ func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config, istioAmb
 	var experimentalResources []string
 	if cfg.XBackendEnabled() {
 		experimentalResources = append(experimentalResources, "xbackends")
+	}
+	if cfg.TelemetryPolicyEnabled() {
+		experimentalResources = append(experimentalResources, "xtelemetrypolicies")
 	}
 	if istioAmbientXMesh {
 		experimentalResources = append(experimentalResources, "xmeshes")

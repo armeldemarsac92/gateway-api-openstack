@@ -38,6 +38,8 @@ const (
 	// GraphWithdrawListenerFilters applies confirmed section rejections on
 	// existing HTTP-family frontends without changing any backend resources.
 	GraphWithdrawListenerFilters GraphDisposition = "WithdrawListenerFilters"
+	// GraphReconcileTelemetry configures or withdraws tracing without changing application forwarding.
+	GraphReconcileTelemetry GraphDisposition = "ReconcileTelemetry"
 )
 
 // GatewayGraphSpec contains the complete authority and desired graph for one
@@ -80,6 +82,26 @@ type GatewayGraphNode struct {
 	BackendCAOwned bool `json:",omitempty"`
 	// ClaimBackendCA checkpoints ownership before creating a Gateway CA revision.
 	ClaimBackendCA func(context.Context) error `json:"-"`
+	Telemetry      *GatewayTelemetry           `json:",omitempty"`
+}
+
+// GatewayTelemetry describes the collector and eligible physical listeners for a Gateway.
+// A nil value in a GraphReconcileTelemetry request withdraws listener tracing.
+type GatewayTelemetry struct {
+	Listeners               []TelemetryListener
+	ServiceUID              string
+	ServicePort             int
+	ServiceName             string
+	SpanName                string
+	Members                 []Member
+	MemberSubnetID          string
+	BackendSecurityGroupIDs []string
+	BackendTLS              *BackendTLSValidation
+}
+
+type TelemetryListener struct {
+	Port     int
+	Protocol string
 }
 
 // AddressWithdrawalOnly indicates that there is no remaining address to
@@ -131,9 +153,10 @@ type RouteGraphNode struct {
 
 // GatewayGraphResult separates whole-graph scheduling from component status.
 type GatewayGraphResult struct {
-	Outcome Outcome
-	Gateway GatewayResult
-	Routes  []RouteGraphResult
+	Outcome              Outcome
+	Gateway              GatewayResult
+	Routes               []RouteGraphResult
+	TelemetryUnsupported string
 }
 
 // RouteGraphResult identifies a route result without relying on input ordering.

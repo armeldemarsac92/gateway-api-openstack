@@ -79,6 +79,8 @@ type Config struct {
 	ClusterTrustBundles *backendtls.ClusterTrustBundles
 	// BackendRetryBudget opts into Octavia budgets for Experimental Service policies.
 	BackendRetryBudget bool
+	// TelemetryPolicy enables Experimental Gateway tracing on a capable Octavia provider.
+	TelemetryPolicy bool
 	// BackendClientCertificate enables the operator's separate backend client certificate map.
 	BackendClientCertificate bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
@@ -131,6 +133,10 @@ func (c Config) XBackendEnabled() bool {
 // BackendRetryBudgetEnabled reports whether Service retry policies can be applied.
 func (c Config) BackendRetryBudgetEnabled() bool {
 	return c.BackendRetryBudget && c.GatewayAPIChannel == features.FeatureChannelExperimental
+}
+
+func (c Config) TelemetryPolicyEnabled() bool {
+	return c.TelemetryPolicy && c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
 // TLSRoutesEnabled reports whether TLSRoute dependencies need to be watched.
@@ -266,6 +272,10 @@ func (c Config) GatewayListenerModeAnnotation(protocol gatewayv1.ProtocolType) s
 // GatewayHTTPSIsolatedPortsAnnotation retains enrollment when a shared port loses its penultimate section.
 func (c Config) GatewayHTTPSIsolatedPortsAnnotation() string {
 	return c.Domain() + "/https-isolated-ports-" + c.controllerKey()
+}
+
+func (c Config) GatewayTelemetryAnnotation() string {
+	return c.Domain() + "/gateway-telemetry-" + c.controllerKey()
 }
 
 // GatewayListenerProtocolAnnotation returns the key that records the listener
