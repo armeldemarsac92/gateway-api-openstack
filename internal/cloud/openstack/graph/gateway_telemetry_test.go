@@ -61,6 +61,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	var calls []string
 	capable := true
 	samplingCapable := false
+	attributesCapable := false
 	exporterState := "ACTIVE"
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := r.Method + " " + r.URL.Path
@@ -81,6 +82,9 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			}
 			if samplingCapable {
 				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSampling)
+			}
+			if attributesCapable {
+				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
 			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case "GET /lbaas/pools":
@@ -122,8 +126,19 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			listener := frontends[r.URL.Path[len("/lbaas/listeners/"):]]
 			if lb["provisioning_status"] == "ERROR" {
-				require.Len(t, body.Listener, 1, "Octavia only accepts a tracing clear while the balancer is in ERROR")
-				require.JSONEq(t, "null", string(body.Listener["otlp_tracing"]))
+				require.Len(t, body.Listener, 1)
+				update := body.Listener["otlp_tracing"]
+				if string(update) != "null" {
+					before, err := json.Marshal(listener["otlp_tracing"])
+					require.NoError(t, err)
+					var profile map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal(before, &profile))
+					require.Contains(t, profile, "attributes")
+					delete(profile, "attributes")
+					want, err := json.Marshal(profile)
+					require.NoError(t, err)
+					require.JSONEq(t, string(want), string(update), "Octavia accepts only the exact withdrawal")
+				}
 				listener["otlp_tracing"] = body.Listener["otlp_tracing"]
 				listener["otlp_tracing_status"] = exporterState
 				w.WriteHeader(http.StatusAccepted)
@@ -142,6 +157,8 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 				require.JSONEq(t, "null", string(body.Listener["otlp_tracing"]))
 			} else if spec.Gateway.Telemetry.Sampling != nil {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request","sampling":{"base":{"numerator":0,"denominator":100},"parent":{"numerator":1,"denominator":1}}}`, string(body.Listener["otlp_tracing"]))
+			} else if len(spec.Gateway.Telemetry.Attributes) > 0 {
+				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request","attributes":[{"name":"build","source_type":"Literal","literal_value":"blue"}]}`, string(body.Listener["otlp_tracing"]))
 			} else {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request"}`, string(body.Listener["otlp_tracing"]))
 			}
@@ -288,6 +305,37 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.Contains(t, settled.TelemetryUnsupported, octavia.GatewayCapabilityListenerOTLPSampling)
 	require.False(t, settled.TelemetryCapabilityUnavailable, "the v1 tracing capability can still report the policy's ancestor")
 	require.Empty(t, calls, "a regional v1 provider must not receive the sampling object")
+
+	spec.Gateway.Telemetry.Sampling = nil
+	spec.Gateway.Telemetry.Attributes = []cloud.TelemetryAttribute{{Name: "build", SourceType: "Literal", LiteralValue: "blue"}}
+	settled = run()
+	require.Contains(t, settled.TelemetryUnsupported, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
+	require.False(t, settled.TelemetryCapabilityUnavailable)
+	require.Empty(t, calls)
+	attributesCapable = true
+	exporterState = "ACTIVE"
+	// The HTTPS exporter is foreign. The controller can publish only its owned HTTP export.
+	for range 3 {
+		require.True(t, run().Outcome.MutationSubmitted)
+	}
+	require.Equal(t, []string{"POST /lbaas/pools", "POST /lbaas/pools/" + poolID + "/members", "PUT /lbaas/listeners/http"}, calls)
+	require.False(t, run().Outcome.MutationSubmitted)
+	require.Equal(t, foreign, frontends["https"]["otlp_tracing"])
+
+	spec.Gateway.Telemetry.Attributes = nil
+	lb["provisioning_status"] = "ERROR"
+	exporterState = "PENDING_UPDATE"
+	calls = nil
+	require.True(t, run().Outcome.MutationSubmitted)
+	require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request"}`, string(frontends["http"]["otlp_tracing"].(json.RawMessage)))
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State)
+	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
+	frontends["http"]["otlp_tracing_status"] = "ERROR"
+	exporterState = "ACTIVE"
+	require.True(t, run().Outcome.MutationSubmitted, "a failed withdrawal clears the exporter before its collector can be released")
+	require.JSONEq(t, "null", string(frontends["http"]["otlp_tracing"].(json.RawMessage)))
+	require.Equal(t, []string{"PUT /lbaas/listeners/http", "PUT /lbaas/listeners/http"}, calls)
+	require.Equal(t, foreign, frontends["https"]["otlp_tracing"])
 }
 
 func TestTelemetryCollectorTLSUsesExplicitHTTP11(t *testing.T) {

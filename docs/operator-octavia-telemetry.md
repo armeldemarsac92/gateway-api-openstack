@@ -47,7 +47,30 @@ spec:
 
 Inspect the policy’s `status.ancestors` entry for the target Gateway. It reports acceptance and whether the collector reference is permitted and resolved. The Octavia listener exposes its own `otlp_tracing_status`. `PENDING_UPDATE` means Amphora has yet to finish programming the exporter. `ACTIVE` records successful configuration publication and TLS preparation. To check delivery, look for the request’s trace ID in the collector. A collector TLS preparation failure sets the exporter to `ERROR` while the application listener continues serving. [Provider API](https://github.com/armeldemarsac92/octavia/blob/5edd5b1402fd22de33a13fc84d6cc0ab9f38b593/api-ref/source/parameters.yaml#L2074)
 
-The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers and custom span attributes remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
+The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
+
+## Add attributes to request spans
+
+Enable `[api_settings] enabled_listener_otlp_span_attributes_providers = amphora` after upgrading the API, workers and Amphora agents with the corresponding tracing Lua script. Check that the region advertises `listener_otlp_tracing_v1` and `listener_otlp_span_attributes_v1`. Add attributes under `spec.tracing` on an Experimental policy.
+
+```yaml
+attributes:
+  - name: deployment.environment.name
+    sourceType: Literal
+    literalValue: staging
+  - name: release.channel
+    sourceType: Header
+    headerName: X-Release-Channel
+  - name: upstream.result
+    sourceType: Attribute
+    attributeKey: http.response.status_code
+```
+
+For `Header`, Amphora reads the first field value from the request. If the request omits that header, Amphora uses the first response field of the same name. A missing field leaves the attribute absent. `Attribute` can copy `http.request.method`, `http.response.status_code`, `url.path` or `url.scheme`. The status code is an integer, the path excludes the query, and the scheme reflects the frontend connection. The output name `http.response.status_code` is reserved for the actual response code. Removing `attributes` restores the default span fields. [Gateway API attribute definitions](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xtelemetrypolicy_types.go#L340)
+
+Before rolling back the controller or Amphora image to a version without span attributes, remove `spec.tracing.attributes` from each affected policy while the compatible controller is running. Check every managed HTTP and terminated HTTPS listener in Octavia. Its `otlp_tracing` profile must omit `attributes` and its `otlp_tracing_status` must report `ACTIVE`. An intentionally disabled exporter reports `otlp_tracing: null` with the same acknowledgement. Then roll back the binaries.
+
+If an older controller is already running with an attribute profile still present, restore the compatible controller to complete withdrawal. An Octavia operator can also clear `otlp_tracing` on the affected listeners and verify the acknowledgement on each one. Keep the collector reserved until every serving listener has acknowledged its update.
 
 ## Set base and parent sampling rates
 
