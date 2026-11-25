@@ -146,6 +146,10 @@ func (r *Reconciler) setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, acc
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(
 		string(gatewayv1.GatewayConditionAccepted), metav1.ConditionTrue, string(reason), message, gateway.Generation,
 	))
+	r.replaceGatewayListenerStatuses(gateway, accepted)
+}
+
+func (r *Reconciler) replaceGatewayListenerStatuses(gateway *gatewayv1.Gateway, accepted []gatewayv1.ListenerStatus) {
 	listeners := make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		index := slices.IndexFunc(accepted, func(status gatewayv1.ListenerStatus) bool { return status.Name == listener.Name })
@@ -569,6 +573,36 @@ func setAcceptedListenerConditions(conditions *[]metav1.Condition, generation in
 type attachedGatewayRoutes struct {
 	counts                 map[gatewayv1.SectionName]int32
 	backendTLSAncestorFull bool
+}
+
+// refreshTransportListenerStatuses records attachment through a route programming
+// failure and retains existing listener readiness observations by name.
+func (r *Reconciler) refreshTransportListenerStatuses(ctx context.Context, gateway *gatewayv1.Gateway) error {
+	listeners, err := SupportedListenersForConfig(r.Config, gateway)
+	if err != nil {
+		return err
+	}
+	attached, err := r.attachedRoutes(ctx, gateway, listeners)
+	if err != nil {
+		return err
+	}
+	statuses := make([]gatewayv1.ListenerStatus, 0, len(listeners))
+	for _, listener := range listeners {
+		conditions := existingListenerConditions(gateway, listener.Name)
+		if len(conditions) == 0 {
+			setAcceptedListenerConditions(&conditions, gateway.Generation)
+			controller.SetCondition(&conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed),
+				metav1.ConditionFalse, string(gatewayv1.ListenerReasonPending), "Waiting to observe listener readiness", gateway.Generation))
+		}
+		statuses = append(statuses, gatewayv1.ListenerStatus{
+			Name:           listener.Name,
+			SupportedKinds: listenerSupportedRouteKinds(r.Config, *listener),
+			AttachedRoutes: attached.counts[listener.Name],
+			Conditions:     conditions,
+		})
+	}
+	r.replaceGatewayListenerStatuses(gateway, statuses)
+	return nil
 }
 
 func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener) (attachedGatewayRoutes, error) {
