@@ -165,20 +165,7 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 	if desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return plan, false
 	}
-	observedListeners := actual.scopedListeners
-	if !actual.scoped && actual.listener != nil {
-		observedListeners = []listeners.Listener{*actual.listener}
-	}
-	portByID := make(map[string]int, len(observedListeners))
-	for _, listener := range observedListeners {
-		portByID[listener.ID] = listener.ProtocolPort
-	}
-	// A scalar listener carries the effective Gateway port even if an older
-	// Octavia inventory omitted protocol_port.
-	if !actual.scoped && actual.listener != nil && actual.listener.ProtocolPort == 0 {
-		portByID[actual.listener.ID] = desired.spec.Gateway.Spec.ListenerPort
-		observedListeners[0].ProtocolPort = desired.spec.Gateway.Spec.ListenerPort
-	}
+	observedListeners, portByID := httpGuardListeners(desired, actual)
 	states := guardedHTTPListeners(desired, actual, portByID, predicate)
 	if len(states) == 0 {
 		return plan, false
@@ -338,6 +325,22 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		}
 		return false
 	}), confirmedClosed
+}
+
+func httpGuardListeners(desired desiredGatewayGraph, actual observedGatewayGraph) ([]listeners.Listener, map[string]int) {
+	frontends := actual.scopedListeners
+	if !actual.scoped && actual.listener != nil {
+		listener := *actual.listener
+		if listener.ProtocolPort == 0 {
+			listener.ProtocolPort = desired.spec.Gateway.Spec.ListenerPort
+		}
+		frontends = []listeners.Listener{listener}
+	}
+	ports := make(map[string]int, len(frontends))
+	for _, listener := range frontends {
+		ports[listener.ID] = listener.ProtocolPort
+	}
+	return frontends, ports
 }
 
 func closeGuardedHTTPListener(listener listeners.Listener, reason string) graphMutation {

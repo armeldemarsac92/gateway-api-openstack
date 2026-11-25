@@ -118,7 +118,7 @@ func ObserveListenerSets(ctx context.Context, reader client.Reader, config contr
 		}
 		if admitted.allowed {
 			for _, spec := range set.Spec.Listeners {
-				entry := projectListenerSetEntry(spec, plainHTTP, isolatedHTTPS, winners[spec.Port])
+				entry := projectListenerSetEntry(config, spec, plainHTTP, isolatedHTTPS, winners[spec.Port])
 				admitted.entries = append(admitted.entries, entry)
 				if entry.rejection == "" {
 					winners[spec.Port] = append(winners[spec.Port], &entry.listener)
@@ -190,7 +190,7 @@ func (p ListenerSetProjection) count() int32 {
 	return count
 }
 
-func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP, isolatedHTTPS bool, siblings []*gatewayv1.Listener) listenerSetEntry {
+func projectListenerSetEntry(config controller.Config, spec gatewayv1.ListenerEntry, plainHTTP, isolatedHTTPS bool, siblings []*gatewayv1.Listener) listenerSetEntry {
 	listener := gatewayv1.Listener(spec)
 	entry := listenerSetEntry{listener: listener}
 	if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 {
@@ -224,7 +224,7 @@ func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP, isolatedHT
 		if err := amphora.ValidateHostname(host); host != "" && err != nil {
 			entry.rejection = gatewayv1.ListenerReasonUnsupportedValue
 		}
-		if listener.Protocol == gatewayv1.HTTPProtocolType && len(siblings) != 0 && (!sharesPlainHTTPPort(&listener) || slices.ContainsFunc(siblings, func(sibling *gatewayv1.Listener) bool { return !sharesPlainHTTPPort(sibling) })) {
+		if listener.Protocol == gatewayv1.HTTPProtocolType && len(siblings) != 0 && (!sharesPlainHTTPPort(config, &listener) || slices.ContainsFunc(siblings, func(sibling *gatewayv1.Listener) bool { return !sharesPlainHTTPPort(config, sibling) })) {
 			entry.rejection = gatewayv1.ListenerReasonPortUnavailable
 		}
 	}
@@ -240,12 +240,12 @@ func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP, isolatedHT
 	return entry
 }
 
-func sharesPlainHTTPPort(listener *gatewayv1.Listener) bool {
+func sharesPlainHTTPPort(config controller.Config, listener *gatewayv1.Listener) bool {
 	host := listenerHostname(listener)
 	if host == "" || host[0] == '*' {
 		return false
 	}
-	_, err := amphora.HostnameRuleValue(host)
+	_, err := amphora.HostnameRuleValue(host, config.LongHTTPHostnames)
 	return err == nil
 }
 

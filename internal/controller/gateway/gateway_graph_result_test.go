@@ -42,6 +42,81 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
+func TestGatewayRestartWithoutLongHostnameOptInRetainsBoundPorts(t *testing.T) {
+	cfg := testConfig()
+	cfg.LongHTTPHostnames = true
+	gateway := programmedTestGateway(cfg)
+	topology := testBoundTopology()
+	topology.Topology.ExternalNetworkID = "33333333-3333-3333-3333-333333333333"
+	require.NoError(t, controller.BindGatewayTopology(cfg, gateway, topology))
+	longName := gatewayv1.Hostname(strings.Repeat("a.", 126) + "b")
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners,
+		gatewayv1.Listener{Name: "long", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: &longName},
+		gatewayv1.Listener{Name: "independent", Port: 8080, Protocol: gatewayv1.HTTPProtocolType})
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(gateway, class).Build()
+	state := cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10", FloatingIPID: "fip-1", FloatingIPAddress: "203.0.113.10"}
+	ready := cloud.GatewayReadyResult(state)
+	ready.ScopedListenerReadyPorts, ready.ScopedListenerServingPorts = []int{80, 8080}, []int{80, 8080}
+	provider := &recordingProvider{gatewayResult: &ready}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+
+	start := func() *Reconciler {
+		return newTestReconciler(Reconciler{Config: cfg, Client: kube, APIReader: kube, Coordinator: &graph.Coordinator{}}, provider)
+	}
+	enabled := start()
+	for range 2 {
+		_, err := enabled.Reconcile(t.Context(), request)
+		require.NoError(t, err)
+	}
+	require.Len(t, provider.gatewaySpecs, 1)
+	var enrolled gatewayv1.Gateway
+	require.NoError(t, kube.Get(t.Context(), request.NamespacedName, &enrolled))
+	require.Equal(t, gatewayv1.HTTPProtocolType, controller.GatewayListenerScope(cfg, &enrolled))
+	require.False(t, provider.gatewaySpecs[0].RetainLongHTTPListenerHostnames, "the capability is enabled")
+
+	cfg.LongHTTPHostnames = false
+	ready.Outcome = cloud.ProgressingOutcome("Waiting for long HTTP hostname rules", time.Second)
+	ready.HTTPPolicyTransition = true
+	ready.ScopedListenerReadyPorts, ready.ScopedListenerServingPorts = []int{8080}, []int{8080}
+	restarted := start()
+	_, err := restarted.Reconcile(t.Context(), request)
+	require.NoError(t, err)
+	require.Empty(t, provider.deletedGateways)
+	require.Len(t, provider.gatewaySpecs, 2)
+	retained := provider.gatewaySpecs[1]
+	require.Equal(t, provider.gatewaySpecs[0].Identity, retained.Identity)
+	require.Equal(t, provider.gatewaySpecs[0].ScopedListeners, retained.ScopedListeners)
+	require.True(t, retained.RetainLongHTTPListenerHostnames)
+	require.Equal(t, []string{"*", string(longName)}, retained.HTTPListenerHostnames[80])
+	var current gatewayv1.Gateway
+	require.NoError(t, kube.Get(t.Context(), request.NamespacedName, &current))
+	require.Equal(t, enrolled.Annotations, current.Annotations)
+	require.Equal(t, enrolled.Finalizers, current.Finalizers)
+	require.Equal(t, enrolled.Status.Addresses, current.Status.Addresses)
+	require.Len(t, current.Status.Addresses, 1)
+	require.Equal(t, state.FloatingIPAddress, current.Status.Addresses[0].Value)
+	for _, section := range current.Status.Listeners {
+		condition := meta.FindStatusCondition(section.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+		require.NotNil(t, condition)
+		require.Equal(t, section.Name == "independent", condition.Status == metav1.ConditionTrue)
+	}
+
+	unbound := gateway.DeepCopy()
+	unbound.Name, unbound.UID = "unbound", "fresh-uid"
+	unbound.Annotations, unbound.Finalizers = nil, nil
+	unbound.ResourceVersion, unbound.Status = "", gatewayv1.GatewayStatus{}
+	require.NoError(t, kube.Create(t.Context(), unbound))
+	_, err = restarted.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(unbound)})
+	require.NoError(t, err)
+	require.Len(t, provider.gatewaySpecs, 2)
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(unbound), unbound))
+	require.Empty(t, unbound.Finalizers)
+	accepted := meta.FindStatusCondition(unbound.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+	require.NotNil(t, accepted)
+	require.Equal(t, metav1.ConditionFalse, accepted.Status)
+}
+
 func TestGatewayRejectsMissingComponentOutcome(t *testing.T) {
 	cfg := testConfig()
 	gateway := programmedTestGateway(cfg)

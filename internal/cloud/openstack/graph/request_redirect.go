@@ -26,7 +26,6 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
-	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
 var requestRedirectPolicy = protectedHTTPPredicate{
@@ -56,18 +55,7 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	if actual.protocol != cloud.ListenerProtocolHTTP || disposition != cloud.GraphEnsure && disposition != cloud.GraphPreserve {
 		return plan
 	}
-	frontends := actual.scopedListeners
-	if !actual.scoped && actual.listener != nil {
-		frontends = []listeners.Listener{*actual.listener}
-	}
-	portByID := make(map[string]int, len(frontends))
-	for index, listener := range frontends {
-		if !actual.scoped && listener.ProtocolPort == 0 {
-			listener.ProtocolPort = desired.spec.Gateway.Spec.ListenerPort
-			frontends[index].ProtocolPort = listener.ProtocolPort
-		}
-		portByID[listener.ID] = listener.ProtocolPort
-	}
+	frontends, portByID := httpGuardListeners(desired, actual)
 	states := guardedHTTPListeners(desired, actual, portByID, predicate)
 	if len(states) == 0 {
 		return plan

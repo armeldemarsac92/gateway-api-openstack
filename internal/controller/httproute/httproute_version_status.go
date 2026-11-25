@@ -172,7 +172,7 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 	}
 	gatewayProgrammed := gatewayProgrammedForGeneration(parent.gateway)
 	if len(gatewaycontroller.HTTPListenerHostnames(listeners)[int(listener.Port)]) != 0 &&
-		(!gatewayProgrammed || parent.ref.SectionName == nil && !stableUnqualifiedRouteAttachment(route, parent, listeners, listener)) {
+		(!gatewayProgrammed || parent.ref.SectionName == nil && !r.stableUnqualifiedRouteAttachment(route, parent, listeners, listener)) {
 		return false
 	}
 	if controller.GatewayListenerScope(r.Config, parent.gateway) == gatewayv1.HTTPProtocolType {
@@ -189,7 +189,7 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 		} else if parent.ref.Port == nil {
 			return listenerProgrammedForGeneration(parent.gateway, listener.Name) &&
 				r.currentRouteProgrammedCondition(route, parent.ref) != nil &&
-				stableUnqualifiedRouteAttachment(route, parent, listeners, listener)
+				r.stableUnqualifiedRouteAttachment(route, parent, listeners, listener)
 		}
 	} else if parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
 		return false
@@ -215,7 +215,7 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 // Namespace labels can change without advancing either generation. Any
 // section a Route could previously select must imply the same forwarding
 // port and exact hostname predicate as the currently selected section.
-func stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managedRouteParent, listeners []*gatewayv1.Listener, selected *gatewayv1.Listener) bool {
+func (r *Reconciler) stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managedRouteParent, listeners []*gatewayv1.Listener, selected *gatewayv1.Listener) bool {
 	candidates, err := routeParentCandidates(route, parent, listeners)
 	if err != nil {
 		return false
@@ -223,7 +223,7 @@ func stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managed
 	effective := model.IntersectHostnames(selected.Hostname, route.Spec.Hostnames)
 	sharedPlainHTTP := len(gatewaycontroller.HTTPListenerHostnames(listeners)[int(selected.Port)]) != 0
 	for _, candidate := range candidates {
-		if candidate.Name == selected.Name || validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames) != nil {
+		if candidate.Name == selected.Name || r.validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames) != nil {
 			continue
 		}
 		if !model.ObservesRouteNamespace(candidate) && !model.AllowsRouteNamespace(candidate, parent.gateway.Namespace, route.Namespace, nil) {
