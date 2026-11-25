@@ -36,6 +36,7 @@ const (
 	GatewayCapabilityTargetRequestFilters      = "weighted_http_target_request_filters_v1"
 	GatewayCapabilityRequestHeaderOperations   = "request_header_operations_v1"
 	GatewayCapabilityResponseHeaderOperations  = "response_header_operations_v1"
+	GatewayCapabilityFrontendAuthFallback      = "frontend_client_auth_insecure_fallback_v1"
 	GatewayCapabilityBackendH2C                = "backend_h2c_v1"
 	GatewayCapabilityGRPCContentType           = "grpc_content_type_v1"
 	GatewayCapabilityBackendTLSHostname        = "backend_tls_hostname_v1"

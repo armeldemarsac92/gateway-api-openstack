@@ -98,8 +98,9 @@ func (r *Reconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 	defer func() {
-		if scope.managed && scope.gateway.DeletionTimestamp.IsZero() {
+		if !scope.skipPatch && scope.managed && scope.gateway.DeletionTimestamp.IsZero() {
 			r.setBackendClientCertificateStatus(ctx, scope.gateway)
+			setFrontendFallbackStatus(scope.gateway)
 		}
 		if err := r.patchGateway(ctx, scope); err != nil {
 			result = ctrl.Result{}
@@ -174,7 +175,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 		if BackendClientCertificateRef(scope.gateway) != nil && !r.Config.BackendTLSPolicy {
 			result, err := r.withdrawGatewayCertificates(ctx, scope.gateway)
 			if usesHTTPSProfile(r.Config, scope.gateway) {
-				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway, ListenerSetProjection{}), nil, false)
+				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway, ListenerSetProjection{}, nil), nil, false)
 			}
 			return result, errors.Join(err, r.withdrawGatewayDiscovery(ctx, scope.gateway, false))
 		}
@@ -274,6 +275,8 @@ func (r *Reconciler) reconcileGatewayBinding(
 		return ctrl.Result{}, err
 	}
 	log.FromContext(ctx).V(1).Info("Reconciled Gateway resource binding checkpoint")
+	// Publish status from the next read of the checkpointed Gateway.
+	scope.skipPatch = true
 	return ctrl.Result{Requeue: true}, nil
 }
 
@@ -291,6 +294,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		if err := r.checkpointListenerSetHTTPS(ctx, scope.gateway, sets); err != nil {
 			return ctrl.Result{}, err
 		}
+		scope.skipPatch = true
 		return ctrl.Result{Requeue: true}, nil
 	}
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
@@ -337,7 +341,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue
 	var keepGatewayProgrammed bool
 	if usesHTTPSProfile(r.Config, scope.gateway) {
-		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway, sets)
+		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway, sets, graphResult.Gateway.FrontendFallbackUnavailablePorts)
 		defer func() {
 			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, keepGatewayProgrammed)
 			r.reportFrontendCAWithdrawal(scope.gateway, tlsIssues, graphResult.Gateway.ScopedTLSClosedPorts)

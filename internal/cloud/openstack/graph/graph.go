@@ -49,6 +49,7 @@ type observedGatewayGraph struct {
 	defaultHTTPResponseCodes map[string]int
 	httpsVirtualHosts        map[string][]string
 	frontendCA               map[int]frontendCAObservation
+	clientAuthFallback       map[string]octavia.ClientAuthFallback
 	httpsIsolationAvailable  bool
 	httpsIsolationPolicies   map[string]httpsPolicyInventory
 	httpsIsolationUnverified map[string]bool
@@ -88,6 +89,7 @@ const (
 	graphCreateListener
 	graphDisableListener
 	graphUpdateListenerCertificate
+	graphDisableFrontendClientAuthFallback
 	graphPublishFrontendCA
 	graphUpdateListenerVirtualHosts
 	graphSetListenerNotFound
@@ -132,6 +134,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			result.Gateway.ScopedTLSClosedPorts = actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
 		} else {
 			result.Gateway.ScopedListenerServingPorts = nil
+		}
+		for _, listener := range spec.Gateway.Spec.ScopedListeners {
+			if actual.frontendCA[listener.Port].fallbackUnavailable {
+				result.Gateway.FrontendFallbackUnavailablePorts = append(result.Gateway.FrontendFallbackUnavailablePorts, listener.Port)
+			}
 		}
 		result.Gateway.AddressAbsent = actual.addressAbsent
 		result.Gateway.AddressActive = hasActiveGatewayAddress(spec.Gateway.Spec, actual)
@@ -454,7 +461,7 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 			return port == step.scopedListener.Port
 		})
 	}
-	if step.kind == graphPublishFrontendCA {
+	if step.kind == graphPublishFrontendCA || step.kind == graphDisableFrontendClientAuthFallback {
 		result.Outcome.MutationSubmitted = true
 	}
 	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationClaimBackendCA || step.route.kind == routeMutationPublishBackendCA ||
@@ -1429,6 +1436,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
 	})
 	actual.httpsVirtualHosts = inventory.HTTPSVirtualHosts
+	actual.clientAuthFallback = inventory.ClientAuthFallback
 	var bindingErr error
 	if markedProtocol != "" {
 		switch {

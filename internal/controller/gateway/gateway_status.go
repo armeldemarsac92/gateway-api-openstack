@@ -765,7 +765,23 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
 }
 
-// A rejected CA is a Kubernetes authorization result. Separately report
+func setFrontendFallbackStatus(gateway *gatewayv1.Gateway) {
+	insecureMode := func(config gatewayv1.TLSConfig) bool {
+		return config.Validation != nil && config.Validation.Mode == gatewayv1.AllowInsecureFallback
+	}
+	conditionType := string(gatewayv1.GatewayConditionInsecureFrontendValidationMode)
+	if tls := gateway.Spec.TLS; tls != nil && tls.Frontend != nil &&
+		(insecureMode(tls.Frontend.Default) || slices.ContainsFunc(tls.Frontend.PerPort, func(port gatewayv1.TLSPortConfig) bool {
+			return insecureMode(port.TLS)
+		})) {
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(conditionType, metav1.ConditionTrue,
+			string(gatewayv1.GatewayReasonConfigurationChanged), "The Gateway is configured to allow HTTPS connections without a valid client certificate", gateway.Generation))
+		return
+	}
+	meta.RemoveStatusCondition(&gateway.Status.Conditions, conditionType)
+}
+
+// A rejected CA or unsupported mode is a configuration result. Separately report
 // whether Octavia has confirmed the affected listener is closed.
 func (r *Reconciler) reportFrontendCAWithdrawal(gateway *gatewayv1.Gateway, issues map[gatewayv1.SectionName]httpsListenerStatusIssue, closedPorts []int) {
 	for i := range gateway.Status.Listeners {
