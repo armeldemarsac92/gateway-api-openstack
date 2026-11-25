@@ -170,6 +170,9 @@ func transportBatchMember(desired desiredRoute, member cloud.Member, existing po
 }
 
 func transportBatchProvisioningPending(route desiredRoute, observed observedRouteGraph) string {
+	if route.udpDropUnverified && observed.pool != nil {
+		return errUDPPacketDropUnverified.Error()
+	}
 	if route.protocol() == cloud.ListenerProtocolTCP && observed.tcpRejection.Present || observed.udpDropPool() {
 		return observed.backendProvisioningIssue(true, true)
 	}

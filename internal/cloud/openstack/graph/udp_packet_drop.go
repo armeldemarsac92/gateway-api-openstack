@@ -184,7 +184,9 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		err := p.submitTransportBatch(ctx, desired, actual, index, batch, &result)
 		return result, true, err
 	}
-	if waitingIndex >= 0 {
+	// An active scoped Gateway can still reconcile its other listeners. The
+	// scoped planner holds each unverified route at its existing attachment.
+	if waitingIndex >= 0 && (pending || !actual.scoped || actual.outcome.State == cloud.OutcomeProgressing) {
 		actual.outcome = p.progressingOutcome(errUDPPacketDropUnverified.Error())
 		return p.waitForUDPPacketDrop(ctx, desired, actual, waitingIndex)
 	}

@@ -334,6 +334,51 @@ func TestUDPPacketDropHoldsOnDiscoveryFailureUnlessADestinationWasRevoked(t *tes
 	}
 }
 
+func TestUDPPacketDropDiscoveryFailureAllowsUnrelatedListenerRemoval(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	gateway := &f.spec.Gateway.Spec
+	gateway.ScopedListeners = append(gateway.ScopedListeners, cloud.ScopedListener{Name: "retiring", Port: 9312})
+	ordinary := &f.spec.Routes[1].Spec
+	ordinary.ScopedListenerPorts = []int{9311, 9312}
+	guarded := &f.spec.Routes[0].Spec
+	guarded.HealthMonitor = cloud.HealthMonitorConfig{}
+	provider := newUDPPacketDropProvider(f)
+	f.settleTransportGraph(provider)
+	guarded.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+	guardedPool := f.inventory[tcpPool]
+	guardedPool["tags"] = append(pilotTags(guardedPool["tags"]), udpDropPoolTag)
+	guardedPool["udp_packet_drop"] = map[string]any{"numerator": 0, "denominator": 1}
+
+	retiring := tcpListener + "-9312"
+	if f.inventory[retiring]["default_pool_id"] != "pool-secondary" {
+		t.Fatal("the ordinary pool must initially serve both of its listeners")
+	}
+	gateway.ScopedListeners = gateway.ScopedListeners[:2]
+	ordinary.ScopedListenerPorts = ordinary.ScopedListenerPorts[:1]
+	f.udpDiscoveryUnavailable = true
+	before := len(f.writes)
+	f.reconcile(provider)
+	if f.inventory[retiring]["default_pool_id"] != nil || !slices.Equal(f.writes[before:], []string{"PUT " + retiring}) {
+		t.Fatalf("discovery failure kept the obsolete ordinary listener attached: writes %v", f.writes[before:])
+	}
+	f.inventory[retiring]["provisioning_status"] = "ACTIVE"
+	f.reconcile(provider)
+	result := f.reconcile(provider)
+	if f.inventory[retiring] != nil || !slices.Equal(f.writes[before:], []string{"PUT " + retiring, "DELETE " + retiring}) {
+		t.Fatalf("ordinary listener cleanup during discovery failure: writes %v", f.writes[before:])
+	}
+	if f.inventory[tcpListener]["default_pool_id"] != "pool" || f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || result.Routes[0].Result.ObservationDeferred ||
+		result.Routes[1].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("independent listeners or route outcomes during discovery failure: %+v, writes %v", result.Routes, f.writes[before:])
+	}
+	f.udpDiscoveryUnavailable = false
+	result = f.settleTransportGraph(provider)
+	if result.Routes[0].Result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before+2 {
+		t.Fatalf("guarded route did not recover from discovery without a write: %+v, writes %v", result.Routes[0], f.writes[before:])
+	}
+}
+
 func TestUDPPacketDropValidatesOnlyItsListenerSecurity(t *testing.T) {
 	f := newUDPPacketDropFixture(t)
 	f.settleTransportGraph(newUDPPacketDropProvider(f))
