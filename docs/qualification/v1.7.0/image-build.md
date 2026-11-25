@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An enrolled Amphora region can route a 253-character HTTP hostname. [Build record](image.json) · [Gateway traffic](provider/long-http-hostnames/README.md)
+An enrolled Amphora region can route exact HTTP paths and segment prefixes up to 1024 bytes. [Build record](image.json) · [Gateway traffic](provider/literal-http-paths/README.md)
+
+An enrolled Amphora region can route a 253-character HTTP hostname. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-bb7d9e7f72ab5fa9c4d745f228ca0c39c30cad66/image.json) · [Gateway traffic](provider/long-http-hostnames/README.md)
 
 An Experimental HTTPRoute can pin a client to one authenticated Service endpoint. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-3b7ad5dccd7d48abaded6e4f95737e37bc3306a8/image.json) · [Cookie and TLS traffic](provider/rule-affinity-backend-tls/README.md)
 

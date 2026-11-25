@@ -18,6 +18,8 @@ Install the Octavia database migration and compatible Octavia API, workers and A
 
 The option supports Gateway API `Exact` and `PathPrefix` paths up to 1024 ASCII bytes on HTTP and terminated HTTPS. The controller sends `HTTP_PATH_LITERAL` when a stock rule would exceed Octavia's 255-character value limit or the legacy renderer would change the path, such as when it contains an apostrophe or ampersand. Octavia compares the raw path. The path match itself leaves the forwarded path unchanged. `PathPrefix` matches whole segments and ignores a trailing slash in the configured prefix. A higher-priority path can also exclude its matching requests from a redirect.
 
+To return HTTP 404 when every path misses, enable `--octavia-fixed-http-responses` and the regional `fixed_http_responses_v1` capability. The Standard and Experimental trials returned HTTP 404 for each unmatched path and forwarded each match with its original bytes. [Traffic results](qualification/v1.7.0/provider/literal-http-paths/README.md)
+
 The controller reports `UnsupportedValue` for a route that needs literal path rules while the option is off. A listener that depends on an installed literal path rule stays closed while the opt-in or the regional capability is unavailable. Other physical listeners can keep serving. Before retiring the extension, replace or remove the affected matches and wait for the full Gateway reconciliation to reopen the listener. Verify that its owned Octavia policies no longer contain `HTTP_PATH_LITERAL` rules, including inverted redirect exclusions.
 
 ## Enable forwarding URL rewrites
