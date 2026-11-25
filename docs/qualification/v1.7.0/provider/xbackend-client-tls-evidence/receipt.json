@@ -2,16 +2,15 @@
   "subject": "An Experimental HTTPRoute to an EndpointSelector XBackend with mutual TLS to its HTTP/1.1 origin",
   "registeredUpstreamCase": false,
   "controller": {
-    "source": "b5e9dc2ecfdf5a595751a43920f425fe87707212",
+    "source": "6b0869de7f8bd3c5db942906aaa2c02ae766e44d",
     "parents": [
-      "85dd1a6b3aaf2ebfeb515f3a88fb0cdae0c38806",
-      "2dbcf0bb2d3302342946865f0098a5afdba63887"
+      "c4d6f47bea3841f6d508c6f593f2443e496b340b"
     ],
-    "tree": "d3edb6cd478085ce935b7870051fbf77701b7c83",
+    "tree": "ee344cece22a259b7d6ca010ebe36fc2eb1d5426",
     "signatureVerified": true,
-    "manifestDigest": "sha256:8cf1f77065fb25bd6b388ff33d7b372861988ab07b15930ed4eb71ddc20a5c60",
-    "managerSHA256": "6fba61acf90932f486301b3655106b8e9952a7c96ca7c7709526ca3e96af885a",
-    "ociArchiveSHA256": "a07493cd0db47dec921c2d469c829796e5f2e4aa15864f7ff259d73a7255d5c4",
+    "manifestDigest": "sha256:177ee209275ad5f06f0b6f8a2071905218bcef3fec7f20a09b212f4c4ef844e8",
+    "managerSHA256": "8906e74ad06238d7bf4e02cf2168bc106da50eef0bf82349ebfbcd1c75968649",
+    "ociArchiveSHA256": "c34ab5ec2b7f8b600ce8ebf3e7c448825d4e4225c3e113439fdd689b63aa201b",
     "platform": "linux/amd64",
     "normalAndNoCacheBuildsMatch": true
   },
@@ -61,11 +60,11 @@
         "Pod member network through isolated kind tunnel"
       ],
       "alpnPoolWrites": [],
-      "rawReceiptSHA256": "8f93a34f2ce2ee3dc4aaa48066ebc923f091d180a44093461a483d523dd9926a",
+      "rawReceiptSHA256": "91fa39e0198ff44f6172407a0bc901d35cda49d7c0f49051848bc1c9dd96f3be",
       "ordinaryService": {
         "route": {
           "generation": 1,
-          "object": "f1823f91247709b5e97ae9fbb71b443dd7f9cedc69bd849b71b4efc962ab6764",
+          "object": "ef2cf8ad0f0040472ceab471c9b48b748a1fc1fc085bf6ce1bc0cf375059c766",
           "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
         },
         "conditions": {
@@ -73,7 +72,7 @@
           "ResolvedRefs": "True/ResolvedRefs",
           "gateway-api-openstack.github.io/Programmed": "False/Pending"
         },
-        "pool": "1e28c1898b123928b7f3d24d6ac57c4a5267e8b8402d10bd3594872197330165",
+        "pool": "8054ec7c45d046762e8cf34e7eff4cd350fad5fefc720576887fb2bab92c6dc3",
         "wire": [
           {
             "status": 200,
@@ -150,11 +149,11 @@
           ]
         }
       ],
-      "rawReceiptSHA256": "35fa90d92fff5be8c8e07c6ea718cb64b89920d4ac2d0ec216cd633a927200b4",
+      "rawReceiptSHA256": "468a1c0f92011bb4ee0bdf738244a2fe6f6f320f6a3fddfb11b431a73e9a4037",
       "ordinaryService": {
         "route": {
           "generation": 1,
-          "object": "e7bda8c00116dee024ecda247f9771cfb686a1fc80cad43178dc964f2b6ba044",
+          "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
           "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
         },
         "conditions": {
@@ -162,7 +161,7 @@
           "ResolvedRefs": "True/ResolvedRefs",
           "gateway-api-openstack.github.io/Programmed": "False/Pending"
         },
-        "pool": "b2df9868902b04bfaca8c705916b9fc95c70e2b61eadff7ba7230ff31ca9dac3",
+        "pool": "bd860702776ff7b5346e3e4f9fd9f21637fb85a539dee9dd1842a0fad176f517",
         "wire": [
           {
             "status": 200,
@@ -211,19 +210,19 @@
         "grant-with-A": {
           "route": {
             "generation": 1,
-            "object": "716080bb6bc066bed8e08ee12bb341ffd4246d6d95f69504f7b312bb42275a82",
+            "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
             "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
           },
           "backend": {
             "generation": 1,
-            "object": "b6aff2ddad93be7471ac7d48963d04f0ac85a964553bb3d58dd08ce284d48c63",
+            "object": "1faa84a9068766ddf29ef40f42f67d79a6e671adeb8c21bb58159e0f2b278e14",
             "specSHA256": "7ac917b1a5703069bcb3c3d5a95bbcf645623dba4b0ca869cd074e38c47f2fc7"
           },
           "weight": 7,
           "routeConditions": {
             "Accepted": "True/Accepted",
             "ResolvedRefs": "True/ResolvedRefs",
-            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
           },
           "xBackendConditions": {
             "Accepted": "True/Accepted"
@@ -233,7 +232,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a",
+                "clientCertificateSHA256": "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -243,7 +242,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a",
+                "clientCertificateSHA256": "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -253,7 +252,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a",
+                "clientCertificateSHA256": "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -263,17 +262,17 @@
           "originRequests": 3,
           "nativeCertificates": {
             "client": [
-              "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a"
+              "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a"
             ],
             "ca": [
-              "62db43145b0bc1a57fd2f2a9201300716c9a73567cf95c9c20eec582f95b5c3e"
+              "d157701e029b33f253f203e4891fe6fd4ff350ae976d8ed9bd7e66e93fbc2bb4"
             ]
           },
           "pool": {
-            "pool": "b558384dc70a71fe92866658870609ed55cb1e966faccad9bc6bfc88a85c91fc",
-            "listener": "367526f5f221f78d548b00b4a315f611d0cd2b2534a7d0cb1b4d098f89d9202f",
-            "policy": "293a3ffd9bbb3234781581af650fc0efbbc9a859d41f0f53089c10806fbda470",
-            "rule": "4aef5cc3b5849dcc900e3009abe7849f41d0d8df787c2e8aa9e948309f48db9c",
+            "pool": "48c9d178977fbb3d5363bfd1299b6cfaa2bd2707c19270ab58a3a75230f9d0dd",
+            "listener": "d7972c8b1bba9163a3f7e60a2353dad9cc35a35c7d660a54cad622667775f96e",
+            "policy": "d61f37bb29c77b67eeab8ecfcdc7e28815845f123bf1a1a926486657e638f143",
+            "rule": "99144e80c1618a8040ef92212dd60c9c265eb3a076609407b0d439725889bfc0",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "tlsEnabled": true,
@@ -281,9 +280,9 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "d30f5d1c4ff8b5059de137004438776c9d2a1a158bd66e804ed370f1b5cf72ee",
+            "caReferenceSHA256": "3b2971c9eab28196a48e7d660402c20e4e4bc0cabce675404b184a4b543f18c7",
             "clientReferenceObserved": true,
-            "clientReferenceSHA256": "ad9081cb9a409e9366e37ae213522e50ea63dd97a09fd086104c7c0ad96ff72c",
+            "clientReferenceSHA256": "edcae0f6164555383e492185ea47076ba149c9c227ec568f2d07fe93c34051c1",
             "nativeVerifyRequired": true,
             "nativeStrictHostname": [
               "endpoint.backend.test"
@@ -300,7 +299,7 @@
           "ordinaryService": {
             "route": {
               "generation": 1,
-              "object": "e7bda8c00116dee024ecda247f9771cfb686a1fc80cad43178dc964f2b6ba044",
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
               "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
             },
             "conditions": {
@@ -308,7 +307,7 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "pool": "b2df9868902b04bfaca8c705916b9fc95c70e2b61eadff7ba7230ff31ca9dac3",
+            "pool": "bd860702776ff7b5346e3e4f9fd9f21637fb85a539dee9dd1842a0fad176f517",
             "wire": [
               {
                 "status": 200,
@@ -329,19 +328,19 @@
         "grant-removed": {
           "route": {
             "generation": 1,
-            "object": "716080bb6bc066bed8e08ee12bb341ffd4246d6d95f69504f7b312bb42275a82",
+            "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
             "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
           },
           "backend": {
             "generation": 1,
-            "object": "b6aff2ddad93be7471ac7d48963d04f0ac85a964553bb3d58dd08ce284d48c63",
+            "object": "1faa84a9068766ddf29ef40f42f67d79a6e671adeb8c21bb58159e0f2b278e14",
             "specSHA256": "7ac917b1a5703069bcb3c3d5a95bbcf645623dba4b0ca869cd074e38c47f2fc7"
           },
           "weight": 7,
           "routeConditions": {
             "Accepted": "True/Accepted",
             "ResolvedRefs": "False/RefNotPermitted",
-            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
           },
           "xBackendConditions": {
             "Accepted": "False/RefNotPermitted"
@@ -360,10 +359,10 @@
           "originRequests": 3,
           "nativeCertificates": {},
           "pool": {
-            "pool": "b558384dc70a71fe92866658870609ed55cb1e966faccad9bc6bfc88a85c91fc",
-            "listener": "367526f5f221f78d548b00b4a315f611d0cd2b2534a7d0cb1b4d098f89d9202f",
-            "policy": "293a3ffd9bbb3234781581af650fc0efbbc9a859d41f0f53089c10806fbda470",
-            "rule": "4aef5cc3b5849dcc900e3009abe7849f41d0d8df787c2e8aa9e948309f48db9c",
+            "pool": "48c9d178977fbb3d5363bfd1299b6cfaa2bd2707c19270ab58a3a75230f9d0dd",
+            "listener": "d7972c8b1bba9163a3f7e60a2353dad9cc35a35c7d660a54cad622667775f96e",
+            "policy": "d61f37bb29c77b67eeab8ecfcdc7e28815845f123bf1a1a926486657e638f143",
+            "rule": "99144e80c1618a8040ef92212dd60c9c265eb3a076609407b0d439725889bfc0",
             "provisioning": "ACTIVE",
             "poolEnabled": false,
             "tlsEnabled": true,
@@ -371,7 +370,7 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "d30f5d1c4ff8b5059de137004438776c9d2a1a158bd66e804ed370f1b5cf72ee",
+            "caReferenceSHA256": "3b2971c9eab28196a48e7d660402c20e4e4bc0cabce675404b184a4b543f18c7",
             "clientReferenceObserved": true,
             "clientReferenceSHA256": null,
             "nativeVerifyRequired": false,
@@ -384,7 +383,7 @@
           "ordinaryService": {
             "route": {
               "generation": 1,
-              "object": "e7bda8c00116dee024ecda247f9771cfb686a1fc80cad43178dc964f2b6ba044",
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
               "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
             },
             "conditions": {
@@ -392,7 +391,7 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "pool": "b2df9868902b04bfaca8c705916b9fc95c70e2b61eadff7ba7230ff31ca9dac3",
+            "pool": "bd860702776ff7b5346e3e4f9fd9f21637fb85a539dee9dd1842a0fad176f517",
             "wire": [
               {
                 "status": 200,
@@ -413,19 +412,19 @@
         "grant-restored-with-A": {
           "route": {
             "generation": 1,
-            "object": "716080bb6bc066bed8e08ee12bb341ffd4246d6d95f69504f7b312bb42275a82",
+            "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
             "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
           },
           "backend": {
             "generation": 1,
-            "object": "b6aff2ddad93be7471ac7d48963d04f0ac85a964553bb3d58dd08ce284d48c63",
+            "object": "1faa84a9068766ddf29ef40f42f67d79a6e671adeb8c21bb58159e0f2b278e14",
             "specSHA256": "7ac917b1a5703069bcb3c3d5a95bbcf645623dba4b0ca869cd074e38c47f2fc7"
           },
           "weight": 7,
           "routeConditions": {
             "Accepted": "True/Accepted",
             "ResolvedRefs": "True/ResolvedRefs",
-            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
           },
           "xBackendConditions": {
             "Accepted": "True/Accepted"
@@ -435,7 +434,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a",
+                "clientCertificateSHA256": "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -445,7 +444,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a",
+                "clientCertificateSHA256": "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -455,27 +454,27 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a",
+                "clientCertificateSHA256": "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
               }
             }
           ],
-          "originRequests": 6,
+          "originRequests": 15,
           "nativeCertificates": {
             "client": [
-              "9a0df032cbc976d5729b9fcae99b2c5585dc2f756717db5cf080df646cec558a"
+              "0589136365cc6988768086cad8c43f53cc9596fd1c561cc71ef6b004da70776a"
             ],
             "ca": [
-              "62db43145b0bc1a57fd2f2a9201300716c9a73567cf95c9c20eec582f95b5c3e"
+              "d157701e029b33f253f203e4891fe6fd4ff350ae976d8ed9bd7e66e93fbc2bb4"
             ]
           },
           "pool": {
-            "pool": "b558384dc70a71fe92866658870609ed55cb1e966faccad9bc6bfc88a85c91fc",
-            "listener": "367526f5f221f78d548b00b4a315f611d0cd2b2534a7d0cb1b4d098f89d9202f",
-            "policy": "293a3ffd9bbb3234781581af650fc0efbbc9a859d41f0f53089c10806fbda470",
-            "rule": "4aef5cc3b5849dcc900e3009abe7849f41d0d8df787c2e8aa9e948309f48db9c",
+            "pool": "48c9d178977fbb3d5363bfd1299b6cfaa2bd2707c19270ab58a3a75230f9d0dd",
+            "listener": "d7972c8b1bba9163a3f7e60a2353dad9cc35a35c7d660a54cad622667775f96e",
+            "policy": "d61f37bb29c77b67eeab8ecfcdc7e28815845f123bf1a1a926486657e638f143",
+            "rule": "99144e80c1618a8040ef92212dd60c9c265eb3a076609407b0d439725889bfc0",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "tlsEnabled": true,
@@ -483,9 +482,9 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "d30f5d1c4ff8b5059de137004438776c9d2a1a158bd66e804ed370f1b5cf72ee",
+            "caReferenceSHA256": "3b2971c9eab28196a48e7d660402c20e4e4bc0cabce675404b184a4b543f18c7",
             "clientReferenceObserved": true,
-            "clientReferenceSHA256": "ad9081cb9a409e9366e37ae213522e50ea63dd97a09fd086104c7c0ad96ff72c",
+            "clientReferenceSHA256": "edcae0f6164555383e492185ea47076ba149c9c227ec568f2d07fe93c34051c1",
             "nativeVerifyRequired": true,
             "nativeStrictHostname": [
               "endpoint.backend.test"
@@ -502,7 +501,7 @@
           "ordinaryService": {
             "route": {
               "generation": 1,
-              "object": "e7bda8c00116dee024ecda247f9771cfb686a1fc80cad43178dc964f2b6ba044",
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
               "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
             },
             "conditions": {
@@ -510,7 +509,7 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "pool": "b2df9868902b04bfaca8c705916b9fc95c70e2b61eadff7ba7230ff31ca9dac3",
+            "pool": "bd860702776ff7b5346e3e4f9fd9f21637fb85a539dee9dd1842a0fad176f517",
             "wire": [
               {
                 "status": 200,
@@ -531,12 +530,12 @@
         "rotation-to-B": {
           "route": {
             "generation": 1,
-            "object": "716080bb6bc066bed8e08ee12bb341ffd4246d6d95f69504f7b312bb42275a82",
+            "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
             "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
           },
           "backend": {
             "generation": 1,
-            "object": "b6aff2ddad93be7471ac7d48963d04f0ac85a964553bb3d58dd08ce284d48c63",
+            "object": "1faa84a9068766ddf29ef40f42f67d79a6e671adeb8c21bb58159e0f2b278e14",
             "specSHA256": "7ac917b1a5703069bcb3c3d5a95bbcf645623dba4b0ca869cd074e38c47f2fc7"
           },
           "weight": 7,
@@ -553,7 +552,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "6c141faa371cbebc8e2932460e2495ff139c77d2b259d8aa07bc7fb72e6d74c4",
+                "clientCertificateSHA256": "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -563,7 +562,7 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "6c141faa371cbebc8e2932460e2495ff139c77d2b259d8aa07bc7fb72e6d74c4",
+                "clientCertificateSHA256": "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
@@ -573,27 +572,27 @@
               "status": 200,
               "body": {
                 "alpn": "http/1.1",
-                "clientCertificateSHA256": "6c141faa371cbebc8e2932460e2495ff139c77d2b259d8aa07bc7fb72e6d74c4",
+                "clientCertificateSHA256": "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212",
                 "httpProtocol": "HTTP/1.1",
                 "origin": "protected",
                 "sni": "endpoint.backend.test"
               }
             }
           ],
-          "originRequests": 12,
+          "originRequests": 24,
           "nativeCertificates": {
             "client": [
-              "6c141faa371cbebc8e2932460e2495ff139c77d2b259d8aa07bc7fb72e6d74c4"
+              "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212"
             ],
             "ca": [
-              "62db43145b0bc1a57fd2f2a9201300716c9a73567cf95c9c20eec582f95b5c3e"
+              "d157701e029b33f253f203e4891fe6fd4ff350ae976d8ed9bd7e66e93fbc2bb4"
             ]
           },
           "pool": {
-            "pool": "b558384dc70a71fe92866658870609ed55cb1e966faccad9bc6bfc88a85c91fc",
-            "listener": "367526f5f221f78d548b00b4a315f611d0cd2b2534a7d0cb1b4d098f89d9202f",
-            "policy": "293a3ffd9bbb3234781581af650fc0efbbc9a859d41f0f53089c10806fbda470",
-            "rule": "4aef5cc3b5849dcc900e3009abe7849f41d0d8df787c2e8aa9e948309f48db9c",
+            "pool": "48c9d178977fbb3d5363bfd1299b6cfaa2bd2707c19270ab58a3a75230f9d0dd",
+            "listener": "d7972c8b1bba9163a3f7e60a2353dad9cc35a35c7d660a54cad622667775f96e",
+            "policy": "d61f37bb29c77b67eeab8ecfcdc7e28815845f123bf1a1a926486657e638f143",
+            "rule": "99144e80c1618a8040ef92212dd60c9c265eb3a076609407b0d439725889bfc0",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "tlsEnabled": true,
@@ -601,9 +600,9 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "d30f5d1c4ff8b5059de137004438776c9d2a1a158bd66e804ed370f1b5cf72ee",
+            "caReferenceSHA256": "3b2971c9eab28196a48e7d660402c20e4e4bc0cabce675404b184a4b543f18c7",
             "clientReferenceObserved": true,
-            "clientReferenceSHA256": "45cfd182edb2132bd8f7554453ff30cd1be170e6fd8572ca1280dc688af2d4e5",
+            "clientReferenceSHA256": "d7f7302905dc64e9c2f51f840f7e2bfb6cc99682317a74b792826a12ace3d6f0",
             "nativeVerifyRequired": true,
             "nativeStrictHostname": [
               "endpoint.backend.test"
@@ -620,7 +619,7 @@
           "ordinaryService": {
             "route": {
               "generation": 1,
-              "object": "e7bda8c00116dee024ecda247f9771cfb686a1fc80cad43178dc964f2b6ba044",
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
               "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
             },
             "conditions": {
@@ -628,7 +627,7 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "pool": "b2df9868902b04bfaca8c705916b9fc95c70e2b61eadff7ba7230ff31ca9dac3",
+            "pool": "bd860702776ff7b5346e3e4f9fd9f21637fb85a539dee9dd1842a0fad176f517",
             "wire": [
               {
                 "status": 200,
@@ -646,7 +645,328 @@
             "clientReferencePresent": false
           }
         }
+      },
+      "revocation": {
+        "observationsFromDeleteRequest": {
+          "deletionObservedMs": 130,
+          "closedPoolObservedMs": 5907,
+          "originRequestsBeforeDelete": 3,
+          "originRequestsAfterClosure": 3,
+          "originRequestDelta": 0,
+          "applicationProbes": 0
+        },
+        "probesAfterClosedPool": {
+          "originRequestsBefore": 3,
+          "originRequestsAfter": 3,
+          "originRequestDelta": 0
+        }
+      },
+      "routeProgrammed": {
+        "ordinary-service": {
+          "sibling": {
+            "route": {
+              "generation": 1,
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
+              "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:11Z",
+              "message": "Created Octavia health monitor",
+              "observedGeneration": 1,
+              "reason": "Pending",
+              "status": "False",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 2640,
+            "samples": [
+              {
+                "elapsedMs": 80,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:11Z",
+                  "message": "Enabled converged Octavia L7 policy",
+                  "observedGeneration": 1,
+                  "reason": "Pending",
+                  "status": "False",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 2212
+              },
+              {
+                "elapsedMs": 2640,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:25Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 2640
+              }
+            ]
+          }
+        },
+        "grant-with-A": {
+          "protected": {
+            "route": {
+              "generation": 1,
+              "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
+              "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:24Z",
+              "message": "Octavia configuration for the route is active",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 196,
+            "samples": [
+              {
+                "elapsedMs": 196,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:24Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 196
+              }
+            ]
+          },
+          "sibling": {
+            "route": {
+              "generation": 1,
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
+              "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:25Z",
+              "message": "Octavia configuration for the route is active",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 264,
+            "samples": [
+              {
+                "elapsedMs": 264,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:25Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 264
+              }
+            ]
+          }
+        },
+        "grant-restored-with-A": {
+          "protected": {
+            "route": {
+              "generation": 1,
+              "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
+              "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:32Z",
+              "message": "Octavia configuration for the route is active",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 187,
+            "samples": [
+              {
+                "elapsedMs": 187,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:32Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 187
+              }
+            ]
+          },
+          "sibling": {
+            "route": {
+              "generation": 1,
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
+              "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:25Z",
+              "message": "Octavia configuration for the route is active",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 255,
+            "samples": [
+              {
+                "elapsedMs": 255,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:25Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 255
+              }
+            ]
+          }
+        },
+        "rotation-to-B": {
+          "protected": {
+            "route": {
+              "generation": 1,
+              "object": "623bfaf139f33b0566a1459edf297a678151c894bfc98d2eb28d124a20d7ecf6",
+              "specSHA256": "c02414db1a576f30c586d6fcece852a7d0adc4560d0a4b212ca2ad5959b8a473"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:44Z",
+              "message": "Created Octavia member",
+              "observedGeneration": 1,
+              "reason": "Pending",
+              "status": "False",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 862,
+            "samples": [
+              {
+                "elapsedMs": 207,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:44Z",
+                  "message": "Created Octavia member",
+                  "observedGeneration": 1,
+                  "reason": "Pending",
+                  "status": "False",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 207
+              },
+              {
+                "elapsedMs": 862,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:48Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 862
+              }
+            ]
+          },
+          "sibling": {
+            "route": {
+              "generation": 1,
+              "object": "ee3716518984c5447be4cb667600396fedaadb4ffe7dfeb8bd8ca8c7a89f86b2",
+              "specSHA256": "7df3bf266925aaacb5432d4b70f795745072888a65b762c968274bda14e12804"
+            },
+            "beforeTrafficProbe": {
+              "lastTransitionTime": "2026-11-25T06:03:25Z",
+              "message": "Octavia configuration for the route is active",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "gateway-api-openstack.github.io/Programmed"
+            },
+            "afterTrafficMillisecondsToFirstObservedTrue": 274,
+            "samples": [
+              {
+                "elapsedMs": 274,
+                "condition": {
+                  "lastTransitionTime": "2026-11-25T06:03:25Z",
+                  "message": "Octavia configuration for the route is active",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                "lastSeenElapsedMs": 925
+              }
+            ]
+          }
+        }
+      },
+      "afterRotationAndProgrammed": {
+        "protected": [
+          {
+            "status": 200,
+            "body": {
+              "alpn": "http/1.1",
+              "clientCertificateSHA256": "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212",
+              "httpProtocol": "HTTP/1.1",
+              "origin": "protected",
+              "sni": "endpoint.backend.test"
+            }
+          },
+          {
+            "status": 200,
+            "body": {
+              "alpn": "http/1.1",
+              "clientCertificateSHA256": "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212",
+              "httpProtocol": "HTTP/1.1",
+              "origin": "protected",
+              "sni": "endpoint.backend.test"
+            }
+          },
+          {
+            "status": 200,
+            "body": {
+              "alpn": "http/1.1",
+              "clientCertificateSHA256": "e309c6617919708d9c387326ac834751fe99b8e769c1aae040bca25cd0886212",
+              "httpProtocol": "HTTP/1.1",
+              "origin": "protected",
+              "sni": "endpoint.backend.test"
+            }
+          }
+        ],
+        "sibling": [
+          {
+            "status": 200,
+            "body": "sibling"
+          },
+          {
+            "status": 200,
+            "body": "sibling"
+          },
+          {
+            "status": 200,
+            "body": "sibling"
+          }
+        ]
       }
     }
+  },
+  "earlierRevocationObservation": {
+    "source": "b5e9dc2ecfdf5a595751a43920f425fe87707212",
+    "receiptSHA256": "593c3724680356d94e353db1833bab0c1c17298363ab6d511771ebf4ebe4f272",
+    "campaignExit": 1,
+    "description": "This trial sent requests while the grant deletion was being reconciled. Its pre-deletion origin counter was unsuitable for checking the three probes after pool closure.",
+    "originRequestsBeforeDelete": 3,
+    "originRequestsAtDeadline": 18,
+    "lastThreeResponses": [
+      503,
+      503,
+      503
+    ],
+    "closedPoolAtDeadline": true
   }
 }
