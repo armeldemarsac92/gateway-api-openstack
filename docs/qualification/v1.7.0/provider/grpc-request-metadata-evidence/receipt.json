@@ -1,0 +1,2398 @@
+{
+  "contract": "GRPCRoute rule and backend RequestHeaderModifier, including repeated binary metadata and weighted ReferenceGrant transitions",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "1063621c0a8ad956ab39521aa79c594acb756fe0",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:e433292039643f844fbc1ce232b209c20402abd86a13668c2d6f6f562f1e5914",
+    "configDigest": "sha256:65c6494dc17edb5aa99b47ca113b0e5a8968dddd67e49deec6ae0d00ef5da2a6",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "2e6725ffae830abf0dad49d96ae5e4704b656b3a5edccd2360cb2add8c74129f",
+    "managerSHA256": "ff5b7e22f08b822ba85504cf70c966ca6d9d973fcd17d959ef3caaafe7122632",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "octaviaRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-grpc-request-binary-metadata-2972069e0a3c",
+  "channels": {
+    "standard": {
+      "kubernetesVersion": "v1.36.4",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "gatewayCRDs": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "installedSchemaSHA256": {
+          "grpcroutes.gateway.networking.k8s.io": {
+            "v1": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+          },
+          "referencegrants.gateway.networking.k8s.io": {
+            "v1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def",
+            "v1beta1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def"
+          }
+        }
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-grpc-content-type",
+        "--octavia-weighted-http-targets",
+        "--octavia-http-backend-request-filters",
+        "--octavia-request-header-modifier",
+        "--octavia-microversion=2.30"
+      ],
+      "cloudBoundary": "Live API and etcd in dedicated disposable kind, installed Octavia WSGI/SQL, Amphora driver renderer, native HAProxy and grpcio. Keystone, Neutron, Octavia RPC completion and Amphora agent transport are fixtures.",
+      "backendBoundary": "Two live grpcio h2c origins, reached through fixture-managed selectorless Services and EndpointSlices with distinct member ports.",
+      "wireAcceptance": {
+        "rpcPerMethodPerPhase": 144,
+        "expectedMinorityShare": 0.25,
+        "minorityShareBounds": [
+          0.12,
+          0.38
+        ],
+        "revokedBackendRPCs": 0,
+        "revokedShareExpectedGRPCStatus": "UNAVAILABLE"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_binary_request_metadata_v1",
+        "grpc_content_type_v1",
+        "request_header_operations_v1",
+        "weighted_http_target_request_filters_v1",
+        "weighted_http_targets_v1"
+      ],
+      "octavia": {
+        "revision": "2972069e0a3c0e09898ae855054084ee4942fd64",
+        "version": "19.0.1.dev90",
+        "sha256": "0a8132f733af2048a9b983dee0b508a0b0b89cd84bd1e4c20c1837395518937f",
+        "filesVerified": 669
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1",
+        "sha256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde"
+      },
+      "grpcio": "1.83.0",
+      "RESTResponses": {
+        "GET versions 200": 5,
+        "GET providers 200": 245,
+        "GET loadbalancers 200": 233,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 129,
+        "GET pools 200": 115,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 106,
+        "PUT listeners 200": 8,
+        "POST pools 201": 4,
+        "GET members 200": 282,
+        "GET healthmonitors 200": 270,
+        "POST members 201": 3,
+        "POST healthmonitors 201": 3,
+        "POST l7policies 201": 4,
+        "GET rules 200": 184,
+        "POST rules 201": 8,
+        "PUT l7policies 200": 7,
+        "DELETE rules 204": 4,
+        "DELETE l7policies 204": 2,
+        "DELETE healthmonitors 204": 1,
+        "DELETE members 204": 1,
+        "DELETE pools 204": 1
+      },
+      "phases": {
+        "configured": {
+          "referenceGrant": {
+            "uid": "3e26a408-9a0e-433e-8d80-9e701c829766",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "green"
+                }
+              ]
+            }
+          },
+          "route": {
+            "uid": "6760b7fd-5e10-49ab-8278-416f2d2ae509",
+            "generation": 1,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "filters": [
+                  {
+                    "requestHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-probe-add-bin",
+                          "value": "/w, AA=="
+                        },
+                        {
+                          "name": "x-probe-hop",
+                          "value": "target"
+                        }
+                      ],
+                      "remove": [
+                        "x-probe-target-remove"
+                      ],
+                      "set": [
+                        {
+                          "name": "x-probe-replace-bin",
+                          "value": "/g==, AQI"
+                        },
+                        {
+                          "name": "x-probe-mode",
+                          "value": "target"
+                        }
+                      ]
+                    },
+                    "type": "RequestHeaderModifier"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [
+              {
+                "requestHeaderModifier": {
+                  "add": [
+                    {
+                      "name": "x-probe-add-bin",
+                      "value": "YQ, Yg=="
+                    },
+                    {
+                      "name": "x-probe-hop",
+                      "value": "rule"
+                    }
+                  ],
+                  "remove": [
+                    "x-probe-rule-remove"
+                  ],
+                  "set": [
+                    {
+                      "name": "x-probe-replace-bin",
+                      "value": "AP8=, /wD/"
+                    },
+                    {
+                      "name": "x-probe-mode",
+                      "value": "rule"
+                    }
+                  ]
+                },
+                "type": "RequestHeaderModifier"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "provider": {
+            "methods": {
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-add-bin",
+                    "value": "YQ, Yg=="
+                  },
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-hop",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-mode",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-replace-bin",
+                    "value": "AP8=, /wD/"
+                  },
+                  {
+                    "operation": "REMOVE",
+                    "name": "x-probe-rule-remove"
+                  }
+                ],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "operations": [
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-add-bin",
+                        "value": "/w, AA=="
+                      },
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-hop",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-mode",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-replace-bin",
+                        "value": "/g==, AQI"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-probe-target-remove"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "a107b344dd772e02b764cf2bf8328978e6e4fd01a4693511e78d53be5ac2956f",
+            "HAProxyReloads": 3
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 108,
+              "green": 36,
+              "empty-failure-pool": 0
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 252,
+            "green": 36
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg=="
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule"
+                  ],
+                  "x-probe-replace-bin": [
+                    "AP8=",
+                    "/wD/"
+                  ],
+                  "x-probe-mode": [
+                    "rule"
+                  ]
+                },
+                "count": 108
+              },
+              "green": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg==",
+                    "/w==",
+                    "AA=="
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule",
+                    "target"
+                  ],
+                  "x-probe-replace-bin": [
+                    "/g==",
+                    "AQI="
+                  ],
+                  "x-probe-mode": [
+                    "target"
+                  ]
+                },
+                "count": 36
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        },
+        "grant-revoked": {
+          "referenceGrant": {
+            "deletedUID": "3e26a408-9a0e-433e-8d80-9e701c829766"
+          },
+          "route": {
+            "uid": "6760b7fd-5e10-49ab-8278-416f2d2ae509",
+            "generation": 1,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "filters": [
+                  {
+                    "requestHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-probe-add-bin",
+                          "value": "/w, AA=="
+                        },
+                        {
+                          "name": "x-probe-hop",
+                          "value": "target"
+                        }
+                      ],
+                      "remove": [
+                        "x-probe-target-remove"
+                      ],
+                      "set": [
+                        {
+                          "name": "x-probe-replace-bin",
+                          "value": "/g==, AQI"
+                        },
+                        {
+                          "name": "x-probe-mode",
+                          "value": "target"
+                        }
+                      ]
+                    },
+                    "type": "RequestHeaderModifier"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [
+              {
+                "requestHeaderModifier": {
+                  "add": [
+                    {
+                      "name": "x-probe-add-bin",
+                      "value": "YQ, Yg=="
+                    },
+                    {
+                      "name": "x-probe-hop",
+                      "value": "rule"
+                    }
+                  ],
+                  "remove": [
+                    "x-probe-rule-remove"
+                  ],
+                  "set": [
+                    {
+                      "name": "x-probe-replace-bin",
+                      "value": "AP8=, /wD/"
+                    },
+                    {
+                      "name": "x-probe-mode",
+                      "value": "rule"
+                    }
+                  ]
+                },
+                "type": "RequestHeaderModifier"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "provider": {
+            "methods": {
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              },
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-add-bin",
+                    "value": "YQ, Yg=="
+                  },
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-hop",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-mode",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-replace-bin",
+                    "value": "AP8=, /wD/"
+                  },
+                  {
+                    "operation": "REMOVE",
+                    "name": "x-probe-rule-remove"
+                  }
+                ],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "empty-failure-pool",
+                    "weight": 1,
+                    "operations": [],
+                    "fixedResponse": null
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "11124791d8c5f226fe38823089b1c761114dec1ed6bf9ba5c48c9e8c2af18629",
+            "HAProxyReloads": 5
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 114,
+              "green": 0,
+              "empty-failure-pool": 30
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 258,
+            "green": 0
+          },
+          "grpc": {
+            "Marked": {
+              "empty-failure-pool": {
+                "grpcStatus": "UNAVAILABLE",
+                "count": 30
+              },
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg=="
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule"
+                  ],
+                  "x-probe-replace-bin": [
+                    "AP8=",
+                    "/wD/"
+                  ],
+                  "x-probe-mode": [
+                    "rule"
+                  ]
+                },
+                "count": 114
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        },
+        "grant-restored": {
+          "referenceGrant": {
+            "uid": "980844a9-9319-49f0-b0a7-a1ed99dee65e",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "green"
+                }
+              ]
+            }
+          },
+          "route": {
+            "uid": "6760b7fd-5e10-49ab-8278-416f2d2ae509",
+            "generation": 1,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "filters": [
+                  {
+                    "requestHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-probe-add-bin",
+                          "value": "/w, AA=="
+                        },
+                        {
+                          "name": "x-probe-hop",
+                          "value": "target"
+                        }
+                      ],
+                      "remove": [
+                        "x-probe-target-remove"
+                      ],
+                      "set": [
+                        {
+                          "name": "x-probe-replace-bin",
+                          "value": "/g==, AQI"
+                        },
+                        {
+                          "name": "x-probe-mode",
+                          "value": "target"
+                        }
+                      ]
+                    },
+                    "type": "RequestHeaderModifier"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [
+              {
+                "requestHeaderModifier": {
+                  "add": [
+                    {
+                      "name": "x-probe-add-bin",
+                      "value": "YQ, Yg=="
+                    },
+                    {
+                      "name": "x-probe-hop",
+                      "value": "rule"
+                    }
+                  ],
+                  "remove": [
+                    "x-probe-rule-remove"
+                  ],
+                  "set": [
+                    {
+                      "name": "x-probe-replace-bin",
+                      "value": "AP8=, /wD/"
+                    },
+                    {
+                      "name": "x-probe-mode",
+                      "value": "rule"
+                    }
+                  ]
+                },
+                "type": "RequestHeaderModifier"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "provider": {
+            "methods": {
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              },
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-add-bin",
+                    "value": "YQ, Yg=="
+                  },
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-hop",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-mode",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-replace-bin",
+                    "value": "AP8=, /wD/"
+                  },
+                  {
+                    "operation": "REMOVE",
+                    "name": "x-probe-rule-remove"
+                  }
+                ],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "operations": [
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-add-bin",
+                        "value": "/w, AA=="
+                      },
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-hop",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-mode",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-replace-bin",
+                        "value": "/g==, AQI"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-probe-target-remove"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "75412e8a854a335fa0971b399c08ef578235533d310df2ed46eac13bb099767d",
+            "HAProxyReloads": 7
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 117,
+              "green": 27,
+              "empty-failure-pool": 0
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 261,
+            "green": 27
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg=="
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule"
+                  ],
+                  "x-probe-replace-bin": [
+                    "AP8=",
+                    "/wD/"
+                  ],
+                  "x-probe-mode": [
+                    "rule"
+                  ]
+                },
+                "count": 117
+              },
+              "green": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg==",
+                    "/w==",
+                    "AA=="
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule",
+                    "target"
+                  ],
+                  "x-probe-replace-bin": [
+                    "/g==",
+                    "AQI="
+                  ],
+                  "x-probe-mode": [
+                    "target"
+                  ]
+                },
+                "count": 27
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        },
+        "filters-removed": {
+          "referenceGrant": {
+            "uid": "980844a9-9319-49f0-b0a7-a1ed99dee65e",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "green"
+                }
+              ]
+            }
+          },
+          "route": {
+            "uid": "6760b7fd-5e10-49ab-8278-416f2d2ae509",
+            "generation": 2,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "provider": {
+            "methods": {
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              },
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "operations": [],
+                    "fixedResponse": null
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "e8ab23b17cc61b98267cc5c39204e62a7579b438c0eba43ffabf7195bec0a07f",
+            "HAProxyReloads": 9
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 109,
+              "green": 35,
+              "empty-failure-pool": 0
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 253,
+            "green": 35
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 109
+              },
+              "green": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 35
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        }
+      }
+    },
+    "experimental": {
+      "kubernetesVersion": "v1.36.4",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "gatewayCRDs": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "installedSchemaSHA256": {
+          "grpcroutes.gateway.networking.k8s.io": {
+            "v1": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+          },
+          "referencegrants.gateway.networking.k8s.io": {
+            "v1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def",
+            "v1beta1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def"
+          }
+        }
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-grpc-content-type",
+        "--octavia-weighted-http-targets",
+        "--octavia-http-backend-request-filters",
+        "--octavia-request-header-modifier",
+        "--octavia-microversion=2.30"
+      ],
+      "cloudBoundary": "Live API and etcd in dedicated disposable kind, installed Octavia WSGI/SQL, Amphora driver renderer, native HAProxy and grpcio. Keystone, Neutron, Octavia RPC completion and Amphora agent transport are fixtures.",
+      "backendBoundary": "Two live grpcio h2c origins, reached through fixture-managed selectorless Services and EndpointSlices with distinct member ports.",
+      "wireAcceptance": {
+        "rpcPerMethodPerPhase": 144,
+        "expectedMinorityShare": 0.25,
+        "minorityShareBounds": [
+          0.12,
+          0.38
+        ],
+        "revokedBackendRPCs": 0,
+        "revokedShareExpectedGRPCStatus": "UNAVAILABLE"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_binary_request_metadata_v1",
+        "grpc_content_type_v1",
+        "request_header_operations_v1",
+        "weighted_http_target_request_filters_v1",
+        "weighted_http_targets_v1"
+      ],
+      "octavia": {
+        "revision": "2972069e0a3c0e09898ae855054084ee4942fd64",
+        "version": "19.0.1.dev90",
+        "sha256": "0a8132f733af2048a9b983dee0b508a0b0b89cd84bd1e4c20c1837395518937f",
+        "filesVerified": 669
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1",
+        "sha256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde"
+      },
+      "grpcio": "1.83.0",
+      "RESTResponses": {
+        "GET versions 200": 5,
+        "GET providers 200": 230,
+        "GET loadbalancers 200": 198,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 100,
+        "GET pools 200": 108,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 99,
+        "PUT listeners 200": 8,
+        "POST pools 201": 4,
+        "GET members 200": 261,
+        "GET healthmonitors 200": 249,
+        "POST members 201": 3,
+        "POST healthmonitors 201": 3,
+        "POST l7policies 201": 4,
+        "GET rules 200": 170,
+        "POST rules 201": 8,
+        "PUT l7policies 200": 7,
+        "DELETE rules 204": 4,
+        "DELETE l7policies 204": 2,
+        "DELETE healthmonitors 204": 1,
+        "DELETE members 204": 1,
+        "DELETE pools 204": 1
+      },
+      "phases": {
+        "configured": {
+          "referenceGrant": {
+            "uid": "acb8cced-c576-4d29-8a1e-5c85aa08e32f",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "green"
+                }
+              ]
+            }
+          },
+          "route": {
+            "uid": "3efaf564-cca7-474b-893c-f5cdd584b298",
+            "generation": 1,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "filters": [
+                  {
+                    "requestHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-probe-add-bin",
+                          "value": "/w, AA=="
+                        },
+                        {
+                          "name": "x-probe-hop",
+                          "value": "target"
+                        }
+                      ],
+                      "remove": [
+                        "x-probe-target-remove"
+                      ],
+                      "set": [
+                        {
+                          "name": "x-probe-replace-bin",
+                          "value": "/g==, AQI"
+                        },
+                        {
+                          "name": "x-probe-mode",
+                          "value": "target"
+                        }
+                      ]
+                    },
+                    "type": "RequestHeaderModifier"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [
+              {
+                "requestHeaderModifier": {
+                  "add": [
+                    {
+                      "name": "x-probe-add-bin",
+                      "value": "YQ, Yg=="
+                    },
+                    {
+                      "name": "x-probe-hop",
+                      "value": "rule"
+                    }
+                  ],
+                  "remove": [
+                    "x-probe-rule-remove"
+                  ],
+                  "set": [
+                    {
+                      "name": "x-probe-replace-bin",
+                      "value": "AP8=, /wD/"
+                    },
+                    {
+                      "name": "x-probe-mode",
+                      "value": "rule"
+                    }
+                  ]
+                },
+                "type": "RequestHeaderModifier"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "provider": {
+            "methods": {
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-add-bin",
+                    "value": "YQ, Yg=="
+                  },
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-hop",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-mode",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-replace-bin",
+                    "value": "AP8=, /wD/"
+                  },
+                  {
+                    "operation": "REMOVE",
+                    "name": "x-probe-rule-remove"
+                  }
+                ],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "operations": [
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-add-bin",
+                        "value": "/w, AA=="
+                      },
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-hop",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-mode",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-replace-bin",
+                        "value": "/g==, AQI"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-probe-target-remove"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "22eea2cc1d2f10e056a5e229398f79bee2a4405818d1aae850c8c67e5e9fcb96",
+            "HAProxyReloads": 3
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 105,
+              "green": 39,
+              "empty-failure-pool": 0
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 249,
+            "green": 39
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg=="
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule"
+                  ],
+                  "x-probe-replace-bin": [
+                    "AP8=",
+                    "/wD/"
+                  ],
+                  "x-probe-mode": [
+                    "rule"
+                  ]
+                },
+                "count": 105
+              },
+              "green": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg==",
+                    "/w==",
+                    "AA=="
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule",
+                    "target"
+                  ],
+                  "x-probe-replace-bin": [
+                    "/g==",
+                    "AQI="
+                  ],
+                  "x-probe-mode": [
+                    "target"
+                  ]
+                },
+                "count": 39
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        },
+        "grant-revoked": {
+          "referenceGrant": {
+            "deletedUID": "acb8cced-c576-4d29-8a1e-5c85aa08e32f"
+          },
+          "route": {
+            "uid": "3efaf564-cca7-474b-893c-f5cdd584b298",
+            "generation": 1,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "filters": [
+                  {
+                    "requestHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-probe-add-bin",
+                          "value": "/w, AA=="
+                        },
+                        {
+                          "name": "x-probe-hop",
+                          "value": "target"
+                        }
+                      ],
+                      "remove": [
+                        "x-probe-target-remove"
+                      ],
+                      "set": [
+                        {
+                          "name": "x-probe-replace-bin",
+                          "value": "/g==, AQI"
+                        },
+                        {
+                          "name": "x-probe-mode",
+                          "value": "target"
+                        }
+                      ]
+                    },
+                    "type": "RequestHeaderModifier"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [
+              {
+                "requestHeaderModifier": {
+                  "add": [
+                    {
+                      "name": "x-probe-add-bin",
+                      "value": "YQ, Yg=="
+                    },
+                    {
+                      "name": "x-probe-hop",
+                      "value": "rule"
+                    }
+                  ],
+                  "remove": [
+                    "x-probe-rule-remove"
+                  ],
+                  "set": [
+                    {
+                      "name": "x-probe-replace-bin",
+                      "value": "AP8=, /wD/"
+                    },
+                    {
+                      "name": "x-probe-mode",
+                      "value": "rule"
+                    }
+                  ]
+                },
+                "type": "RequestHeaderModifier"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "provider": {
+            "methods": {
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              },
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-add-bin",
+                    "value": "YQ, Yg=="
+                  },
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-hop",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-mode",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-replace-bin",
+                    "value": "AP8=, /wD/"
+                  },
+                  {
+                    "operation": "REMOVE",
+                    "name": "x-probe-rule-remove"
+                  }
+                ],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "empty-failure-pool",
+                    "weight": 1,
+                    "operations": [],
+                    "fixedResponse": null
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "db53f73af865060095080af361fb0c7c7fa7b4e12b72193fd82656eb7a5dd43e",
+            "HAProxyReloads": 5
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 109,
+              "green": 0,
+              "empty-failure-pool": 35
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 253,
+            "green": 0
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg=="
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule"
+                  ],
+                  "x-probe-replace-bin": [
+                    "AP8=",
+                    "/wD/"
+                  ],
+                  "x-probe-mode": [
+                    "rule"
+                  ]
+                },
+                "count": 109
+              },
+              "empty-failure-pool": {
+                "grpcStatus": "UNAVAILABLE",
+                "count": 35
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        },
+        "grant-restored": {
+          "referenceGrant": {
+            "uid": "10e323c0-741e-45fa-a203-0d7b7569333d",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "green"
+                }
+              ]
+            }
+          },
+          "route": {
+            "uid": "3efaf564-cca7-474b-893c-f5cdd584b298",
+            "generation": 1,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "filters": [
+                  {
+                    "requestHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-probe-add-bin",
+                          "value": "/w, AA=="
+                        },
+                        {
+                          "name": "x-probe-hop",
+                          "value": "target"
+                        }
+                      ],
+                      "remove": [
+                        "x-probe-target-remove"
+                      ],
+                      "set": [
+                        {
+                          "name": "x-probe-replace-bin",
+                          "value": "/g==, AQI"
+                        },
+                        {
+                          "name": "x-probe-mode",
+                          "value": "target"
+                        }
+                      ]
+                    },
+                    "type": "RequestHeaderModifier"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [
+              {
+                "requestHeaderModifier": {
+                  "add": [
+                    {
+                      "name": "x-probe-add-bin",
+                      "value": "YQ, Yg=="
+                    },
+                    {
+                      "name": "x-probe-hop",
+                      "value": "rule"
+                    }
+                  ],
+                  "remove": [
+                    "x-probe-rule-remove"
+                  ],
+                  "set": [
+                    {
+                      "name": "x-probe-replace-bin",
+                      "value": "AP8=, /wD/"
+                    },
+                    {
+                      "name": "x-probe-mode",
+                      "value": "rule"
+                    }
+                  ]
+                },
+                "type": "RequestHeaderModifier"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "provider": {
+            "methods": {
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              },
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-add-bin",
+                    "value": "YQ, Yg=="
+                  },
+                  {
+                    "operation": "ADD",
+                    "name": "x-probe-hop",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-mode",
+                    "value": "rule"
+                  },
+                  {
+                    "operation": "SET",
+                    "name": "x-probe-replace-bin",
+                    "value": "AP8=, /wD/"
+                  },
+                  {
+                    "operation": "REMOVE",
+                    "name": "x-probe-rule-remove"
+                  }
+                ],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "operations": [
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-add-bin",
+                        "value": "/w, AA=="
+                      },
+                      {
+                        "operation": "ADD",
+                        "name": "x-probe-hop",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-mode",
+                        "value": "target"
+                      },
+                      {
+                        "operation": "SET",
+                        "name": "x-probe-replace-bin",
+                        "value": "/g==, AQI"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-probe-target-remove"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "dadacc74e50900bba860c8b3750f992ab6b2b21ee3c5037d251ce98a09eacadc",
+            "HAProxyReloads": 7
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 112,
+              "green": 32,
+              "empty-failure-pool": 0
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 256,
+            "green": 32
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg=="
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule"
+                  ],
+                  "x-probe-replace-bin": [
+                    "AP8=",
+                    "/wD/"
+                  ],
+                  "x-probe-mode": [
+                    "rule"
+                  ]
+                },
+                "count": 112
+              },
+              "green": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-add-bin": [
+                    "gAA=",
+                    "YQ==",
+                    "Yg==",
+                    "/w==",
+                    "AA=="
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-hop": [
+                    "client",
+                    "rule",
+                    "target"
+                  ],
+                  "x-probe-replace-bin": [
+                    "/g==",
+                    "AQI="
+                  ],
+                  "x-probe-mode": [
+                    "target"
+                  ]
+                },
+                "count": 32
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        },
+        "filters-removed": {
+          "referenceGrant": {
+            "uid": "10e323c0-741e-45fa-a203-0d7b7569333d",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "green"
+                }
+              ]
+            }
+          },
+          "route": {
+            "uid": "3efaf564-cca7-474b-893c-f5cdd584b298",
+            "generation": 2,
+            "markedBackends": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "blue",
+                "port": 8080,
+                "weight": 3
+              },
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "green",
+                "namespace": "grpc-peer",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "markedFilters": [],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "provider": {
+            "methods": {
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "ruleOperations": [],
+                "origin": "blue"
+              },
+              "Marked": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "operations": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "operations": [],
+                    "fixedResponse": null
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "0b1db94cb79b3043493a7371d35281112518bbf2e1055fdbdd49df2278935477",
+            "HAProxyReloads": 9
+          },
+          "inputMetadata": {
+            "x-probe-replace-bin": [
+              "Y2xpZW50"
+            ],
+            "x-probe-add-bin": [
+              "gAA="
+            ],
+            "x-probe-rule-remove": [
+              "drop-at-rule"
+            ],
+            "x-probe-target-remove": [
+              "drop-at-target"
+            ],
+            "x-probe-witness": [
+              "carry-through"
+            ],
+            "x-probe-mode": [
+              "client"
+            ],
+            "x-probe-hop": [
+              "client"
+            ]
+          },
+          "distribution": {
+            "Marked": {
+              "blue": 103,
+              "green": 41,
+              "empty-failure-pool": 0
+            },
+            "Plain": {
+              "blue": 144,
+              "green": 0,
+              "empty-failure-pool": 0
+            }
+          },
+          "originRPCs": {
+            "blue": 247,
+            "green": 41
+          },
+          "grpc": {
+            "Marked": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 103
+              },
+              "green": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 41
+              }
+            },
+            "Plain": {
+              "blue": {
+                "grpcStatus": "OK",
+                "metadata": {
+                  "x-probe-replace-bin": [
+                    "Y2xpZW50"
+                  ],
+                  "x-probe-add-bin": [
+                    "gAA="
+                  ],
+                  "x-probe-rule-remove": [
+                    "drop-at-rule"
+                  ],
+                  "x-probe-target-remove": [
+                    "drop-at-target"
+                  ],
+                  "x-probe-witness": [
+                    "carry-through"
+                  ],
+                  "x-probe-mode": [
+                    "client"
+                  ],
+                  "x-probe-hop": [
+                    "client"
+                  ]
+                },
+                "count": 144
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
