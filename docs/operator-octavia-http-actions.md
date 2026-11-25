@@ -143,6 +143,8 @@ the authorization request using HTTP/1.1 and checks the peer against the
 policy. Regional support determines the available trust sources, SANs
 and Gateway client identity. [Backend TLS policy setup](operator-octavia-backend-tls-policy.md)
 
+[Local grant and CA withdrawal results](qualification/v1.7.0/provider/gateway-http-route-http-authorizer-tls/README.md)
+
 An authorization response of HTTP 200 allows the request to reach the origin.
 The rule can specify an authorization path prefix and request and response header allowlists.
 
