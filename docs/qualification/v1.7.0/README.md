@@ -46,7 +46,7 @@ An **Unrun** entry means the profile has not run on a deployed Hibiscus cluster.
 
 The Experimental qualification also requires behavioral checks for XBackend, XBackendTrafficPolicy, XMesh and XTelemetryPolicy. The registry inventory identifies named features without upstream cases. [Additional contracts](matrix/unflagged-contracts.md) · [Source study of AWS, Envoy Gateway and Istio](reference-implementations.md)
 
-On Experimental, an HTTPRoute can use a same-namespace XBackend to select ready IPv4 Pods in Endpoint mode. A loopback Amphora served traffic through two selector revisions and stopped serving after route detachment. In the separate policy probes, the backend and telemetry policies had no status and XMesh retained its default pending condition. Their data-plane behavior remains unqualified. [XBackend](provider/xbackend-endpoint-selector.md) · [Policies and XMesh](provider/experimental-policies.md)
+On Experimental, an HTTPRoute can use a same-namespace XBackend to select ready IPv4 Pods in Endpoint mode. A loopback Amphora served traffic through two selector revisions and stopped serving after route detachment. An ExternalHostname trial then followed A to B, served HTTP 503 during NXDOMAIN and recovered when A returned. All four phases kept the same HTTPRoute and XBackend. Separate policy trials recorded a Service retry budget, Gateway trace export and Istio ambient readiness. [DNS rotation and recovery](provider/xbackend-external-hostname-evidence/receipt.json) [XBackend](provider/xbackend-endpoint-selector.md) · [Policies and XMesh](provider/experimental-policies.md)
 
 ## Reproduce the local checks
 
