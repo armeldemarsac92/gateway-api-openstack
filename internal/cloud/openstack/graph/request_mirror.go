@@ -81,8 +81,8 @@ func (p *Provider) compileHTTPMirrors(spec cloud.RouteSpec, mirrors []cloud.HTTP
 	if len(mirrors) == 0 {
 		return nil, nil
 	}
-	if !p.httpRequestMirror || spec.GRPC {
-		return nil, errors.New("mirroring requires --octavia-http-request-mirror on an HTTPRoute")
+	if !p.httpRequestMirror {
+		return nil, errors.New("mirroring requires --octavia-http-request-mirror")
 	}
 	result := make([]desiredHTTPMirror, 0, len(mirrors))
 	for _, mirror := range mirrors {
@@ -93,6 +93,9 @@ func (p *Provider) compileHTTPMirrors(spec cloud.RouteSpec, mirrors []cloud.HTTP
 		backend := spec.HTTPBackends[mirror.BackendIndex]
 		if backend.InvalidReference || backend.Kind != "" || backend.BackendTLS != nil && backend.BackendTLS.Denied {
 			return nil, errors.New("HTTP request mirror must reference an authorized Service backend")
+		}
+		if spec.GRPC && !backend.BackendH2C && backend.BackendTLS == nil {
+			return nil, errors.New("gRPC request mirror requires a Service backend using h2c or authenticated HTTP/2")
 		}
 		result = append(result, desiredHTTPMirror{backendKey: scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend)),
 			numerator: mirror.Numerator, denominator: mirror.Denominator, phase: mirror.Phase})
@@ -233,25 +236,37 @@ func isPrimaryHTTPPool(route desiredRoute, key string, observed observedRouteGra
 	return false
 }
 
+func requestMirrorCapabilities(grpc bool) []string {
+	if grpc {
+		return []string{octavia.GatewayCapabilityHTTPRequestMirror, octavia.GatewayCapabilityGRPCContentType, octavia.GatewayCapabilityGRPCRequestMirror}
+	}
+	return []string{octavia.GatewayCapabilityHTTPRequestMirror}
+}
+
 func (p *Provider) gateRequestMirrors(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) {
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || !slices.ContainsFunc(desired.routes, hasDesiredRequestMirrors) {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || !p.httpRequestMirror {
 		return
 	}
-	if !p.httpRequestMirror {
-		return
-	}
-	err := p.verifyGatewayHTTPURLCapabilities(ctx, *desired, actual, []string{octavia.GatewayCapabilityHTTPRequestMirror})
-	if err == nil {
-		return
-	}
-	availability := requestMirrorUnverified
-	var missing *octavia.MissingGatewayCapability
-	if errors.As(err, &missing) {
-		availability = requestMirrorMissing
-	}
-	for index := range desired.routes {
-		if hasDesiredRequestMirrors(desired.routes[index]) {
-			desired.routes[index].mirrorAvailability = availability
+	for _, grpc := range []bool{false, true} {
+		usesCapability := func(route desiredRoute) bool { return route.spec.GRPC == grpc && hasDesiredRequestMirrors(route) }
+		if !slices.ContainsFunc(desired.routes, usesCapability) {
+			continue
+		}
+		required := requestMirrorCapabilities(grpc)
+		err := p.verifyGatewayHTTPURLCapabilities(ctx, *desired, actual, required)
+		if err == nil {
+			continue
+		}
+		availability, capability := requestMirrorUnverified, required[len(required)-1]
+		var missing *octavia.MissingGatewayCapability
+		if errors.As(err, &missing) {
+			availability, capability = requestMirrorMissing, missing.Capability
+		}
+		for index, route := range desired.routes {
+			if usesCapability(route) {
+				desired.routes[index].mirrorAvailability = availability
+				desired.routes[index].mirrorUnavailableCapability = capability
+			}
 		}
 	}
 }
@@ -262,9 +277,9 @@ func (p *Provider) reportRequestMirrorAvailability(desired desiredGatewayGraph, 
 			continue
 		}
 		outcome := &result.Routes[index].Result
-		message := "Waiting to verify Octavia " + octavia.GatewayCapabilityHTTPRequestMirror
+		message := "Waiting to verify Octavia " + route.mirrorUnavailableCapability
 		if route.mirrorAvailability == requestMirrorMissing {
-			message = "Octavia does not advertise " + octavia.GatewayCapabilityHTTPRequestMirror
+			message = "Octavia does not advertise " + route.mirrorUnavailableCapability
 			if !routeHasIndependentMirrorlessPolicies(route) {
 				outcome.UnsupportedMatch = message
 			}
@@ -448,6 +463,7 @@ func requestMirrorMembersAuthorized(route desiredRoute, key string, observed obs
 	}
 	if tls := backend.spec.BackendTLS; tls != nil {
 		if tls.Denied || !observed.pool.TLSEnabled || !backendTLSReadbackComplete(backend, observed) ||
+			!backendTLSProtocolMatches(backend, observed) ||
 			tls.Hostname != observed.backendTLS.Hostname || !backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, observed) ||
 			!slices.Contains(observed.pool.Tags, backendTLSRevisionTag(tls)) {
 			return false

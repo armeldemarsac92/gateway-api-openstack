@@ -474,8 +474,7 @@ The Octavia region must advertise `fixed_http_responses_v1`,
 The controller uses a weighted target even for a single filtered backend. Rule
 operations run first, then the operations for the selected backend. Each
 backend keeps its configured weight and its own set, add and remove operations.
-Removing a filter withdraws its operations from Octavia. Backend-level
-`ResponseHeaderModifier` and `RequestMirror` are separate features.
+Removing a filter withdraws its operations from Octavia.
 
 Custom metadata uses printable ASCII, or standard base64 for names ending in
 `-bin`. The gRPC transport manages the `grpc-` namespace, `content-type`,
@@ -493,6 +492,30 @@ transition, the controller closes the affected listener before changing the
 serving policy. It reopens the listener after verifying that the updated policy
 is active in its original order. Removing the list can proceed during a
 regional capability withdrawal.
+
+### gRPC request mirroring
+
+Enable the gRPC profile with `--octavia-backend-h2c` and
+`--octavia-fixed-http-responses`. The `config/octavia-http-request-mirror`
+overlay (`--octavia-http-request-mirror`) enables `RequestMirror` on a
+GRPCRoute rule or backendRef. The effective
+regional Octavia provider must advertise `grpc_request_mirror_v1`,
+`grpc_content_type_v1` and `http_request_mirror_v1`. The controller uses the
+configured gRPC Content-Type matching mode for primary traffic.
+
+Each filter can mirror every RPC or sample with `percent` or `fraction`.
+The mirror uses a Service port declaring `appProtocol: kubernetes.io/h2c` or
+protected by a BackendTLSPolicy with mandatory HTTP/2 ALPN. An h2c destination
+uses `backend_h2c_v1`. A TLS destination needs `--octavia-backend-tls-policy`
+and a provider advertising `backend_tls_hostname_v1` and
+`backend_tls_h2_alpn_v1`. [Backend trust configuration](operator-octavia-backend-tls-policy.md)
+
+A Service in another namespace requires a ReferenceGrant from `GRPCRoute`.
+A filter on a backendRef also needs `--octavia-weighted-http-targets` and
+`weighted_http_targets_v1`. It runs only when that backendRef occurrence is
+selected. The client receives the primary RPC response. If a mirror reference
+becomes invalid, the controller withdraws that copy, reports the failure in
+`ResolvedRefs`, and keeps primary forwarding.
 
 ### Response header modification
 

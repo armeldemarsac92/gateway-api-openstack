@@ -806,6 +806,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact || blocked.capability == octavia.GatewayCapabilityHTTPRequestRedirect ||
 		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityRequestCORS ||
 		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityHTTPRequestMirror ||
+		blocked.capability == octavia.GatewayCapabilityGRPCRequestMirror ||
 		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType ||
 		blocked.capability == octavia.GatewayCapabilityGRPCBinaryMetadata || blocked.capability == octavia.GatewayCapabilityGRPCBinaryRequestMetadata
@@ -878,6 +879,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		}
 	}
 	var required []string
+	var mirrorCapabilities []string
 	fixed := desired.fixedHTTPResponses
 	switch step.kind {
 	case graphCreateLoadBalancer:
@@ -895,7 +897,8 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		part := graphRoutePart(desired, step)
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
 		if requestMirrorWriteRequiresCapability(step.route) {
-			required = append(required, octavia.GatewayCapabilityHTTPRequestMirror)
+			mirrorCapabilities = requestMirrorCapabilities(part.spec.GRPC)
+			required = append(required, mirrorCapabilities...)
 		}
 		if redirectPolicyWriteRequiresCapability(part, step.route) {
 			required = append(required, octavia.GatewayCapabilityHTTPRequestRedirect)
@@ -960,14 +963,18 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	verify := p.verifyGatewayHTTPCapabilities
 	if slices.Contains(required, octavia.GatewayCapabilityHTTPRequestRedirect) || slices.Contains(required, octavia.GatewayCapabilityRequestURLRewrite) ||
 		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityRequestCORS) ||
-		slices.Contains(required, octavia.GatewayCapabilityHTTPRequestMirror) {
+		len(mirrorCapabilities) != 0 {
 		verify = p.verifyGatewayHTTPURLCapabilities
 	}
 	err := verify(ctx, desired, actual, required)
-	if err != nil && requestMirrorWriteRequiresCapability(step.route) {
+	if err != nil && len(mirrorCapabilities) != 0 {
 		var missingMirror *octavia.MissingGatewayCapability
-		if !errors.As(err, &missingMirror) || missingMirror.Capability == octavia.GatewayCapabilityHTTPRequestMirror {
-			return step, &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPRequestMirror}
+		capability := mirrorCapabilities[len(mirrorCapabilities)-1]
+		if errors.As(err, &missingMirror) {
+			capability = missingMirror.Capability
+		}
+		if slices.Contains(mirrorCapabilities, capability) {
+			return step, &unavailableRouteCapability{error: err, capability: capability}
 		}
 	}
 	var missingResponseHeaders *octavia.MissingGatewayCapability

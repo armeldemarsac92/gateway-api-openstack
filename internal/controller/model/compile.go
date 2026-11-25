@@ -205,8 +205,7 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
 		kind := HTTPProfileRouteKind(route)
 		ordinaryHTTP := kind == HTTPRouteKind
-		mirrorEnabled := input.HTTPRequestMirror && ordinaryHTTP
-		mirrors, diagnostic := NormalizeRequestMirrors(rule.Filters, mirrorEnabled, len(rule.BackendRefs) > 0)
+		mirrors, diagnostic := NormalizeRequestMirrors(rule.Filters, input.HTTPRequestMirror, len(rule.BackendRefs) > 0)
 		if diagnostic != nil {
 			compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 		}
@@ -242,7 +241,7 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			}
 		}
 		for i, backend := range rule.BackendRefs {
-			mirrors, diagnostic := NormalizeRequestMirrors(backend.Filters, mirrorEnabled, true)
+			mirrors, diagnostic := NormalizeRequestMirrors(backend.Filters, input.HTTPRequestMirror, true)
 			if diagnostic != nil {
 				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 			}
