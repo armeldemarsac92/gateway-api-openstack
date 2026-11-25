@@ -1,0 +1,63 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-25T17:17:37+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 04bb56309d8a199a43e132d76e3ac4c26580692f
+kind: ConformanceReport
+mode: local-octavia-amphora-signed
+profiles:
+- core:
+    failedTests:
+    - HTTPRouteHeaderMatching
+    - HTTPRouteMatching
+    - HTTPRouteServiceTypes
+    result: failure
+    skippedTests:
+    - GatewayClassObservedGenerationBump
+    - GatewayInvalidRouteKind
+    - GatewayInvalidTLSConfiguration
+    - GatewayListenerUnsupportedProtocol
+    - GatewayModifyListeners
+    - GatewayNameMaximumLength
+    - GatewayObservedGenerationBump
+    - GatewayPreserveForeignConditions
+    - GatewaySecretInvalidReferenceGrant
+    - GatewaySecretReferenceGrantAllInNamespace
+    - GatewaySecretReferenceGrantSpecific
+    - GatewayWithAttachedRoutes
+    - HTTPRouteCrossNamespace
+    - HTTPRouteExactPathMatching
+    - HTTPRouteHTTPSListener
+    - HTTPRouteHostnameIntersection
+    - HTTPRouteInvalidBackendRefUnknownKind
+    - HTTPRouteInvalidCrossNamespaceBackendRef
+    - HTTPRouteInvalidCrossNamespaceParentRef
+    - HTTPRouteInvalidNonExistentBackendRef
+    - HTTPRouteInvalidParentRefNotMatchingSectionName
+    - HTTPRouteInvalidReferenceGrant
+    - HTTPRouteListenerHostnameMatching
+    - HTTPRouteMatchingAcrossRoutes
+    - HTTPRouteMultipleGateways
+    - HTTPRouteNoBackendRefs
+    - HTTPRouteObservedGenerationBump
+    - HTTPRoutePartiallyInvalidViaInvalidReferenceGrant
+    - HTTPRoutePathMatchOrder
+    - HTTPRoutePreserveForeignStatus
+    - HTTPRouteRedirectHostAndStatus
+    - HTTPRouteReferenceGrant
+    - HTTPRouteRequestHeaderModifier
+    - HTTPRouteRuleOrder
+    - HTTPRouteSimpleSameNamespace
+    - HTTPRouteWeight
+    statistics:
+      Failed: 3
+      Passed: 1
+      Skipped: 36
+  name: GATEWAY-HTTP
+  summary: Core tests failed with 3 test failures.
