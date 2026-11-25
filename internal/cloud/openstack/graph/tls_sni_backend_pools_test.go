@@ -534,6 +534,62 @@ func TestSNIIndependentBackendPoolsWithdrawOnlyUnavailableShare(t *testing.T) {
 	require.Equal(t, weighted.backendPools[1].pool.ID, steps[0].sni.parentID)
 }
 
+func TestSNIWeightedSystemTrustAdmitsAfterAttestationAndRetainsDuringDiscovery(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	route.BackendPools[1].BackendTLS = &cloud.BackendTLSValidation{
+		Trust: cloud.BackendTLSTrustSystem, Hostname: "backend.example.test",
+	}
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, targets)
+	desired.protocol = cloud.ListenerProtocolTLSTerminate
+	desired.sniBackendPoolsCapable = true
+	selector := activeIndependentSNIFragment(targets[0])
+	actual.sni[targets[0].key] = selector
+	leaf := selector.backendPools[1]
+	leaf.pool.Tags = append(leaf.pool.Tags, backendTLSSystemCATag)
+	leaf.pool.CATLSContainerRef = ""
+	leaf.backendTLS.SystemCA, leaf.backendTLS.SystemCAObserved, leaf.backendTLS.SystemCADigestObserved = true, true, true
+	members := leaf.members
+	require.Len(t, members, 1)
+	leaf.members = nil
+	provider := &Provider{backendTLSPolicy: true}
+	plan := func(supported, pending bool) (graphMutation, bool) {
+		t.Helper()
+		desired.sni = slices.Clone(targets)
+		require.NoError(t, provider.prepareSNIBackendPools(t.Context(), &desired, actual, true,
+			func(*cloud.BackendTLSValidation) (bool, bool) { return supported, pending }))
+		want := desired.sni[0]
+		if step, ok := withdrawSNIBackendPools(desired, actual, []sniFragmentKey{want.key}, map[sniFragmentKey]desiredSNIFragment{want.key: want}); ok {
+			return step, true
+		}
+		return nextSNIBackendPoolsMutation(want, selector)
+	}
+
+	_, changed := plan(true, false)
+	require.False(t, changed, "the empty backend must wait for its digest")
+	leaf.backendTLS.SystemCASHA256 = fmt.Sprintf("%064x", 1)
+	step, changed := plan(true, false)
+	require.True(t, changed)
+	require.Equal(t, sniCreateMember, step.sni.kind)
+	require.Equal(t, leaf.pool.ID, step.sni.parentID)
+
+	leaf.members = members
+	_, changed = plan(false, true)
+	require.False(t, changed, "the serving backend still has its proof and its authorized endpoint")
+	leaf.members = nil
+	step, changed = plan(false, true)
+	require.True(t, changed)
+	require.Equal(t, sniDisableBackendTLSPool, step.sni.kind, "a discovery outage cannot admit a new endpoint")
+	leaf.members = members
+	step, changed = plan(false, false)
+	require.True(t, changed)
+	require.Equal(t, sniDisableBackendTLSPool, step.sni.kind, "confirmed capability loss withdraws this share")
+	require.Equal(t, leaf.pool.ID, step.sni.parentID)
+	require.True(t, selector.backendPools[0].pool.AdminStateUp)
+}
+
 func TestSNIIndependentBackendPoolsRejectMalformedOrForeignTargetReadback(t *testing.T) {
 	id := safetyTestIdentity(t)
 	route := independentSNIPoolsTestRoute(id)

@@ -305,6 +305,11 @@ func weightedBackendReady(route desiredRoute, key string, observed observedRoute
 		return false
 	}
 	backend := route.httpParts[index]
+	if backend.backendTLS.stagesSystemCA() {
+		// The active predicate renders the pool so Octavia can attest its
+		// trust. It has no destinations until that observation succeeds.
+		return observed.pool != nil && observed.pool.AdminStateUp && len(observed.members) == 0
+	}
 	if !backend.backendTLS.allowsMembers() || backend.backendTransportNeedsWithdrawal(observed) {
 		return false
 	}

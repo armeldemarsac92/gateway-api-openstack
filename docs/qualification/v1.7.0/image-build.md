@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller distributed TLS passthrough connections across two Services at weights 257:128. [Build record](image.json) · [Per-Service measurements](provider/tlsroute-large-weights.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-cf8c28e66c9a756cab3d9fe30d81f15a99892c15)
+The linux/amd64 controller authenticated Service endpoints with the regional Amphora CA store. [Build record](image.json) · [Trust and identity checks](provider/backend-tls-system-ca.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-920b54673d075dc34f71b09d40d4d8a55ae65668)
+
+The linux/amd64 controller distributed TLS passthrough connections across two Services at weights 257:128. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-cf8c28e66c9a756cab3d9fe30d81f15a99892c15/image.json) · [Per-Service measurements](provider/tlsroute-large-weights.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-cf8c28e66c9a756cab3d9fe30d81f15a99892c15)
 
 The linux/amd64 controller served HTTP/2 to XBackend origins over cleartext, server TLS and mutual TLS. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-3b8862d8057433b9abc60eef71468c1bc556137c/image.json) · [Pod requests and DNS rotation](provider/xbackend-http2.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-3b8862d8057433b9abc60eef71468c1bc556137c)
 

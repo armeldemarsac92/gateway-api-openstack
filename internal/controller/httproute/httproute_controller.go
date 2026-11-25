@@ -83,6 +83,10 @@ type Reconciler struct {
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
 	// XBackendCookieAvailable checks regional Amphora support for the requested HTTP cookie.
 	XBackendCookieAvailable func(context.Context, cloud.HTTPSessionCookieRequirements) (bool, error)
+	// BackendTLSSystemCAAvailable checks system trust for the selected HTTP backend profile.
+	BackendTLSSystemCAAvailable func(context.Context, bool, bool, bool) (bool, error)
+	// TCPBackendTLSSystemCAAvailable checks system trust for terminating TLSRoutes.
+	TCPBackendTLSSystemCAAvailable func(context.Context, bool) (bool, error)
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// TelemetryBackendTLSAvailable reports authentication capabilities for collectors.

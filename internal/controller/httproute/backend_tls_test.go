@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -45,6 +46,59 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func TestBackendTLSPolicySystemCAReportsRegionalAvailability(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.BackendTLSPolicy = true
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "system", UID: "system-policy", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(f.service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "backend.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem),
+			},
+		},
+	}
+	f.create(t, policy)
+	supported, discoveryErr := false, error(nil)
+	f.reconciler.BackendTLSSystemCAAvailable = func(_ context.Context, h2, san, xBackend bool) (bool, error) {
+		require.False(t, h2 || san || xBackend)
+		return supported, discoveryErr
+	}
+	status := &backendTLSPolicyStatusReconciler{routes: f.reconciler}
+	key := client.ObjectKeyFromObject(policy)
+	assertStatus := func(state metav1.ConditionStatus, reason string) {
+		t.Helper()
+		_, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, policy))
+		require.Len(t, policy.Status.Ancestors, 1)
+		conditions := policy.Status.Ancestors[0].Conditions
+		require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))
+		accepted := meta.FindStatusCondition(conditions, string(gatewayv1.PolicyConditionAccepted))
+		require.NotNil(t, accepted)
+		require.Equal(t, state, accepted.Status)
+		require.Equal(t, reason, accepted.Reason)
+	}
+	assertStatus(metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid))
+	discoveryErr = errors.New("temporary capability probe failure")
+	assertStatus(metav1.ConditionUnknown, "Pending")
+	discoveryErr, supported = nil, true
+	assertStatus(metav1.ConditionTrue, string(gatewayv1.PolicyReasonAccepted))
+
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)})
+	require.NoError(t, err)
+	require.Len(t, provider.routeSpecs, 1)
+	tls := provider.routeSpecs[0].BackendTLS
+	require.NotNil(t, tls)
+	require.Equal(t, cloud.BackendTLSTrustSystem, tls.Trust)
+	require.Empty(t, tls.CAConfigMapUID)
+	require.Empty(t, tls.CAPEM)
+}
 
 func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 	f := newRouteModelInputFixture(t)

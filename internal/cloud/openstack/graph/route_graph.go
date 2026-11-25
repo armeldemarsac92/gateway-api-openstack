@@ -1117,7 +1117,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 		}
 		return []routeMutation{*step}, state, nil
 	}
-	if !desired.backendTLS.allowsMembers() && !desired.backendTLS.denies() {
+	if !desired.backendTLS.allowsMembers() && !desired.backendTLS.denies() && !desired.backendTLS.stagesSystemCA() {
 		return nil, routeStateFromObservation(actual), nil
 	}
 	nonPolicyPlan := make([]routeMutation, 0)
@@ -1182,7 +1182,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 		if budgetStep != nil {
 			return []routeMutation{*budgetStep}, state, nil
 		}
-		if desired.backendTLS.denies() {
+		if desired.backendTLS.denies() || desired.backendTLS.stagesSystemCA() {
 			break
 		}
 		clearPersistence := desired.sessionCookieName == "" && pool.Persistence != (pools.SessionPersistence{}) &&
@@ -1794,7 +1794,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		var hostname string
 		var subjectAltNames []cloud.BackendTLSSubjectAltName
 		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
-		if step.poolTags != nil && (desired.xBackend || desired.spec.GRPC || step.backendTLS != nil &&
+		systemCA := step.backendTLS != nil && step.backendTLS.SystemCA != nil && *step.backendTLS.SystemCA
+		if step.poolTags != nil && (desired.xBackend || desired.spec.GRPC || systemCA || step.backendTLS != nil &&
 			(step.backendTLS.ClientCertificateReference != "" || len(step.backendTLS.SubjectAltNames) != 0)) {
 			// Authenticated XBackends and extended Service TLS start closed.
 			// Enabling traffic requires independent, ownership-checked readback.
@@ -1814,7 +1815,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			CookiePath:         cookiePath,
 			BackendRetryBudget: budget,
 			BackendH2C:         desired.spec.BackendH2C && desired.backendTLS.allowsMembers(),
-			BackendTLSHostname: hostname, BackendTLSSubjectAltNames: subjectAltNames, BackendTLSRequireH2: requireH2})
+			BackendTLSHostname: hostname, BackendTLSSubjectAltNames: subjectAltNames, BackendTLSRequireH2: requireH2, BackendTLSSystemCA: systemCA})
 	case routeMutationUpdatePool:
 		opts := pools.UpdateOpts{LBMethod: pools.LBMethodRoundRobin}
 		if step.backendH2C == nil {

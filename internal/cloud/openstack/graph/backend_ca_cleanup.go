@@ -128,7 +128,7 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		}
 	}
 	selectRevision := func(tls *cloud.BackendTLSValidation) {
-		if tls == nil || tls.Denied {
+		if tls == nil || tls.Denied || tls.Trust != cloud.BackendTLSTrustReference {
 			return
 		}
 		revision := backendca.SelectConfigMapRevision(revisions, tls.CAConfigMapUID, tls.CADigest, func(ref string) bool { return attached[ref] })

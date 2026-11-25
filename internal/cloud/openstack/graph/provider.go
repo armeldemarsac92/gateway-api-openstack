@@ -240,6 +240,26 @@ func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSA
 	return p.amphoraCapabilityAvailable(ctx, backendTLSCapabilities(requireH2, requireSAN)...)
 }
 
+// BackendTLSSystemCAAvailable checks the selected authenticated HTTP profile with system trust.
+func (p *Provider) BackendTLSSystemCAAvailable(ctx context.Context, requireH2, requireSAN, xBackend bool) (bool, error) {
+	if !p.backendTLSPolicy || xBackend && !p.poolALPN {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, append(backendTLSCapabilities(requireH2, requireSAN), octavia.GatewayCapabilityBackendTLSSystemCA)...)
+}
+
+// TCPBackendTLSSystemCAAvailable checks the selected terminating TLSRoute profile with system trust.
+func (p *Provider) TCPBackendTLSSystemCAAvailable(ctx context.Context, weighted bool) (bool, error) {
+	if !p.backendTLSPolicy || !p.tcpTLSTermination {
+		return false, nil
+	}
+	required := append(tcpBackendTLSCapabilities(), octavia.GatewayCapabilityBackendTLSSystemCA)
+	if weighted {
+		required = append(required, octavia.GatewayCapabilityTLSSNIWeightedPools)
+	}
+	return p.amphoraCapabilityAvailable(ctx, required...)
+}
+
 // TCPBackendTLSAvailable checks authenticated backend TLS on terminating TCP listeners.
 func (p *Provider) TCPBackendTLSAvailable(ctx context.Context) (bool, error) {
 	if !p.backendTLSPolicy || !p.tcpTLSTermination || p.backendCA == nil {

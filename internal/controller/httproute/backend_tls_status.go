@@ -129,6 +129,8 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	ancestors := make(map[types.NamespacedName]backendTLSPolicyConditions, len(gateways))
 	availability := make(map[backendTLSRequirements]backendTLSAvailability, 2)
 	requireSAN := len(policy.Spec.Validation.SubjectAltNames) != 0
+	systemCA := policy.Spec.Validation.WellKnownCACertificates != nil &&
+		*policy.Spec.Validation.WellKnownCACertificates == gatewayv1.WellKnownCACertificatesSystem
 	for key, gateway := range gateways {
 		consumer, err := r.observeGatewayConsumer(ctx, policy, gateway, targets, peers[key])
 		if err != nil {
@@ -137,13 +139,13 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		if consumer.selection == nil {
 			continue
 		}
-		requirements := backendTLSRequirements{requireH2: consumer.requiresHTTP2, requireSAN: requireSAN}
+		requirements := backendTLSRequirements{requireH2: consumer.requiresHTTP2, requireSAN: requireSAN, systemCA: systemCA}
 		if _, checked := availability[requirements]; !checked &&
 			consumer.selection.Accepted.Status == metav1.ConditionTrue && consumer.supportedProtocol {
 			availability[requirements] = r.routes.backendTLSAvailability(ctx, requirements)
 		}
 		ancestors[key] = backendTLSPolicyConditions{
-			accepted:     availability[requirements].apply(consumer.selection.Accepted, consumer.supportedProtocol, requireSAN),
+			accepted:     availability[requirements].apply(consumer.selection.Accepted, consumer.supportedProtocol, requireSAN, systemCA),
 			resolvedRefs: consumer.selection.ResolvedRefs,
 		}
 	}
@@ -157,13 +159,13 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		for key, consumer := range consumers {
 			capability, checked := capabilities[consumer.Weighted]
 			if !checked && !requireSAN && consumer.Accepted.Status == metav1.ConditionTrue {
-				capability = r.tcpBackendTLSAvailability(ctx, consumer.Weighted)
+				capability = r.tcpBackendTLSAvailability(ctx, consumer.Weighted, systemCA)
 				capabilities[consumer.Weighted] = capability
 			}
 			conditions := backendTLSPolicyConditions{
-				accepted: capability.apply(consumer.Accepted, !requireSAN, requireSAN), resolvedRefs: consumer.ResolvedRefs,
+				accepted: capability.apply(consumer.Accepted, !requireSAN, requireSAN, systemCA), resolvedRefs: consumer.ResolvedRefs,
 			}
-			if consumer.Weighted && consumer.Accepted.Status == metav1.ConditionTrue {
+			if !systemCA && consumer.Weighted && consumer.Accepted.Status == metav1.ConditionTrue {
 				switch conditions.accepted.Reason {
 				case "UnsupportedProvider":
 					conditions.accepted.Message = "The regional provider does not support weighted authenticated TLSRoute upstreams"
@@ -183,7 +185,9 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			return nil, err
 		}
 		capability := backendTLSUnknown
-		if len(consumers) != 0 && r.routes.TelemetryBackendTLSAvailable != nil {
+		if systemCA {
+			capability = backendTLSUnsupported
+		} else if len(consumers) != 0 && r.routes.TelemetryBackendTLSAvailable != nil {
 			supported, err := r.routes.TelemetryBackendTLSAvailable(ctx, requireSAN)
 			if err == nil {
 				capability = backendTLSUnsupported
@@ -194,7 +198,7 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		}
 		for key, consumer := range consumers {
 			mergeBackendTLSConsumer(ancestors, key, backendTLSPolicyConditions{
-				accepted:     capability.apply(consumer.Accepted, true, requireSAN),
+				accepted:     capability.apply(consumer.Accepted, true, requireSAN, systemCA),
 				resolvedRefs: consumer.ResolvedRefs,
 			})
 		}
@@ -202,10 +206,18 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	return ancestors, nil
 }
 
-func (r *backendTLSPolicyStatusReconciler) tcpBackendTLSAvailability(ctx context.Context, weighted bool) backendTLSAvailability {
+func (r *backendTLSPolicyStatusReconciler) tcpBackendTLSAvailability(ctx context.Context, weighted, systemCA bool) backendTLSAvailability {
 	discover := r.routes.TCPBackendTLSAvailable
 	if weighted {
 		discover = r.routes.TCPWeightedBackendTLSAvailable
+	}
+	if systemCA {
+		if r.routes.TCPBackendTLSSystemCAAvailable == nil {
+			return backendTLSUnknown
+		}
+		discover = func(ctx context.Context) (bool, error) {
+			return r.routes.TCPBackendTLSSystemCAAvailable(ctx, weighted)
+		}
 	}
 	if discover == nil {
 		return backendTLSUnknown
