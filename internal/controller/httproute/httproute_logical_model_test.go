@@ -327,6 +327,7 @@ func TestHTTPRouteCompilesGatewayManagedListenerFilters(t *testing.T) {
 	cfg := testConfig()
 	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
 	cfg.GatewayListenerFilters = true
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
 	_, gateway := providerRouteParentObjects(cfg)
 	chosen := &gateway.Spec.Listeners[0]
 	chosen.Hostname = ptr.To(gatewayv1.Hostname("chosen.example.test"))
@@ -346,11 +347,13 @@ func TestHTTPRouteCompilesGatewayManagedListenerFilters(t *testing.T) {
 	gateway.Spec.Listeners = append(gateway.Spec.Listeners, sister)
 
 	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	grpcService, grpcEndpoints, _ := validNodePortBackend(gateway.Namespace, "grpc-backend")
+	grpcService.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
 	scheme := testScheme(t)
 	if err := gatewayx.Install(scheme); err != nil {
 		t.Fatal(err)
 	}
-	reader := indexedFakeClientBuilder(scheme, cfg).WithObjects(service, endpoints, node).Build()
+	reader := indexedFakeClientBuilder(scheme, cfg).WithObjects(service, endpoints, node, grpcService, grpcEndpoints).Build()
 	build := func(config Config, gateway *gatewayv1.Gateway, section gatewayv1.SectionName) error {
 		route := mapperTestHTTPRoute(gateway.Namespace, string(section), gatewayv1.ParentReference{
 			Name: gatewayv1.ObjectName(gateway.Name), SectionName: &section,
@@ -371,6 +374,16 @@ func TestHTTPRouteCompilesGatewayManagedListenerFilters(t *testing.T) {
 	}
 	if err := build(cfg, unsupported, sister.Name); err != nil {
 		t.Fatalf("the unsupported filter affected the sister section: %v", err)
+	}
+	grpc := &gatewayv1.GRPCRoute{}
+	grpc.Name, grpc.Namespace, grpc.UID = "rpc", gateway.Namespace, "rpc-uid"
+	grpc.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule(gatewayv1.ObjectName(grpcService.Name))}
+	for _, section := range []gatewayv1.SectionName{chosen.Name, sister.Name} {
+		grpc.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &section}}
+		_, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(grpc), gateway)
+		if (err == nil) != (section == sister.Name) {
+			t.Fatalf("gRPC attachment for %s: %v", section, err)
+		}
 	}
 	cfg.GatewayListenerFilters = false
 	if err := build(cfg, gateway, chosen.Name); err == nil {
