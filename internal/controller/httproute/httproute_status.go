@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -460,6 +461,11 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 		}
 	}
+	if r.Config.HTTPRequestMirror && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+		if err := r.resolveRequestMirrorReferences(ctx, route, rules, grantsByNamespace, status); err != nil {
+			return err
+		}
+	}
 	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
 	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
 	if grpc {
@@ -513,7 +519,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		}
 	}
 	if grpc && r.Config.BackendTLSPolicy {
-		if err := graph.CollectBackendTLSInputs(ctx, r.routePatchReader(), &input, nil); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, r.routePatchReader(), &input, nil, r.Config.ClusterTrustBundles); err != nil {
 			return err
 		}
 	}
@@ -522,6 +528,63 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			for _, backend := range model.ResolveBackends(route, rule, input) {
 				if backend.Diagnostic != nil {
 					*status = status.withBackendDiagnostic(*backend.Diagnostic)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) resolveRequestMirrorReferences(ctx context.Context, route *gatewayv1.HTTPRoute, rules []gatewayv1.HTTPRouteRule, grants map[string][]gatewayv1.ReferenceGrant, status *routeReconcileStatus) error {
+	services := map[types.NamespacedName]*corev1.Service{}
+	for _, rule := range rules {
+		for _, ref := range model.RequestMirrorReferences(rule) {
+			key, supported := model.BackendServiceReference(route.Namespace, ref)
+			if !supported {
+				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonInvalidKind),
+					Message: "RequestMirror backendRef must reference a core Service"})
+				continue
+			}
+			if key.Namespace != route.Namespace {
+				rows, observed := grants[key.Namespace]
+				if !observed {
+					if r.APIReader == nil {
+						return controller.ErrAPIReaderRequired
+					}
+					var err error
+					rows, err = graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
+					if err != nil {
+						return err
+					}
+					grants[key.Namespace] = rows
+				}
+				if denied := backendReferenceRejection(model.HTTPRouteKind, route.Namespace, key, rows); denied != nil {
+					*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonRefNotPermitted), Message: denied.message})
+					continue
+				}
+			}
+			service, observed := services[key]
+			if !observed {
+				service = &corev1.Service{}
+				if err := r.routePatchReader().Get(ctx, key, service); err != nil {
+					if !apierrors.IsNotFound(err) {
+						return fmt.Errorf("get RequestMirror backend Service: %w", err)
+					}
+					service = nil
+				}
+				services[key] = service
+			}
+			switch {
+			case service == nil || !service.DeletionTimestamp.IsZero():
+				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound),
+					Message: fmt.Sprintf("RequestMirror backend Service %s was not found", key)})
+			case service.Spec.Type == corev1.ServiceTypeLoadBalancer || service.Spec.Type == corev1.ServiceTypeExternalName:
+				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue),
+					Message: "RequestMirror backend Service must use ClusterIP or NodePort type"})
+			default:
+				_, diagnostic := model.ResolveServicePortForBackendTLS(service, ref.Port, r.Config.BackendH2C, r.Config.BackendTLSPolicy)
+				if diagnostic != nil {
+					*status = status.withBackendDiagnostic(*diagnostic)
 				}
 			}
 		}

@@ -75,6 +75,7 @@ type BackendGroup struct {
 	FilterDiagnostic        *Diagnostic
 	RequestHeaderOperations []cloud.HTTPHeaderOperation
 	URLRewrite              *cloud.HTTPURLRewrite
+	RequestMirrors          []RequestMirror
 }
 
 // UsesH2C reports the protocol selected by its backend kind.

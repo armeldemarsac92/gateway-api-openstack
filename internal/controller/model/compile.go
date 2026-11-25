@@ -203,6 +203,14 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	for i, rule := range route.Spec.Rules {
 		// Rule names identify API sections. The index groups matches by rule and breaks precedence ties.
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
+		ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
+		mirrorEnabled := input.HTTPRequestMirror && ordinaryHTTP
+		mirrors, diagnostic := NormalizeRequestMirrors(rule.Filters, mirrorEnabled, len(rule.BackendRefs) > 0)
+		if diagnostic != nil {
+			compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+		}
+		ResolveRequestMirrorBackends(route, mirrors, input)
+		compiled.RequestMirrors = mirrors
 		if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("session persistence is not implemented", ScopeRule))
 		}
@@ -219,8 +227,9 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				compiled.Redirect = &redirect
 			}
 		} else {
-			ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
-			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(rule, input.RequestHeaderModifier,
+			forwarding := rule
+			forwarding.Filters = WithoutRequestMirrorFilters(rule.Filters)
+			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(forwarding, input.RequestHeaderModifier,
 				input.ResponseHeaderModifier && ordinaryHTTP, input.HTTPRequestURLRewrite && ordinaryHTTP, input.HTTPCORS && ordinaryHTTP)
 			if diagnostic != nil {
 				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
@@ -232,6 +241,13 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			}
 		}
 		for i, backend := range rule.BackendRefs {
+			mirrors, diagnostic := NormalizeRequestMirrors(backend.Filters, mirrorEnabled, true)
+			if diagnostic != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+			}
+			ResolveRequestMirrorBackends(route, mirrors, input)
+			compiled.Backends[i].RequestMirrors = mirrors
+			backend.Filters = WithoutRequestMirrorFilters(backend.Filters)
 			request, rewrite, diagnostic := NormalizeHTTPBackendRequestFilters(rule, backend,
 				input.BackendRequestFilters && HTTPProfileRouteKind(route) == HTTPRouteKind,
 				compiled.RequestHeaderOperations, compiled.URLRewrite)

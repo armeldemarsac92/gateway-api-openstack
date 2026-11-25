@@ -78,15 +78,18 @@ func readRequestURLRewrite(raw json.RawMessage) *RequestURLRewrite {
 }
 
 func (o L7PolicyObservation) HasValidRequestURLRewrite() bool {
-	if o.RequestURLRewrite == nil || o.AdminState == nil || o.Target == nil || o.Target.FixedResponse != nil ||
+	if o.RequestURLRewrite == nil || o.AdminState == nil || o.Target == nil ||
 		o.Policy.RedirectURL != "" || o.Policy.RedirectPrefix != "" || o.RedirectRequestPresent {
 		return false
 	}
 	switch o.Policy.Action {
 	case string(l7policies.ActionRedirectToPool):
-		return o.Policy.RedirectPoolID != "" && o.Target.WeightedTargets == nil && !o.ExtendedTargetFields
+		return o.Policy.RedirectPoolID != "" && o.Target.FixedResponse == nil && o.Target.WeightedTargets == nil && !o.ExtendedTargetFields
 	case string(ActionWeightedTargets):
-		return o.Policy.RedirectPoolID == "" && string(o.PoolReference) == "null" && len(o.Target.WeightedTargets) != 0
+		return o.Policy.RedirectPoolID == "" && o.Target.FixedResponse == nil && string(o.PoolReference) == "null" && len(o.Target.WeightedTargets) != 0
+	case string(ActionFixedResponse):
+		return o.RequestMirrorsErr == nil && len(o.RequestMirrors) != 0 && o.Target.IsFixedServerError() &&
+			o.Policy.RedirectPoolID == "" && len(o.Target.WeightedTargets) == 0
 	default:
 		return false
 	}

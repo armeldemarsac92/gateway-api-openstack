@@ -257,14 +257,14 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 		}
 		input.Services = append(input.Services, service)
 	}
-	if err := graph.CollectBackendTLSInputs(ctx, r.routes.APIReader, &input, nil); err != nil {
+	if err := graph.CollectBackendTLSInputs(ctx, r.routes.APIReader, &input, nil, r.routes.Config.ClusterTrustBundles); err != nil {
 		return backendTLSConsumer{}, err
 	}
 	result := backendTLSConsumer{supportedProtocol: true}
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		for _, rule := range route.Spec.Rules {
-			for _, backend := range model.ResolveBackends(route, rule, input) {
+			for _, backend := range model.ResolveBackendsAndMirrors(route, rule, input) {
 				if backend.Weight == 0 {
 					continue
 				}

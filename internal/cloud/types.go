@@ -98,10 +98,13 @@ type ListenerTLS struct {
 	VirtualHosts []string `json:",omitempty"`
 }
 
+// MaxCAPEMBytes bounds the normalized CA payload stored in Barbican.
+const MaxCAPEMBytes = 128 * 1024
+
 // FrontendClientValidation identifies the trust anchor and validation mode on
 // an HTTPS port. The PEM is excluded from graph serialization.
 type FrontendClientValidation struct {
-	ConfigMapUID     string
+	ConfigMapUID     string // UID of the ConfigMap or ClusterTrustBundle
 	Digest           string
 	PEM              []byte `json:"-"`
 	InsecureFallback bool   `json:",omitempty"`
@@ -234,6 +237,7 @@ type HTTPPathMatch struct {
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite               *HTTPURLRewrite       `json:",omitempty"`
 	RequestPolicy            *HTTPRequestPolicy    `json:",omitempty"`
+	RequestMirrors           []HTTPMirrorTarget    `json:",omitempty"`
 	CORS                     *HTTPCORS             `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
@@ -257,7 +261,7 @@ const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBa
 type BackendTLSValidation struct {
 	Hostname        string
 	SubjectAltNames []BackendTLSSubjectAltName `json:",omitempty"`
-	CAConfigMapUID  string
+	CAConfigMapUID  string                     // UID of the ConfigMap or ClusterTrustBundle
 	CADigest        string
 	CAPEM           []byte `json:"-"`
 	Denied          bool
@@ -325,6 +329,7 @@ type HTTPWeightedTarget struct {
 	Weight                  int
 	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite              *HTTPURLRewrite       `json:",omitempty"`
+	RequestMirrors          []HTTPMirrorTarget    `json:",omitempty"`
 }
 
 // HTTPWeightedRule preserves backendRef order and owns the policies for its matches.

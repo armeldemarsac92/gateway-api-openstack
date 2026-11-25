@@ -82,6 +82,11 @@ func enableUpstreamListenerSetHTTPS(t *testing.T, writer *graph.Writer, cfg cont
 // Envtest records the enrollment under a simulated Barbican identifier.
 func enrollEnvtestServingCertificate(t *testing.T, cfg controller.Config, certificateMap string, secret *corev1.Secret) {
 	t.Helper()
+	enrollEnvtestServingCertificateForClass(t, cfg, certificateMap, upstreamStatusGatewayClass, secret)
+}
+
+func enrollEnvtestServingCertificateForClass(t *testing.T, cfg controller.Config, certificateMap, class string, secret *corev1.Secret) {
+	t.Helper()
 	block, _ := pem.Decode(secret.Data[corev1.TLSCertKey])
 	if block == nil || block.Type != "CERTIFICATE" {
 		t.Fatal("upstream fixture has no serving certificate")
@@ -91,7 +96,7 @@ func enrollEnvtestServingCertificate(t *testing.T, cfg controller.Config, certif
 		t.Fatal(err)
 	}
 	snapshot := fmt.Appendf(nil, `{"version":1,"scope":{"cluster":%q,"gatewayClass":%q,"project":%q,"region":%q},"revisions":[{"namespace":%q,"name":%q,"uid":%q,"resourceVersion":%q,"barbicanSecretID":%q,"chainSHA256":[%q],"notBefore":%q,"notAfter":%q}]}`,
-		cfg.ClusterID, upstreamStatusGatewayClass, cfg.OpenStackProjectID, envtestCertificateRegion,
+		cfg.ClusterID, class, cfg.OpenStackProjectID, envtestCertificateRegion,
 		secret.Namespace, secret.Name, secret.UID, secret.ResourceVersion, envtestServingSecretID,
 		fmt.Sprintf("%x", sha256.Sum256(leaf.Raw)), leaf.NotBefore.Format(time.RFC3339), leaf.NotAfter.Format(time.RFC3339))
 	if err := os.WriteFile(certificateMap, snapshot, 0o600); err != nil {

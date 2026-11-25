@@ -82,7 +82,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 		}
 		return nil, err
 	}
-	observer := graph.NewBackendTLSObserver(r.APIReader)
+	observer := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
 	ancestors := make(map[types.NamespacedName]backendtls.PolicyResult, len(candidates))
 	for key := range candidates {
 		parent := &gatewayv1.Gateway{}

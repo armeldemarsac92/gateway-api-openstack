@@ -110,6 +110,8 @@ tls:
                 namespace: trust
 ```
 
+A Gateway can also reference a named cluster-scoped trust bundle for a default or port-specific CA. [Use a ClusterTrustBundle](operator-cluster-trust-bundle.md)
+
 The default mode is `AllowValidOnly`. A port override replaces the default, and every HTTPS section on the same port uses the same client trust. Plain HTTP ports are independent. For a cross-namespace CA, create a ReferenceGrant in the ConfigMap's namespace. In this example, the Gateway lives in `apps`.
 
 ```yaml

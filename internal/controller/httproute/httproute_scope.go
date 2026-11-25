@@ -441,7 +441,9 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 	}
 	transitioned := false
-	requiresPolicyReadback := slices.ContainsFunc(route.Spec.Rules, model.HasHTTPRequestPolicy)
+	requiresPolicyReadback := slices.ContainsFunc(route.Spec.Rules, func(rule gatewayv1.HTTPRouteRule) bool {
+		return model.HasHTTPRequestPolicy(rule) || model.HasRequestMirrors(rule)
+	})
 	for index, update := range p.updates {
 		if requiresPolicyReadback && !update.status.implementedRules && update.status.accepted == metav1.ConditionTrue && update.status.programmed != metav1.ConditionTrue {
 			update.status.accepted = metav1.ConditionUnknown

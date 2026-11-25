@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -30,12 +31,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/stretchr/testify/require"
@@ -887,6 +890,20 @@ func TestTLSRouteBackendTLSPolicyUsesAuthorizedServiceSection(t *testing.T) {
 	require.Equal(t, string(ca.UID), withTLS[0].targets[0].BackendTLS.CAConfigMapUID)
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.101", Port: 9443}}, withTLS[0].targets[0].Members)
 	require.Nil(t, withTLS[1].targets[0].BackendTLS)
+
+	bundles, err := backendtls.NewClusterTrustBundles(&rest.Config{Host: "http://127.0.0.1:1"}, http.DefaultClient)
+	require.NoError(t, err)
+	r.Config.ClusterTrustBundles = bundles
+	configMapRef := policy.Spec.Validation.CACertificateRefs[0]
+	policy.Spec.Validation.CACertificateRefs[0] = gatewayv1.LocalObjectReference{
+		Group: "certificates.k8s.io", Kind: "ClusterTrustBundle", Name: "backend-ca",
+	}
+	require.NoError(t, kube.Update(t.Context(), policy))
+	_, err = r.observeSNIRoutes(t.Context(), snapshot)
+	require.ErrorIs(t, err, backendtls.ErrClusterTrustBundleUnavailable, "uncertain trust cannot produce a denial graph")
+	policy.Spec.Validation.CACertificateRefs[0] = configMapRef
+	require.NoError(t, kube.Update(t.Context(), policy))
+	r.Config.ClusterTrustBundles = nil
 
 	optedOut := cfg
 	optedOut.BackendTLSPolicy = false

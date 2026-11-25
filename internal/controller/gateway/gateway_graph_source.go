@@ -259,7 +259,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 			return input, err
 		}
-		r.addTLSGraphInput(ctx, snapshot, sets, &input)
+		if err := r.addTLSGraphInput(ctx, snapshot, sets, &input); err != nil {
+			return input, err
+		}
 	}
 	return input, nil
 }
