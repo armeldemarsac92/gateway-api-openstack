@@ -46,15 +46,19 @@ func AppliesToServicePort(policy *gatewayv1.BackendTLSPolicy, service *corev1.Se
 	})
 }
 
-// ConfigMapKey identifies the single local CA source supported by this controller.
-func ConfigMapKey(policy *gatewayv1.BackendTLSPolicy) (types.NamespacedName, bool) {
+// CAKey identifies one supported CA reference and its scope.
+func CAKey(policy *gatewayv1.BackendTLSPolicy, bundlesEnabled bool) (types.NamespacedName, bool) {
 	validation := policy.Spec.Validation
 	if len(policy.Spec.TargetRefs) != 1 || len(validation.CACertificateRefs) != 1 || validation.WellKnownCACertificates != nil {
 		return types.NamespacedName{}, false
 	}
 	ref := validation.CACertificateRefs[0]
-	if ref.Group != "" || ref.Kind != "ConfigMap" || ref.Name == "" {
+	switch {
+	case ref.Group == "" && ref.Kind == "ConfigMap" && ref.Name != "":
+		return types.NamespacedName{Namespace: policy.Namespace, Name: string(ref.Name)}, true
+	case bundlesEnabled && IsClusterTrustBundle(ref.Group, ref.Kind) && ValidClusterTrustBundleName(string(ref.Name)):
+		return types.NamespacedName{Name: string(ref.Name)}, true
+	default:
 		return types.NamespacedName{}, false
 	}
-	return types.NamespacedName{Namespace: policy.Namespace, Name: string(ref.Name)}, true
 }

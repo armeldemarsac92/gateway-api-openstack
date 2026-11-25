@@ -48,7 +48,7 @@ func (r *Reconciler) backendTLSPolicies(ctx context.Context, field string, key t
 	return policies.Items
 }
 
-func (r *Reconciler) enqueueRoutesForBackendTLSConfigMap(ctx context.Context, object client.Object) []reconcile.Request {
+func (r *Reconciler) enqueueRoutesForBackendTLSCA(ctx context.Context, object client.Object) []reconcile.Request {
 	policies := r.backendTLSPolicies(ctx, controller.IndexBackendTLSPolicyByCA, client.ObjectKeyFromObject(object))
 	return r.enqueueRoutesForBackendTLSPolicies(ctx, policies)
 }
@@ -175,7 +175,7 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 	setup := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.BackendTLSPolicy{}).
 		Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForSharedService), policySpec).
-		WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForConfigMap)).
+		WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForCA)).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForService), builder.WithPredicates(controller.ServicePredicate())).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant, grpc.enqueueHTTPRoutesForReferenceGrant))), policySpec).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
@@ -194,6 +194,9 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 	if served {
 		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForListenerSet, nil)))
 	}
+	if watch := r.Config.ClusterTrustBundles.Watch(r.enqueuePoliciesForCA); watch != nil {
+		setup.WatchesRawSource(watch)
+	}
 	return setup.Named("backendtlspolicy").
 		Complete(status)
 }
@@ -206,7 +209,7 @@ func (r *Reconciler) enqueuePoliciesForSharedService(ctx context.Context, object
 	return controller.SortedRequests(keys)
 }
 
-func (r *Reconciler) enqueuePoliciesForConfigMap(ctx context.Context, object client.Object) []reconcile.Request {
+func (r *Reconciler) enqueuePoliciesForCA(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
 	r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByCA, client.ObjectKeyFromObject(object))
 	return controller.SortedRequests(keys)

@@ -190,7 +190,10 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	identity := request.Identity
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
 	spec := cloud.GatewayGraphSpec{Identity: identity, Gateway: gateway.Node, Routes: routes.Nodes}
-	gateway, routes, spec.HTTPSPolicyAuthority = w.observeHTTPSCleanupAuthority(ctx, request, identity, gateway, routes)
+	gateway, routes, spec.HTTPSPolicyAuthority, err = w.observeHTTPSCleanupAuthority(ctx, request, identity, gateway, routes)
+	if err != nil {
+		return cloud.GatewayGraphResult{}, err
+	}
 	started = time.Now()
 	err = validateInputs(ctx, gateway, routes)
 	w.observeStage(StageValidation, started, err)
@@ -220,23 +223,29 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 // A route can still be detaching when its section is reauthorized. An
 // ownership-only cleanup cannot prove that the other section's policies
 // belong on the shared bind. Use the complete, fenced graph when available.
-func (w *Writer) observeHTTPSCleanupAuthority(ctx context.Context, request Request, identity cloud.Identity, gateway GatewayInput, routes RouteInputs) (GatewayInput, RouteInputs, *cloud.GatewayGraphSpec) {
+func (w *Writer) observeHTTPSCleanupAuthority(ctx context.Context, request Request, identity cloud.Identity, gateway GatewayInput, routes RouteInputs) (GatewayInput, RouteInputs, *cloud.GatewayGraphSpec, error) {
 	if request.Action != DeleteRoute || request.Route == nil || gateway.Object == nil ||
 		gateway.Node.Disposition != cloud.GraphPreserve || gateway.Node.Spec.ListenerProtocol != cloud.ListenerProtocolHTTP ||
 		gateway.Node.Spec.ScopedListeners == nil {
-		return gateway, routes, nil
+		return gateway, routes, nil, nil
 	}
 	ensure := Request{Action: Ensure, Identity: identity, Gateway: gateway.Object}
 	live, err := w.Gateway.ObserveGatewayGraph(ctx, ensure)
+	if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		return gateway, routes, nil, err
+	}
 	if err != nil || live.Object == nil || live.Node.Disposition != cloud.GraphEnsure ||
 		!slices.ContainsFunc(live.Node.Spec.ScopedListeners, authorizedHTTPSScopes) {
-		return gateway, routes, nil
+		return gateway, routes, nil, nil
 	}
 	current, err := w.Routes.ObserveRouteGraph(ctx, ensure, live.Object)
+	if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		return gateway, routes, nil, err
+	}
 	if err != nil || !slices.ContainsFunc(current.Nodes, func(node cloud.RouteGraphNode) bool {
 		return node.Disposition == cloud.GraphDelete && node.Spec.Identity == request.Identity
 	}) {
-		return gateway, routes, nil
+		return gateway, routes, nil, nil
 	}
 	validate := routes.Validate
 	routes.Validate = func(ctx context.Context) error {
@@ -249,10 +258,13 @@ func (w *Writer) observeHTTPSCleanupAuthority(ctx context.Context, request Reque
 		}
 		return nil
 	}
-	return live, routes, &cloud.GatewayGraphSpec{Identity: identity, Gateway: live.Node, Routes: current.Nodes}
+	return live, routes, &cloud.GatewayGraphSpec{Identity: identity, Gateway: live.Node, Routes: current.Nodes}, nil
 }
 
 func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
+	if errors.Is(graphErr, backendtls.ErrClusterTrustBundleUnavailable) {
+		return w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
+	}
 	var backendErr error
 	if request.Action == Ensure && gateway.Node.BackendCAOwned &&
 		cloud.NormalizeListenerProtocol(gateway.Node.Spec.ListenerProtocol) == cloud.ListenerProtocolHTTP {
@@ -288,7 +300,8 @@ func (w *Writer) withdrawBackendClientCertificate(ctx context.Context, identity 
 	return result, err
 }
 func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
-	if gateway.ObserveTLS == nil || (graphErr == nil && !hasTLSListeners(gateway)) {
+	unconfirmedTrust := errors.Is(graphErr, backendtls.ErrClusterTrustBundleUnavailable)
+	if gateway.ObserveTLS == nil || (!hasTLSListeners(gateway) && (graphErr == nil || unconfirmedTrust)) {
 		return result, graphErr
 	}
 	input, err := gateway.ObserveTLS(ctx)
@@ -296,6 +309,23 @@ func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway
 		return result, errors.Join(graphErr, err)
 	}
 	changed := changedTLSListeners(gateway, input)
+	if unconfirmedTrust {
+		// This fresh observation depends only on the frontend. A later
+		// backend failure cannot authorize any pool or unrelated port change.
+		if input.Node.Spec.ListenerProtocol != cloud.ListenerProtocolHTTP {
+			return result, graphErr
+		}
+		for _, listener := range input.Node.Spec.ScopedListeners {
+			if listener.TLS != nil && listener.TLS.CertificateRef == "" {
+				changed = append(changed, listener.Port)
+			}
+		}
+		slices.Sort(changed)
+		changed = slices.Compact(changed)
+		if len(changed) == 0 {
+			return result, graphErr
+		}
+	}
 	if graphErr == nil && len(changed) == 0 {
 		return result, nil
 	}
@@ -314,27 +344,37 @@ func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway
 			}
 		}
 	}
-	if (graphErr == nil || previous != nil) && len(changed) != 0 && input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolHTTP {
+	if (graphErr == nil || previous != nil || unconfirmedTrust) && len(changed) != 0 && input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolHTTP {
 		// A request with a known authorization change does not imply that
 		// route policy ownership on unrelated HTTPS ports became unreadable.
 		input.Node.TLSWithdrawalPorts = changed
-		if gateway.Node.Disposition == cloud.GraphEnsure {
+		if !unconfirmedTrust && gateway.Node.Disposition == cloud.GraphEnsure {
 			input.Node.TLSWithdrawalPreviousHosts = previousHTTPSHosts(gateway, input, changed, previous)
 		}
 	}
 	tlsOnly := input
 	var authority *cloud.GatewayGraphSpec
-	if len(input.Node.TLSWithdrawalPreviousHosts) != 0 || len(input.Node.TLSWithdrawalPorts) == 0 && graphErr != nil {
-		input, authority = w.observeHTTPSWithdrawalAuthority(ctx, identity, gateway.Object, input)
+	if !unconfirmedTrust && (len(input.Node.TLSWithdrawalPreviousHosts) != 0 || len(input.Node.TLSWithdrawalPorts) == 0 && graphErr != nil) {
+		input, authority, err = w.observeHTTPSWithdrawalAuthority(ctx, identity, gateway.Object, input)
+		if err != nil {
+			if !errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) || len(tlsOnly.Node.TLSWithdrawalPorts) == 0 {
+				return result, errors.Join(graphErr, err)
+			}
+			input = tlsOnly
+			graphErr = errors.Join(graphErr, err)
+		}
 	}
 	if authority == nil {
 		input.Node.TLSWithdrawalPreviousHosts = nil
 	}
 	withdrawal, err := w.withdrawTLS(ctx, identity, input, authority)
-	if err != nil && authority != nil {
+	if err != nil && authority != nil && (!errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) || len(tlsOnly.Node.TLSWithdrawalPorts) != 0) {
 		// A stale route fence cannot authorize preserving the remaining
 		// traffic. Refresh TLS independently before attempting strict closure.
 		strict, readErr := gateway.ObserveTLS(ctx)
+		if errors.Is(readErr, backendtls.ErrClusterTrustBundleUnavailable) {
+			return result, errors.Join(graphErr, err, readErr)
+		}
 		if readErr != nil {
 			strict = tlsOnly
 		}
@@ -348,6 +388,9 @@ func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway
 		var fallbackErr error
 		withdrawal, fallbackErr = w.withdrawTLS(ctx, identity, strict, nil)
 		err = errors.Join(err, readErr, fallbackErr)
+	}
+	if err == nil && withdrawal.Gateway.ScopedTLSClosedPorts != nil {
+		result.Gateway.ScopedTLSClosedPorts = withdrawal.Gateway.ScopedTLSClosedPorts
 	}
 	if authority == nil || err != nil {
 		result.Gateway.ScopedListenerServingPorts = nil
@@ -434,21 +477,30 @@ func (w *Writer) withdrawTLS(ctx context.Context, identity cloud.Identity, input
 // A normal reconcile can lose its snapshot while a separate writer is
 // already converging a section withdrawal. Rebuild the current bindings
 // without the stale route request before treating them as unreadable.
-func (w *Writer) observeHTTPSWithdrawalAuthority(ctx context.Context, identity cloud.Identity, gateway *gatewayv1.Gateway, input GatewayInput) (GatewayInput, *cloud.GatewayGraphSpec) {
+func (w *Writer) observeHTTPSWithdrawalAuthority(ctx context.Context, identity cloud.Identity, gateway *gatewayv1.Gateway, input GatewayInput) (GatewayInput, *cloud.GatewayGraphSpec, error) {
 	if gateway == nil || input.Validate == nil || input.Node.Spec.ListenerProtocol != cloud.ListenerProtocolHTTP ||
 		!slices.ContainsFunc(input.Node.Spec.ScopedListeners, authorizedHTTPSScopes) {
-		return input, nil
+		return input, nil, nil
 	}
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
 	request := Request{Action: Ensure, Identity: identity, Gateway: gateway}
 	live, err := w.Gateway.ObserveGatewayGraph(ctx, request)
+	if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		return input, nil, err
+	}
 	if err != nil || live.Object == nil || live.Node.Disposition != cloud.GraphEnsure ||
 		len(changedTLSListeners(live, input)) != 0 || len(changedTLSListeners(input, live)) != 0 {
-		return input, nil
+		return input, nil, nil
 	}
 	routes, err := w.Routes.ObserveRouteGraph(ctx, request, live.Object)
-	if err != nil || validateInputs(ctx, live, routes) != nil {
-		return input, nil
+	if err == nil {
+		err = validateInputs(ctx, live, routes)
+	}
+	if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		return input, nil, err
+	}
+	if err != nil {
+		return input, nil, nil
 	}
 	validate := input.Validate
 	input.Validate = func(ctx context.Context) error {
@@ -457,7 +509,7 @@ func (w *Writer) observeHTTPSWithdrawalAuthority(ctx context.Context, identity c
 		}
 		return validate(ctx)
 	}
-	return input, &cloud.GatewayGraphSpec{Identity: identity, Gateway: live.Node, Routes: routes.Nodes}
+	return input, &cloud.GatewayGraphSpec{Identity: identity, Gateway: live.Node, Routes: routes.Nodes}, nil
 }
 
 func authorizedHTTPSScopes(listener cloud.ScopedListener) bool {

@@ -1,6 +1,6 @@
 # Authenticate HTTPRoute and GRPCRoute backends with BackendTLSPolicy
 
-An application can require the Gateway to encrypt its connection to a Service and verify the server's certificate identity. HTTPRoute can attach to an HTTP listener or a listener that terminates HTTPS. The gRPC profile uses an HTTP listener. On the upstream connection, Amphora sends the policy hostname as SNI and verifies the certificate against the CA in the Service namespace.
+An application can require the Gateway to encrypt its connection to a Service and verify the server's certificate identity. HTTPRoute can attach to an HTTP listener or a listener that terminates HTTPS. The gRPC profile uses an HTTP listener. On the upstream connection, Amphora sends the policy hostname as SNI and verifies the certificate against the CA selected by the policy.
 
 ## Enable the regional capability
 
@@ -44,6 +44,8 @@ spec:
 ```
 
 HTTPRoute and GRPCRoute continue to refer to the Service port by number. A cross-namespace backend also requires the usual ReferenceGrant in the Service namespace. Omitting `sectionName` applies the policy to the Service as a whole. A matching port-specific policy takes precedence. Competing policies for the same target and section are ordered by creation timestamp and name. [Service grant lifecycle](qualification/v1.7.0/service-grants.md)
+
+A policy can also reference a named cluster-scoped trust bundle with the controller opt-in. [Use a ClusterTrustBundle](operator-cluster-trust-bundle.md)
 
 ### Require explicit certificate identities
 

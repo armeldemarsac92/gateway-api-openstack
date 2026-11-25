@@ -34,7 +34,7 @@ import (
 // CollectBackendTLSInputs observes policies for authorized Service ports. The
 // caller uses an uncached reader both for planning and just before mutation.
 // A namespaced policy list finds concurrent winners that indexed lookups could miss.
-func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input, ancestor *backendtls.GatewayAncestor) error {
+func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input, ancestor *backendtls.GatewayAncestor, bundles *backendtls.ClusterTrustBundles) error {
 	input.BackendTLSPolicies = make(map[model.ServicePortKey]backendtls.Selection)
 	services := make(map[types.NamespacedName]*corev1.Service, len(input.Services))
 	for i := range input.Services {
@@ -43,7 +43,7 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 			services[client.ObjectKeyFromObject(service)] = service
 		}
 	}
-	observer := NewBackendTLSObserver(reader)
+	observer := NewBackendTLSObserver(reader, bundles)
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		kind := model.HTTPProfileRouteKind(route)
@@ -84,11 +84,19 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 type BackendTLSObserver struct {
 	reader   client.Reader
 	policies map[string][]gatewayv1.BackendTLSPolicy
-	cas      map[types.NamespacedName]*corev1.ConfigMap
+	bundles  *backendtls.ClusterTrustBundles
+	cas      backendtls.CAInputs
 }
 
-func NewBackendTLSObserver(reader client.Reader) *BackendTLSObserver {
-	return &BackendTLSObserver{reader: reader, policies: map[string][]gatewayv1.BackendTLSPolicy{}, cas: map[types.NamespacedName]*corev1.ConfigMap{}}
+func NewBackendTLSObserver(reader client.Reader, bundles *backendtls.ClusterTrustBundles) *BackendTLSObserver {
+	observer := &BackendTLSObserver{
+		reader: reader, bundles: bundles, policies: map[string][]gatewayv1.BackendTLSPolicy{},
+		cas: backendtls.CAInputs{ConfigMaps: map[types.NamespacedName]*corev1.ConfigMap{}},
+	}
+	if bundles != nil {
+		observer.cas.ClusterTrustBundles = make(map[string]backendtls.CAObservation)
+	}
+	return observer
 }
 
 func (o *BackendTLSObserver) policiesInNamespace(ctx context.Context, namespace string) ([]gatewayv1.BackendTLSPolicy, error) {
@@ -130,11 +138,21 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 		if !policy.DeletionTimestamp.IsZero() || !backendtls.AppliesToServicePort(policy, service, port) {
 			continue
 		}
-		key, supported := backendtls.ConfigMapKey(policy)
+		key, supported := backendtls.CAKey(policy, o.bundles != nil)
 		if !supported {
 			continue
 		}
-		if _, observed := o.cas[key]; observed {
+		if key.Namespace == "" {
+			if _, observed := o.cas.ClusterTrustBundles[key.Name]; !observed {
+				bundle, err := o.bundles.Read(ctx, key.Name)
+				if err != nil {
+					return backendtls.Selection{}, err
+				}
+				o.cas.ClusterTrustBundles[key.Name] = bundle
+			}
+			continue
+		}
+		if _, observed := o.cas.ConfigMaps[key]; observed {
 			continue
 		}
 		var configMap corev1.ConfigMap
@@ -145,9 +163,9 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 			// A known policy still governs this port when its CA cannot be
 			// read. The mutation fence repeats the read, and later watches
 			// and resyncs can restore this backend independently of its peers.
-			o.cas[key] = nil
+			o.cas.ConfigMaps[key] = nil
 		} else {
-			o.cas[key] = &configMap
+			o.cas.ConfigMaps[key] = &configMap
 		}
 	}
 	selection := backendtls.Evaluate(service, port, items, o.cas)

@@ -28,6 +28,8 @@ import (
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/pkg/features"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 )
 
 // DefaultOpenStackResyncInterval controls how often a converged resource is
@@ -70,6 +72,8 @@ type Config struct {
 	BackendH2C bool
 	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
 	BackendTLSPolicy bool
+	// ClusterTrustBundles enables optional native trust sources for both TLS consumers.
+	ClusterTrustBundles *backendtls.ClusterTrustBundles
 	// BackendClientCertificate enables the operator's separate backend client certificate map.
 	BackendClientCertificate bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.

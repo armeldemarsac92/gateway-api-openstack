@@ -98,10 +98,13 @@ type ListenerTLS struct {
 	VirtualHosts []string `json:",omitempty"`
 }
 
+// MaxCAPEMBytes bounds the normalized CA payload stored in Barbican.
+const MaxCAPEMBytes = 128 * 1024
+
 // FrontendClientValidation identifies the trust anchor and validation mode on
 // an HTTPS port. The PEM is excluded from graph serialization.
 type FrontendClientValidation struct {
-	ConfigMapUID     string
+	ConfigMapUID     string // UID of the ConfigMap or ClusterTrustBundle
 	Digest           string
 	PEM              []byte `json:"-"`
 	InsecureFallback bool   `json:",omitempty"`
@@ -257,7 +260,7 @@ const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBa
 type BackendTLSValidation struct {
 	Hostname        string
 	SubjectAltNames []BackendTLSSubjectAltName `json:",omitempty"`
-	CAConfigMapUID  string
+	CAConfigMapUID  string                     // UID of the ConfigMap or ClusterTrustBundle
 	CADigest        string
 	CAPEM           []byte `json:"-"`
 	Denied          bool

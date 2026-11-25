@@ -38,7 +38,6 @@ import (
 const (
 	namePrefix  = "gateway-api-openstack-backend-ca-v1-"
 	contentType = "application/octet-stream"
-	maxPEMBytes = 128 * 1024
 )
 
 // Store manages the CA revisions of Gateway graphs. Each graph must have a
@@ -111,11 +110,11 @@ func (r Revision) String() string { return "[backend CA revision]" }
 // GoString redacts the reference in Go-syntax formatting.
 func (r Revision) GoString() string { return r.String() }
 
-// Find reads a verified revision for the exact ConfigMap UID and normalized
+// Find reads a verified revision for the exact CA source UID and normalized
 // CA digest. Prefer a verified reference the pool already uses after a retry.
 func (s *Store) Find(ctx context.Context, gatewayUID, configMapUID, wantedDigest, preferredReference string) (Revision, error) {
 	if configMapUID == "" || !isDigest(wantedDigest) {
-		return Revision{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("backend CA requires a ConfigMap UID and normalized CA digest"))
+		return Revision{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("backend CA requires a CA source UID and normalized CA digest"))
 	}
 	client, prefix, err := s.open(gatewayUID)
 	if err != nil {
@@ -130,14 +129,14 @@ func (s *Store) Find(ctx context.Context, gatewayUID, configMapUID, wantedDigest
 	}), nil
 }
 
-// Ensure publishes the normalized, validated ConfigMap CA PEM once and
+// Ensure publishes the normalized, validated CA PEM once and
 // returns a verified reference. A retry first looks up the same immutable
 // revision in the authenticated project. Barbican can briefly omit a recent
 // write and can accept duplicate names. All verified duplicates remain
 // eligible for explicit retirement after their own Octavia usage check.
 func (s *Store) Ensure(ctx context.Context, gatewayUID, configMapUID string, normalizedPEM []byte) (Revision, error) {
 	if configMapUID == "" || !validPEM(normalizedPEM) {
-		return Revision{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("backend CA requires a ConfigMap UID and normalized CA PEM"))
+		return Revision{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("backend CA requires a CA source UID and normalized CA PEM"))
 	}
 	client, prefix, err := s.open(gatewayUID)
 	if err != nil {
@@ -274,7 +273,7 @@ func digest(value []byte) string {
 }
 
 func validPEM(data []byte) bool {
-	if len(data) == 0 || len(data) > maxPEMBytes {
+	if len(data) == 0 || len(data) > cloud.MaxCAPEMBytes {
 		return false
 	}
 	for len(data) > 0 {
