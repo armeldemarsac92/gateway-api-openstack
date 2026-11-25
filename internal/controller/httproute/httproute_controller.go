@@ -92,7 +92,7 @@ type Reconciler struct {
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// TelemetryBackendTLSAvailable reports authentication capabilities for collectors.
-	TelemetryBackendTLSAvailable func(context.Context, bool) (bool, error)
+	TelemetryBackendTLSAvailable func(ctx context.Context, requireSAN, systemCA bool) (bool, error)
 	// GRPCBackendTLSAvailable also checks enforcement of negotiated h2.
 	GRPCBackendTLSAvailable func(context.Context) (bool, error)
 	// BackendTLSSANAvailable checks explicit SANs and the selected transport.

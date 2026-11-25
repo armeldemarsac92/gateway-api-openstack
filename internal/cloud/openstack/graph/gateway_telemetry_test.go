@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -62,6 +64,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	capable := true
 	samplingCapable := false
 	attributesCapable := false
+	systemTLSCapable := false
 	exporterState := "ACTIVE"
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := r.Method + " " + r.URL.Path
@@ -78,13 +81,17 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 		case "GET /lbaas/providers/amphora/gateway_capabilities":
 			capabilities := []string{}
 			if capable {
-				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPTracing)
+				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPTracing,
+					octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityBackendTLSSubjectAltNames)
 			}
 			if samplingCapable {
 				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSampling)
 			}
 			if attributesCapable {
 				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
+			}
+			if systemTLSCapable {
+				capabilities = append(capabilities, octavia.GatewayCapabilityBackendTLSSystemCA)
 			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case "GET /lbaas/pools":
@@ -106,10 +113,29 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			require.Equal(t, "HTTP", pool["protocol"])
 			require.Equal(t, "load-balancer-1", pool["loadbalancer_id"])
 			require.NotContains(t, pool, "listener_id")
+			if telemetryUsesSystemCA(spec.Gateway.Telemetry) {
+				require.Equal(t, true, pool["backend_tls_system_ca"])
+				require.Equal(t, true, pool["tls_enabled"])
+				require.Equal(t, "collector.example.test", pool["backend_tls_hostname"])
+				require.Equal(t, []any{"http/1.1"}, pool["alpn_protocols"])
+				require.Equal(t, "https://barbican.example.test/v1/containers/collector-client", pool["tls_container_ref"])
+				require.Equal(t, []any{map[string]any{"type": "Hostname", "hostname": "collector-san.example.test"}}, pool["backend_tls_subject_alt_names"])
+				require.NotContains(t, pool, "ca_tls_container_ref")
+				pool["ca_tls_container_ref"] = nil
+				pool["backend_tls_system_ca_sha256"] = nil
+				pool["backend_h2c"] = false
+				pool["backend_tls_require_h2"] = false
+			}
 			pool["id"], pool["project_id"], pool["provisioning_status"] = poolID, "project-a", "ACTIVE"
 			pool["members"], pool["listeners"], pool["loadbalancers"] = []any{}, []any{}, []map[string]string{{"id": "load-balancer-1"}}
 			lb["pools"] = []map[string]string{{"id": poolID}}
 			w.WriteHeader(http.StatusCreated)
+			safetyWriteJSON(t, w, map[string]any{"pool": pool})
+		case "PUT /lbaas/pools/" + poolID:
+			var body struct{ Pool map[string]any }
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Len(t, body.Pool, 1)
+			pool["tags"] = body.Pool["tags"]
 			safetyWriteJSON(t, w, map[string]any{"pool": pool})
 		case "POST /lbaas/pools/" + poolID + "/members":
 			var body struct{ Member map[string]any }
@@ -153,7 +179,10 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			}
 			require.Len(t, body.Listener, 2)
 			require.Contains(t, body.Listener, "otlp_tracing")
-			if spec.Gateway.Telemetry == nil || !capable || spec.Gateway.Telemetry.Sampling != nil && !samplingCapable {
+			target := cloud.TelemetryListener{Port: listener["protocol_port"].(int), Protocol: listener["protocol"].(string)}
+			if spec.Gateway.Telemetry == nil || !capable || !slices.Contains(spec.Gateway.Telemetry.Listeners, target) ||
+				spec.Gateway.Telemetry.Sampling != nil && !samplingCapable ||
+				telemetryUsesSystemCA(spec.Gateway.Telemetry) && pool["backend_tls_system_ca_sha256"] == nil {
 				require.JSONEq(t, "null", string(body.Listener["otlp_tracing"]))
 			} else if spec.Gateway.Telemetry.Sampling != nil {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request","sampling":{"base":{"numerator":0,"denominator":100},"parent":{"numerator":1,"denominator":1}}}`, string(body.Listener["otlp_tracing"]))
@@ -177,7 +206,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			t.Fatalf("unexpected Octavia request %s", request)
 		}
 	}))
-	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{BackendTLSPolicy: true})
 	run := func() cloud.GatewayGraphResult {
 		result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
 		require.NoError(t, err)
@@ -297,6 +326,106 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.True(t, settled.TelemetryCapabilityUnavailable)
 	require.Equal(t, []string{"PUT /lbaas/listeners/http",
 		"DELETE /lbaas/pools/" + poolID + "/members/collector", "DELETE /lbaas/pools/" + poolID}, calls)
+
+	t.Run("system trust gates members and exporter", func(t *testing.T) {
+		capable = true
+		exporterState = "ACTIVE"
+		// The previous scenario exercised a foreign exporter. Release that
+		// test fixture before checking two listeners with the same collector.
+		delete(frontends["https"], "otlp_tracing")
+		delete(frontends["https"], "otlp_tracing_status")
+		frontends["https"]["tags"] = safetyGatewayTags(t, id, roleListener)
+		frontends["http"]["provisioning_status"] = "ACTIVE"
+		wanted := spec.Gateway.Telemetry
+		wanted.BackendTLS = &cloud.BackendTLSValidation{
+			Trust: cloud.BackendTLSTrustSystem, Hostname: "collector.example.test",
+			SubjectAltNames: []cloud.BackendTLSSubjectAltName{{Type: "Hostname", Hostname: "collector-san.example.test"}},
+		}
+		spec.Gateway.BackendClientCertificate.Reference = "https://barbican.example.test/v1/containers/collector-client"
+		calls = nil
+		require.Contains(t, run().TelemetryUnsupported, octavia.GatewayCapabilityBackendTLSSystemCA)
+		require.Empty(t, calls)
+
+		systemTLSCapable = true
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.False(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, []string{"POST /lbaas/pools"}, calls)
+
+		// A diverging peer keeps the pool in ERROR until its bundle matches.
+		// Expire the retry tag to simulate two failed attempts without sleeping.
+		pool["provisioning_status"] = "ERROR"
+		for attempt := range 2 {
+			wait := run()
+			require.False(t, wait.Outcome.MutationSubmitted)
+			require.Greater(t, wait.Outcome.RequeueAfter, provider.pollInterval)
+			rawTags := pool["tags"].([]any)
+			pool["tags"] = slices.DeleteFunc(rawTags, func(tag any) bool {
+				return strings.HasPrefix(tag.(string), telemetryRetryTag)
+			})
+			require.True(t, run().Outcome.MutationSubmitted)
+			require.Len(t, calls, 2+attempt)
+			require.Equal(t, "PUT /lbaas/pools/"+poolID, calls[len(calls)-1])
+		}
+
+		// A pool with a different TLS identity still needs replacement.
+		pool["backend_tls_hostname"] = "changed.example.test"
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, "DELETE /lbaas/pools/"+poolID, calls[len(calls)-1])
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, "POST /lbaas/pools", calls[len(calls)-1])
+		pool["backend_tls_system_ca_sha256"] = strings.Repeat("a", 64)
+		calls = nil
+		for range 3 {
+			require.True(t, run().Outcome.MutationSubmitted)
+		}
+		require.Equal(t, cloud.OutcomeReady, run().Outcome.State)
+		require.Equal(t, []string{"POST /lbaas/pools/" + poolID + "/members", "PUT /lbaas/listeners/http", "PUT /lbaas/listeners/https"}, calls)
+
+		// HTTPS can still be publishing the same attested collector after
+		// the HTTP exporter comes up. Keep that HTTP exporter in service.
+		calls = nil
+		frontends["https"]["otlp_tracing_status"] = "PENDING_UPDATE"
+		require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State)
+		require.Empty(t, calls)
+		require.NotEqual(t, "null", string(frontends["http"]["otlp_tracing"].(json.RawMessage)))
+
+		// Withdraw the HTTP export if the desired listener set no longer
+		// authorizes it, even while HTTPS has a pending update.
+		desiredListeners := wanted.Listeners
+		wanted.Listeners = desiredListeners[1:]
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
+		require.JSONEq(t, "null", string(frontends["http"]["otlp_tracing"].(json.RawMessage)))
+		wanted.Listeners = desiredListeners
+		require.True(t, run().Outcome.MutationSubmitted)  // Release the cleared ownership tags.
+		require.False(t, run().Outcome.MutationSubmitted) // The pending neighbor still blocks a new attachment.
+		frontends["https"]["otlp_tracing_status"] = "ACTIVE"
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, cloud.OutcomeReady, run().Outcome.State)
+
+		pool["backend_tls_system_ca_sha256"] = nil
+		exporterState = "PENDING_UPDATE"
+		calls = nil
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.True(t, run().Outcome.MutationSubmitted)
+		require.False(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, []string{"PUT /lbaas/listeners/http", "PUT /lbaas/listeners/https"}, calls)
+		for _, name := range []string{"http", "https"} {
+			frontends[name]["otlp_tracing_status"] = "ACTIVE"
+			require.Equal(t, true, frontends[name]["admin_state_up"])
+		}
+
+		spec.Gateway.Telemetry = nil
+		for range 4 {
+			require.True(t, run().Outcome.MutationSubmitted)
+		}
+		require.Equal(t, cloud.OutcomeReady, run().Outcome.State)
+		require.Nil(t, pool)
+		wanted.BackendTLS = nil
+		spec.Gateway.Telemetry = wanted
+		spec.Gateway.BackendClientCertificate.Reference = ""
+		frontends["https"]["otlp_tracing"] = foreign
+	})
 
 	capable, samplingCapable = true, false
 	spec.Gateway.Telemetry.Sampling = sampling

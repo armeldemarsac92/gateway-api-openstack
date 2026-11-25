@@ -335,10 +335,6 @@ func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *ga
 				rejected = telemetryIssue{"UnsupportedValue", "The collector requires an applicable, verifiable BackendTLSPolicy"}
 				return
 			}
-			if selection.Winner.Validation.Trust == cloud.BackendTLSTrustSystem {
-				rejected = telemetryIssue{"UnsupportedValue", "The collector backend TLS profile requires an explicit CA reference"}
-				return
-			}
 			transport = selection.Winner.Validation.CloudValidation()
 			var live gatewayv1.BackendTLSPolicy
 			if err = r.APIReader.Get(ctx, selection.Winner.Key, &live); err != nil {
@@ -463,6 +459,17 @@ func (r *Reconciler) observeTelemetryGraph(ctx context.Context, request graph.Re
 	if observed.desired != nil {
 		input.Node.Spec.Identity = request.Identity
 		input.Node.BackendClientCertificate, _, _ = r.observeBackendClientCertificate(ctx, gateway)
+		if tls := observed.desired.BackendTLS; tls != nil && tls.Trust == cloud.BackendTLSTrustReference && !input.Node.BackendCAOwned {
+			input.Node.ClaimBackendCA = func(ctx context.Context) error {
+				desired := gateway.DeepCopy()
+				controllerutil.AddFinalizer(desired, r.Config.BackendCAFinalizer())
+				if err := r.Patch(ctx, desired, controller.OptimisticMergeFrom(gateway)); err != nil {
+					return err
+				}
+				input.Node.BackendCAOwned = true
+				return nil
+			}
+		}
 	}
 	input.Validate = func(ctx context.Context) error {
 		latest, current, currentErr, err := observe(ctx)
@@ -587,15 +594,12 @@ func applyTelemetryConditions(entry *gatewayv1.PolicyAncestorStatus, policy *gat
 	meta.SetStatusCondition(&entry.Conditions, controller.Condition("ResolvedRefs", resolvedStatus, resolved.reason, resolved.message, policy.Generation))
 }
 
-func (r *Reconciler) markGatewayTelemetry(ctx context.Context, scope *gatewayScope, claimCA bool) error {
+func (r *Reconciler) markGatewayTelemetry(ctx context.Context, scope *gatewayScope) error {
 	desired := scope.gateway.DeepCopy()
 	if desired.Annotations == nil {
 		desired.Annotations = map[string]string{}
 	}
 	desired.Annotations[r.Config.GatewayTelemetryAnnotation()] = "v1"
-	if claimCA {
-		controllerutil.AddFinalizer(desired, r.Config.BackendCAFinalizer())
-	}
 	if err := r.Patch(ctx, desired, controller.OptimisticMergeFrom(scope.original)); err != nil {
 		return err
 	}
@@ -613,21 +617,17 @@ func (r *Reconciler) reconcileGatewayTelemetry(ctx context.Context, scope *gatew
 	if !marked && !r.Config.TelemetryPolicyEnabled() {
 		return 0, r.reportTelemetryWithoutBinding(ctx, client.ObjectKeyFromObject(gateway))
 	}
-	claimCA := !withdraw && r.Config.TelemetryPolicyEnabled() && r.Config.BackendTLSPolicy &&
-		!controllerutil.ContainsFinalizer(gateway, r.Config.BackendCAFinalizer())
-	if !marked || claimCA {
+	if !marked {
 		policies, err := r.listTelemetryPolicies(ctx, r.APIReader, gateway.Namespace)
 		hasTarget := slices.ContainsFunc(policies, func(policy gatewayx.XTelemetryPolicy) bool { return telemetryTargets(&policy, gateway) })
 		if err == nil && hasTarget {
-			if err := r.markGatewayTelemetry(ctx, scope, claimCA); err != nil {
+			if err := r.markGatewayTelemetry(ctx, scope); err != nil {
 				return 0, err
 			}
 			gateway = scope.gateway
-		} else if !marked {
+		} else {
 			return 0, err
 		}
-		// An existing checkpoint still authorizes withdrawal after an API
-		// read failure or deletion of the last policy.
 	}
 
 	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{Action: graph.ReconcileTelemetry, Gateway: gateway,

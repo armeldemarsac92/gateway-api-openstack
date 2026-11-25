@@ -585,8 +585,12 @@ func TestTelemetryCollectorUsesSharedBackendTLSPolicyAncestors(t *testing.T) {
 	require.NoError(t, gatewayx.Install(scheme))
 	kube := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(&gatewayv1.BackendTLSPolicy{}).
 		WithObjects(class, gateway, service, endpoints).Build()
+	systemCAAvailable := false
 	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg,
-		TelemetryBackendTLSAvailable: func(context.Context, bool) (bool, error) { return true, nil }}
+		TelemetryBackendTLSAvailable: func(_ context.Context, requireSAN, systemCA bool) (bool, error) {
+			require.Equal(t, systemCA, requireSAN)
+			return !systemCA || systemCAAvailable, nil
+		}}
 	tracing := &gatewayx.XTelemetryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "trace", UID: "trace"}, Spec: gatewayx.TelemetryPolicySpec{
 			TargetRefs: []gatewayv1.LocalObjectReference{{Group: gatewayv1.GroupName, Kind: "Gateway", Name: gatewayv1.ObjectName(gateway.Name)}},
@@ -645,6 +649,20 @@ func TestTelemetryCollectorUsesSharedBackendTLSPolicyAncestors(t *testing.T) {
 	oldStatus := policy.DeepCopy()
 	oldStatus.Generation++
 	require.False(t, ancestor.AcceptsCurrentPolicy(oldStatus), "a prior generation cannot authorize an exporter")
+
+	policy.Generation++
+	policy.Spec.Validation.CACertificateRefs = nil
+	policy.Spec.Validation.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesSystem)
+	policy.Spec.Validation.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: "Hostname", Hostname: "collector.example.test"}}
+	require.NoError(t, kube.Update(t.Context(), policy))
+	reconcile()
+	require.False(t, ancestor.AcceptsCurrentPolicy(policy))
+	conditions := policy.Status.Ancestors[len(foreign)].Conditions
+	require.Equal(t, string(gatewayv1.PolicyReasonInvalid), meta.FindStatusCondition(conditions, string(gatewayv1.PolicyConditionAccepted)).Reason)
+
+	systemCAAvailable = true
+	reconcile()
+	require.True(t, ancestor.AcceptsCurrentPolicy(policy))
 
 	require.NoError(t, kube.Delete(t.Context(), tracing))
 	reconcile()

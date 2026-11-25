@@ -173,6 +173,7 @@ func TestTelemetrySamplingDefaultsAndInvalidFractions(t *testing.T) {
 func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) {
 	cfg := testConfig()
 	cfg.TelemetryPolicy, cfg.GatewayAPIChannel = true, features.FeatureChannelExperimental
+	cfg.BackendTLSPolicy = true
 	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "internal"},
 		Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
 	gateway := &gatewayv1.Gateway{
@@ -207,13 +208,34 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(service.Name))}},
 		},
 	}
-	c := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(gateway, class, service, endpoints, policy, grant).
+	tlsPolicy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "tls", UID: "collector-tls", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "collector.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem),
+			},
+		},
+		Status: gatewayv1.PolicyStatus{Ancestors: []gatewayv1.PolicyAncestorStatus{{
+			AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))},
+			ControllerName: cfg.ControllerName,
+			Conditions: []metav1.Condition{
+				controller.Condition(string(gatewayv1.PolicyConditionAccepted), metav1.ConditionTrue, "Accepted", "", 1),
+				controller.Condition(string(gatewayv1.BackendTLSPolicyConditionResolvedRefs), metav1.ConditionTrue, "ResolvedRefs", "", 1),
+			},
+		}}},
+	}
+	c := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(gateway, class, service, endpoints, policy, grant, tlsPolicy).
 		WithStatusSubresource(&gatewayx.XTelemetryPolicy{}).Build()
 	var calls []*cloud.GatewayTelemetry
 	var beforeProviderValidation func()
 	provider := telemetryGraphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
 		require.Equal(t, cloud.GraphReconcileTelemetry, spec.Gateway.Disposition)
 		require.Empty(t, spec.Routes)
+		require.False(t, spec.Gateway.BackendCAOwned)
+		require.Nil(t, spec.Gateway.ClaimBackendCA)
 		if beforeProviderValidation != nil {
 			beforeProviderValidation()
 			beforeProviderValidation = nil
@@ -230,7 +252,8 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	run()
 	require.Nil(t, calls[0], "status slot precedes the first exporter write")
 	run()
-	require.NotNil(t, calls[1], "a policy with base 25/100 and sampled-parent 1/2 must reach the exporter")
+	require.NotNil(t, calls[1], "the accepted tracing policy reaches the exporter")
+	require.Equal(t, &cloud.BackendTLSValidation{Trust: cloud.BackendTLSTrustSystem, Hostname: "collector.example.test"}, calls[1].BackendTLS)
 	require.Equal(t, &cloud.TelemetrySampling{Base: cloud.TelemetryRate{Numerator: 25, Denominator: 100},
 		Parent: &cloud.TelemetryRate{Numerator: 1, Denominator: 2}}, calls[1].Sampling)
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.12", Port: 9443}}, calls[1].Members)
@@ -263,14 +286,8 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
 	require.Equal(t, metav1.ConditionTrue, meta.FindStatusCondition(policy.Status.Ancestors[0].Conditions, "ResolvedRefs").Status)
 
-	// The collector cannot silently downgrade when an applicable policy
-	// becomes present on an installation without the backend TLS option.
-	require.NoError(t, c.Create(t.Context(), &gatewayv1.BackendTLSPolicy{
-		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "tls"},
-		Spec: gatewayv1.BackendTLSPolicySpec{TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
-			LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
-		}}},
-	}))
+	// Turning off BackendTLSPolicy cannot downgrade an authenticated collector.
+	r.Config.BackendTLSPolicy = false
 	run()
 	require.Nil(t, calls[4])
 	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
