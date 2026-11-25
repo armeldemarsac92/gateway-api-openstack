@@ -81,8 +81,8 @@ type Reconciler struct {
 	retryBudgetPolicyServed bool
 	// BackendRetryBudgetAvailable checks regional Amphora support for Service budgets.
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
-	// XBackendCookieAvailable checks regional Amphora support for named HTTP cookies.
-	XBackendCookieAvailable func(context.Context) (bool, error)
+	// XBackendCookieAvailable checks regional Amphora support for named HTTP cookies and, when requested, absolute timeout.
+	XBackendCookieAvailable func(context.Context, bool) (bool, error)
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// TelemetryBackendTLSAvailable reports authentication capabilities for collectors.

@@ -43,6 +43,7 @@ const (
 	GatewayCapabilityTCPConnectionRejection    = "tcp_connection_rejection_v1"
 	GatewayCapabilityUDPPacketDrop             = "udp_packet_drop_v1"
 	GatewayCapabilityHTTPCookieName            = "http_cookie_name_v1"
+	GatewayCapabilityHTTPCookieAbsoluteTimeout = "http_cookie_absolute_timeout_v1"
 	GatewayCapabilityBackendH2C                = "backend_h2c_v1"
 	GatewayCapabilityGRPCContentType           = "grpc_content_type_v1"
 	GatewayCapabilityBackendTLSHostname        = "backend_tls_hostname_v1"

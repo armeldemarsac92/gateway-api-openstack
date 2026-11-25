@@ -19,6 +19,7 @@ package graph
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -103,7 +104,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 		inventory, err := p.octavia.ListPoolInventory(t.Context(), pools.ListOpts{})
 		require.NoError(t, err)
 		require.Len(t, inventory.Items, 1)
-		return observedRouteGraph{pool: &inventory.Items[0], backendTLS: inventory.BackendTLS["pool"]}
+		return observedRouteGraph{pool: &inventory.Items[0], backendTLS: inventory.BackendTLS["pool"], cookieDeadline: inventory.CookieDeadline["pool"]}
 	}
 	create := converge(observedRouteGraph{})
 	require.Equal(t, routeMutationCreatePool, create.kind)
@@ -137,29 +138,104 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed"}`, string(writes[2]["session_persistence"]))
 	require.Equal(t, "reports_renamed", observe().pool.Persistence.CookieName)
 
+	// The named capability alone cannot authorize a newly requested deadline.
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{Scope: strings.Repeat("a", 64)}
 	active = observe()
+	actual.routes[0].httpParts[wanted.backendKey] = &active
+	require.NotNil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, wanted.cookieSupportIssue())
+	available, err := p.XBackendCookieAvailable(t.Context(), false)
+	require.NoError(t, err)
+	require.True(t, available)
+
+	capabilities = append(capabilities, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout)
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	require.Equal(t, cloud.SessionPersistenceDeadlineReadbackUnverified, wanted.cookieSupportIssue())
+	execute(converge(active))
+	zero := observe()
+	require.Equal(t, wanted.sessionCookieDeadline, zero.cookieDeadline.Value)
+	require.Contains(t, zero.pool.Tags, xBackendCookieDeadlineTag)
+	require.Equal(t, routeMutationCreateMember, converge(zero).kind)
+
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 1234, Scope: wanted.sessionCookieDeadline.Scope}
+	zero.members = persisted.members
+	actual.routes[0].httpParts[wanted.backendKey] = &zero
+	require.Equal(t, routeMutationClearPoolMembers, p.prepareXBackendCookies(t.Context(), &desired, actual).route.kind)
+	zero.members = nil
+	execute(converge(zero))
+	bounded := observe()
+	require.Equal(t, wanted.sessionCookieDeadline, bounded.cookieDeadline.Value)
+	require.Equal(t, routeMutationCreateMember, converge(bounded).kind)
+
+	// A provider that advertised the extension can still ignore it or return
+	// incomplete data. Both must keep the policy from admitting members.
+	correct := pool["session_persistence"]
+	for _, persistence := range []string{
+		`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed"}`,
+		`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":"1234","cookie_scope":"bad"}`,
+		`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":5,"cookie_scope":"` + wanted.sessionCookieDeadline.Scope + `"}`,
+	} {
+		pool["session_persistence"] = json.RawMessage(persistence)
+		ignored := observe()
+		actual.routes[0].httpParts[wanted.backendKey] = &ignored
+		require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+		require.Equal(t, cloud.SessionPersistenceDeadlineReadbackUnverified, wanted.cookieSupportIssue())
+		require.Equal(t, routeMutationSetXBackendCookie, converge(ignored).kind)
+	}
+	pool["session_persistence"] = correct
+
+	// Clearing the deadline must send explicit nulls while retaining the name.
+	deadline := wanted.sessionCookieDeadline
+	wanted.sessionCookieDeadline = nil
+	bounded.members = persisted.members
+	require.Equal(t, routeMutationClearPoolMembers, converge(bounded).kind)
+	bounded.members = nil
+	execute(converge(bounded))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":null,"cookie_scope":null}`,
+		string(writes[len(writes)-1]["session_persistence"]))
+	active = observe()
+	require.Nil(t, active.cookieDeadline.Value)
+	require.NotContains(t, active.pool.Tags, xBackendCookieDeadlineTag)
+	require.Equal(t, routeMutationCreateMember, converge(active).kind)
+
+	wanted.sessionCookieDeadline = deadline
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	execute(converge(active))
+	active = observe()
+	actual.routes[0].httpParts[wanted.backendKey] = &active
 	capabilityResponse = http.StatusServiceUnavailable
 	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
 	_, err = planXBackendCookie(*wanted, active)
 	require.ErrorIs(t, err, errXBackendCookieUnverified)
-	require.Len(t, writes, 3)
 	capabilityResponse = http.StatusOK
-	capabilities = []string{}
+	capabilities = []string{octavia.GatewayCapabilityHTTPCookieName}
 	withdraw := p.prepareXBackendCookies(t.Context(), &desired, actual)
 	require.NotNil(t, withdraw)
+	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, wanted.cookieSupportIssue())
 	execute(withdraw.route)
-	require.Equal(t, "null", string(writes[3]["session_persistence"]))
+	require.Equal(t, "null", string(writes[len(writes)-1]["session_persistence"]))
 	active = observe()
 	require.Empty(t, active.pool.Persistence)
 	_, err = planXBackendCookie(*wanted, active)
-	require.ErrorIs(t, err, errXBackendCookieUnavailable)
+	require.ErrorIs(t, err, errXBackendCookieDeadlineUnavailable)
 
-	wanted.sessionCookieName = ""
+	wanted.sessionCookieName, wanted.sessionCookieDeadline = "", nil
 	step := converge(active)
 	require.Equal(t, routeMutationSetXBackendCookie, step.kind)
 	execute(step)
 	require.NotContains(t, observe().pool.Tags, xBackendCookieTag)
 	require.Equal(t, routeMutationCreateMember, converge(observe()).kind)
+
+	// The first bounded pool also starts closed and sends the full contract.
+	capabilities = append(capabilities, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout)
+	wanted.sessionCookieName, wanted.sessionCookieDeadline = "reports_renamed", deadline
+	actual.routes[0].httpParts = nil
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	execute(converge(observedRouteGraph{}))
+	request := writes[len(writes)-1]
+	require.Equal(t, "false", string(request["admin_state_up"]))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1234,"cookie_scope":"`+deadline.Scope+`"}`,
+		string(request["session_persistence"]))
 }
 
 func TestXBackendCookieWeightedPolicyFollowsPoolReadback(t *testing.T) {
@@ -173,11 +249,15 @@ func TestXBackendCookieWeightedPolicyFollowsPoolReadback(t *testing.T) {
 	require.True(t, resolved.policies[0].targetsPending())
 	backend.pool.Tags = append(backend.pool.Tags, xBackendCookieTag)
 	backend.pool.Persistence = pools.SessionPersistence{Type: httpCookiePersistence, CookieName: part.sessionCookieName}
+	part.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 3000, Scope: strings.Repeat("b", 64)}
+	backend.pool.Tags = append(backend.pool.Tags, xBackendCookieDeadlineTag)
+	resolved = resolveWeightedHTTPPart(weighted, desired.routes[0], actual.routes[0], "")
+	require.True(t, resolved.policies[0].targetsPending())
+	backend.cookieDeadline.Value = part.sessionCookieDeadline
 	resolved = resolveWeightedHTTPPart(weighted, desired.routes[0], actual.routes[0], "")
 	require.False(t, resolved.policies[0].targetsPending())
 	require.Equal(t, []octavia.WeightedHTTPTarget{{Weight: 3, PoolID: "pool-1"}, {Weight: 1, PoolID: "pool-remote"}},
 		resolved.policies[0].weightedPlan.targets)
-	delete(actual.routes[0].httpParts, part.backendKey)
 	for _, capability := range []xBackendCookieCapability{xBackendCookieUnavailable, xBackendCookieUnverified} {
 		part.sessionCookieCapability = capability
 		resolved = resolveWeightedHTTPPart(weighted, desired.routes[0], actual.routes[0], "")
