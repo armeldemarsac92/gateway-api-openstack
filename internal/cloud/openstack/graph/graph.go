@@ -327,6 +327,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		p.recordGraphMutationOutcome(&result, *step)
 		return result, nil
 	}
+	p.observeTCPConnectionRejectionCapability(ctx, &desired, actual)
 	p.gateRequestMirrors(ctx, &desired, actual)
 	if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
 		if step, needed := nextRequestMirrorWithdrawal(desired, actual); needed {
@@ -388,7 +389,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
-		if len(actual.httpsServingPorts) != 0 && spec.ValidateMutation != nil {
+		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired)) && spec.ValidateMutation != nil {
 			// Busy Octavia can prove a serving subset without a write. Apply
 			// the same Kubernetes snapshot fence before publishing that proof.
 			if err := spec.ValidateMutation(ctx); err != nil {
@@ -460,6 +461,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
+		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual)) && spec.ValidateMutation != nil {
+			if err := spec.ValidateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
 		if isSNIProtocol(desired.protocol) && spec.Gateway.Disposition == cloud.GraphEnsure && result.Outcome.State == cloud.OutcomeReady {
 			if err := p.verifySNICapability(ctx, desired, actual); err != nil {
 				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
@@ -521,6 +527,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if err != nil {
 		if step.kind == graphRouteMutation {
+			if step.route.kind == routeMutationReplaceTCPMembers {
+				withdrawn, withdrawalErr := p.withdrawAfterRejectedTCPBatch(ctx, desired, step.routeIndex, &result, err)
+				if withdrawn {
+					return result, nil
+				}
+				err = errors.Join(err, withdrawalErr)
+			}
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
 		if step.kind == graphSNIMutation && step.isRestrictiveSNI() {

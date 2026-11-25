@@ -62,6 +62,11 @@ func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error
 	return p.graph.BackendRetryBudgetAvailable(ctx)
 }
 
+// TCPConnectionRejectionAvailable discovers regional Amphora support.
+func (p *Provider) TCPConnectionRejectionAvailable(ctx context.Context) (bool, error) {
+	return p.graph.TCPConnectionRejectionAvailable(ctx)
+}
+
 // XBackendCookieAvailable discovers regional Amphora named HTTP cookie support.
 func (p *Provider) XBackendCookieAvailable(ctx context.Context) (bool, error) {
 	return p.graph.XBackendCookieAvailable(ctx)

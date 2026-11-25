@@ -46,10 +46,11 @@ func (s *Service) ListPools(ctx context.Context, opts pools.ListOpts) ([]pools.P
 
 // PoolInventory carries the provider extension separately from SDK pool types.
 type PoolInventory struct {
-	Items              []pools.Pool
-	BackendH2C         map[string]bool
-	BackendTLS         map[string]PoolBackendTLS
-	BackendRetryBudget map[string]PoolBackendRetryBudget
+	Items                  []pools.Pool
+	BackendH2C             map[string]bool
+	BackendTLS             map[string]PoolBackendTLS
+	BackendRetryBudget     map[string]PoolBackendRetryBudget
+	TCPConnectionRejection map[string]PoolTCPConnectionRejection
 }
 
 // PoolBackendTLS records which transport fields the API actually reported.
@@ -77,7 +78,7 @@ func (tls PoolBackendTLS) Complete() bool {
 // reads backend transport alongside the stock fields.
 func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
 	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS),
-		BackendRetryBudget: make(map[string]PoolBackendRetryBudget)}
+		BackendRetryBudget: make(map[string]PoolBackendRetryBudget), TCPConnectionRejection: make(map[string]PoolTCPConnectionRejection)}
 	query, err := opts.ToPoolListQuery()
 	if err != nil {
 		return inventory, fmt.Errorf("list pools: %w", err)
@@ -88,15 +89,16 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			Links []gophercloud.Link `json:"pools_links"`
 			Pools []struct {
 				pools.Pool
-				BackendRetryBudget json.RawMessage `json:"backend_retry_budget"`
-				BackendH2C         *bool           `json:"backend_h2c"`
-				Hostname           json.RawMessage `json:"backend_tls_hostname"`
-				SubjectAltNames    json.RawMessage `json:"backend_tls_subject_alt_names"`
-				CA                 json.RawMessage `json:"ca_tls_container_ref"`
-				ClientRef          json.RawMessage `json:"tls_container_ref"`
-				RequireH2          *bool           `json:"backend_tls_require_h2"`
-				Enabled            *bool           `json:"tls_enabled"`
-				Admin              *bool           `json:"admin_state_up"`
+				BackendRetryBudget     json.RawMessage `json:"backend_retry_budget"`
+				TCPConnectionRejection json.RawMessage `json:"tcp_connection_rejection"`
+				BackendH2C             *bool           `json:"backend_h2c"`
+				Hostname               json.RawMessage `json:"backend_tls_hostname"`
+				SubjectAltNames        json.RawMessage `json:"backend_tls_subject_alt_names"`
+				CA                     json.RawMessage `json:"ca_tls_container_ref"`
+				ClientRef              json.RawMessage `json:"tls_container_ref"`
+				RequireH2              *bool           `json:"backend_tls_require_h2"`
+				Enabled                *bool           `json:"tls_enabled"`
+				Admin                  *bool           `json:"admin_state_up"`
 			} `json:"pools"`
 		}
 		// Decode directly from the response. The SDK pager first decodes
@@ -130,6 +132,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
 			inventory.BackendTLS[pool.ID] = tls
 			inventory.BackendRetryBudget[pool.ID] = decodeBackendRetryBudget(pool.BackendRetryBudget)
+			inventory.TCPConnectionRejection[pool.ID] = decodeTCPConnectionRejection(pool.TCPConnectionRejection)
 			items = append(items, pool.Pool)
 			if pool.BackendH2C != nil && *pool.BackendH2C {
 				inventory.BackendH2C[pool.ID] = true
@@ -368,6 +371,13 @@ func (s *Service) ListCompleteMembers(ctx context.Context, poolID string, opts p
 // The SDK's boolean alone cannot distinguish either case from explicit false.
 func (s *Service) ListMembersWithBackup(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, error) {
 	return s.listCompleteMembers(ctx, poolID, opts, "backup", nil)
+}
+
+// ListMembersForTCPRejection observes the member selection fields atomically updated with rejection.
+func (s *Service) ListMembersForTCPRejection(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, map[string]struct{}, error) {
+	missing := make(map[string]struct{})
+	items, missingBackup, err := s.listCompleteMembers(ctx, poolID, opts, "backup", missing)
+	return items, missingBackup, missing, err
 }
 
 // ListMembersWithAdminState reports the IDs without an explicit administrative state.

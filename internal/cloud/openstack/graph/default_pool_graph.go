@@ -255,7 +255,11 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			if err := validateRouteGatewayIDs(route.spec.Gateway, actual.state); err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			canServe := slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining })
+			if pending := tcpRejectionProvisioningPending(route, observed); pending != "" {
+				routeResult.Outcome = p.progressingOutcome(pending)
+				break
+			}
+			canServe := defaultPoolCanServe(route)
 			if actual.protocol == cloud.ListenerProtocolUDP && index == defaultOwner {
 				if !canServe || !hasActiveUDPBackend(route, observed, actual.state.VIPAddress) {
 					// Revoke the proven forwarding pointer even if another
@@ -266,7 +270,7 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 				}
 			}
 			steps, state, err := buildRouteEnsurePlan(route, observed)
-			if errors.Is(err, errWeightedTCPBackupUnknown) {
+			if errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) || errors.Is(err, errTCPRejectionReadback) {
 				detach = detach || index == defaultOwner
 				routeResult.Outcome = p.progressingOutcome(err.Error())
 				break
@@ -277,7 +281,8 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			routeResult.State = state
 			issue := observed.backendProvisioningIssue(false, true)
 			backendReady := observed.pool != nil && issue == "" && canServe && len(steps) == 0
-			detach = detach || index == defaultOwner && !backendReady
+			liveBatch := !listenerFailed && eligibleTCPRejectionLiveUpdate(steps, issue)
+			detach = detach || index == defaultOwner && !backendReady && !liveBatch
 			switch {
 			case issue != "":
 				routeResult.Outcome = p.progressingOutcome(issue)

@@ -327,7 +327,7 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 	if !pending || len(readyPools) == 0 {
 		return nil
 	}
-	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer)
+	inventory, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
 	if err != nil {
 		return nil
 	}
@@ -341,17 +341,17 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 		if poolID == "" || slices.ContainsFunc(ports, func(port int) bool { return readyPools[port] != poolID }) {
 			continue
 		}
-		poolIndex := slices.IndexFunc(poolItems, func(pool pools.Pool) bool { return pool.ID == poolID })
+		poolIndex := slices.IndexFunc(inventory.Items, func(pool pools.Pool) bool { return pool.ID == poolID })
 		if poolIndex == -1 {
 			continue
 		}
-		pool := poolItems[poolIndex]
+		pool := inventory.Items[poolIndex]
 		if !pool.AdminStateUp || pool.ProvisioningStatus != "ACTIVE" || len(pool.Listeners) != len(ports) ||
 			!route.identity.MatchesRoute(pool.Tags, rolePool) ||
 			p.validateScopedDefaultPool(pool, actual.loadBalancer.ID, actual.scopedListeners, actual.protocol) != nil {
 			continue
 		}
-		observed := observedRouteGraph{pool: &pool}
+		observed := observedRouteGraph{pool: &pool, tcpRejection: inventory.TCPConnectionRejection[pool.ID]}
 		if p.observeRoutePoolChildren(ctx, route.identity, &observed) != nil || observed.validateDefaultPoolChildren() != nil {
 			continue
 		}
@@ -365,7 +365,7 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 // pending sibling permits a read-only observation of this route's backend.
 func scopedRouteBackendReady(route desiredRoute, observed observedRouteGraph, vip string, changes []routeMutation, provisioningIssue string) bool {
 	return observed.pool != nil && provisioningIssue == "" && len(changes) == 0 &&
-		slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining }) &&
+		defaultPoolCanServe(route) &&
 		(route.spec.GatewayRequirements.ListenerProtocol == cloud.ListenerProtocolTCP || hasActiveUDPBackend(route, observed, vip))
 }
 
@@ -410,7 +410,7 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 				break
 			}
 			changes, _, err := buildRouteEnsurePlan(route, observed)
-			if errors.Is(err, errWeightedTCPBackupUnknown) {
+			if errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) || errors.Is(err, errTCPRejectionReadback) {
 				break
 			}
 			if err != nil {
@@ -435,8 +435,15 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 			if err := validateScopedRouteGatewayIDs(route.spec.Gateway, actual.state, actual.scopedListeners); err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
+			if pending := tcpRejectionProvisioningPending(route, observed); pending != "" {
+				routeResult.Outcome = p.progressingOutcome(pending)
+				for _, port := range route.spec.ScopedListenerPorts {
+					keepEdge[port] = found[port].DefaultPoolID == observed.pool.ID
+				}
+				break
+			}
 			steps, state, err := buildRouteEnsurePlan(route, observed)
-			if errors.Is(err, errWeightedTCPBackupUnknown) {
+			if errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) || errors.Is(err, errTCPRejectionReadback) {
 				routeResult.Outcome = p.progressingOutcome(err.Error())
 				break
 			}
@@ -480,6 +487,12 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 					default:
 						routeResult.Outcome = p.progressingOutcome("Waiting for the previous route to detach")
 					}
+				}
+			}
+			if eligibleTCPRejectionLiveUpdate(steps, issue) {
+				for _, port := range route.spec.ScopedListenerPorts {
+					listener := found[port]
+					keepEdge[port] = listener.DefaultPoolID == observed.pool.ID && listener.ProvisioningStatus == "ACTIVE"
 				}
 			}
 			if routeResult.Outcome.State == cloud.OutcomeReady && !gatewayReady &&

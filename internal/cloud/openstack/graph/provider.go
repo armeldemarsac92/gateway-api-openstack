@@ -72,6 +72,7 @@ type ProviderConfig struct {
 	BackendCA              *backendca.Store
 	BackendTLSPolicy       bool
 	BackendRetryBudget     bool
+	TCPConnectionRejection bool
 	FixedHTTPResponses     bool
 	HTTPHeaderExact        bool
 	HTTPQueryParamExact    bool
@@ -106,6 +107,7 @@ type Provider struct {
 	backendCA              *backendca.Store
 	backendTLSPolicy       bool
 	backendRetryBudget     bool
+	tcpConnectionRejection bool
 	fixedHTTPResponses     bool
 	httpHeaderExact        bool
 	httpQueryParamExact    bool
@@ -153,6 +155,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		backendCA:              cfg.BackendCA,
 		backendTLSPolicy:       cfg.BackendTLSPolicy,
 		backendRetryBudget:     cfg.BackendRetryBudget,
+		tcpConnectionRejection: cfg.TCPConnectionRejection,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
@@ -242,6 +245,20 @@ func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	available, err := p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityBackendRetryBudget)
+	if isNotFound(err) {
+		return false, nil
+	}
+	return available, err
+}
+
+// TCPConnectionRejectionAvailable checks explicit opt-in and regional Amphora support.
+func (p *Provider) TCPConnectionRejectionAvailable(ctx context.Context) (bool, error) {
+	if !p.tcpConnectionRejection {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	available, err := p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityTCPConnectionRejection)
 	if isNotFound(err) {
 		return false, nil
 	}

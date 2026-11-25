@@ -289,19 +289,30 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	}
 	// Zero-weight references affect status only. Their authorization and
 	// revisions cannot change the serving destinations of the sealed graph.
-	refs, rejections, err := r.authorizedBackends(ctx, route, false)
-	revisions.grants = rejections.grants
-	if err != nil || rejections.active != nil || len(refs) == 0 {
+	refs, auth, err := r.authorizedBackends(ctx, route, false)
+	revisions.grants = auth.grants
+	if err != nil || auth.active != nil && auth.rejectWeight == 0 || auth.active != nil && !r.tcpConnectionRejectionEnabled() {
 		return nil, "", revisions, err
 	}
-	services, rejections, err := r.backendServices(ctx, refs, "")
-	if err != nil || rejections.active != nil || len(services) == 0 {
+	services, invalid, err := r.backendServices(ctx, refs, "")
+	if err != nil || invalid.active != nil && !r.tcpConnectionRejectionEnabled() {
 		return nil, "", revisions, err
 	}
-	for _, service := range services {
-		revisions.services = append(revisions.services, revisionOf(service.service))
+	revisions.services = invalid.services
+	rejectWeight := auth.rejectWeight + invalid.rejectWeight
+	if readErr := errors.Join(auth.readError, invalid.readError); readErr != nil {
+		if rejectWeight > 0 {
+			return nil, "", revisions, nil
+		}
+		return nil, "", revisions, readErr
 	}
-	spec, target, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, services, topology, ports...)
+	if len(services) == 0 && rejectWeight == 0 {
+		return nil, "", revisions, nil
+	}
+	spec, target, diagnostic, err := r.buildRouteSpec(ctx, route, gateway, listener, services, rejectWeight, topology, ports...)
+	if err != nil && rejectWeight > 0 {
+		return nil, "", revisions, nil
+	}
 	if err != nil || diagnostic != nil {
 		return nil, "", revisions, err
 	}
