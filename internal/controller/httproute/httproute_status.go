@@ -520,7 +520,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Gateway member mode is pending"})
 			} else if observation.Spec.SessionPersistence != nil && status.resolved != metav1.ConditionFalse {
 				status.resolved, status.resolvedReason, status.resolvedMessage = cookieCapability.apply(status.resolved, status.resolvedReason, status.resolvedMessage,
-					observation.Spec.SessionPersistence.AbsoluteTimeout != nil)
+					model.XBackendCookieRequirements(*observation.Spec.SessionPersistence))
 			}
 			continue
 		}

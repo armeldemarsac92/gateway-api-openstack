@@ -1,0 +1,1611 @@
+{
+  "passed": true,
+  "deliveryPinsSHA256": "0913aa9ff8c5541007cfb05f2286a0602d4de00a46f54ecbcba79ab2c93eb4d6",
+  "scope": "Local kind, OCI-extracted manager, Octavia REST, native Amphora rendering, HAProxy and real Pods",
+  "client": "Python MozillaCookieJar, using ordinary file save and reopen for the restart checks",
+  "limits": [
+    "Browser GUI",
+    "production Amphora agent",
+    "live Hibiscus region"
+  ],
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "campaignExitCode": 0,
+      "channelExitCode": 0,
+      "runnerExitCode": 0,
+      "passed": true,
+      "evidenceSHA256": "beb2dda4886e36035120e26d9753894bc88210665ee418183545e5f8eb2fb89a",
+      "receipt": {
+        "channel": "standard",
+        "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "controllerRevision": "249f9436e527bb885818c0bf29924236e666c591",
+        "verifiedOCIManifest": "sha256:8125eff5623c2b9b2bfb7dd34cad6b8b2bffd5de2290f25bc67d5d00e0bb97e1",
+        "managerSHA256": "cb782dcd6fe79efa9be4ff3e2348ec11e223eb342751823b4ebefb03ddce8ff8",
+        "fixtureBackendSHA256": "e8a1336969acca9b1cadc633f2bd21e7e0218a8fbc4d6c1fea95f8400f35d9e4",
+        "kindNodeImageDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+        "octavia": {
+          "revision": "0a0c55cbc7c390ffe7bf8084b79517c4b7c74a89",
+          "version": "19.0.1.dev76",
+          "sha256": "7816656e8d93321f70d5be4a702b71e6b16ddaa2226ffb28bcfd679478ea257d",
+          "filesVerified": 666
+        },
+        "octaviaLib": {
+          "revision": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+          "version": "3.12.1.dev19",
+          "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+          "filesVerified": 24
+        },
+        "HAProxy": {
+          "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+          "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287"
+        },
+        "xBackendCRD": {
+          "installed": false,
+          "discovered": false
+        },
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "capabilitiesDefault": [],
+        "capabilitiesConfigured": [],
+        "phases": {
+          "ordinary-service": {
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              {
+                "type": "ResolvedRefs",
+                "status": "True",
+                "reason": "ResolvedRefs",
+                "observedGeneration": 1
+              },
+              {
+                "type": "gateway-api-openstack.github.io/Programmed",
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            ],
+            "provider": {
+              "pool": "d0aad913956a8d4ae56628cfdffacf4a82643e02a92707c0c222ff2f777c3b0e",
+              "rule": "325e1aa80a325e0952c3d05c61bfa42a05cde5f8bd041efec8117832d73b5aee",
+              "policy": "1c246346c4fc8b4fba4e1820e2d57ed03365d403d2a0c88bedbc010ab130c9c6",
+              "loadBalancer": "8b423d26d1a7907c06ad0813b456ff906e4816059ae4dcb2f8671ca3271bd063",
+              "listener": "7355534731e6a5dfe11d1ed231b6d3652f87c0e11a4c75b8c6800488da3a62b0",
+              "provisioning": "ACTIVE",
+              "poolEnabled": true,
+              "poolProtocol": "HTTP",
+              "poolAlgorithm": "ROUND_ROBIN",
+              "nativeSignedCookieLimitUs": null,
+              "nativePolicySelectsPool": true,
+              "sessionPersistence": null,
+              "members": [
+                {
+                  "member": "3eb4ee8b2c9c0415705bedb0a90bb8c3248c7948b840206cc2075e9fbf4e8fb4",
+                  "port": 8080,
+                  "provisioning": "ACTIVE",
+                  "enabled": true,
+                  "weight": 1,
+                  "endpointSHA256": "8959edf6884f2c2e223a9319e83a69820ff7a9c39ecd7ebe6413e5297d4347dd"
+                }
+              ],
+              "haproxyServerCount": 1
+            },
+            "wire": [
+              {
+                "path": "/sibling",
+                "startUTC": "2026-11-25T08:35:18.675+00:00",
+                "startMs": 0.0,
+                "endMs": 7.751,
+                "status": 200,
+                "pod": "sibling",
+                "sentCookieSHA256": null,
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 0
+              },
+              {
+                "path": "/sibling",
+                "startUTC": "2026-11-25T08:35:18.684+00:00",
+                "startMs": 0.0,
+                "endMs": 3.97,
+                "status": 200,
+                "pod": "sibling",
+                "sentCookieSHA256": null,
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 0
+              },
+              {
+                "path": "/sibling",
+                "startUTC": "2026-11-25T08:35:18.689+00:00",
+                "startMs": 0.0,
+                "endMs": 2.685,
+                "status": 200,
+                "pod": "sibling",
+                "sentCookieSHA256": null,
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 0
+              }
+            ]
+          }
+        }
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "campaignExitCode": 0,
+      "channelExitCode": 0,
+      "runnerExitCode": 0,
+      "passed": true,
+      "evidenceSHA256": "2a7f676c69edc3e3c63d0b4ad92dfa63c137849bf52ede9f92d1536ce59a300b",
+      "receipt": {
+        "channel": "experimental",
+        "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "controllerRevision": "249f9436e527bb885818c0bf29924236e666c591",
+        "verifiedOCIManifest": "sha256:8125eff5623c2b9b2bfb7dd34cad6b8b2bffd5de2290f25bc67d5d00e0bb97e1",
+        "managerSHA256": "cb782dcd6fe79efa9be4ff3e2348ec11e223eb342751823b4ebefb03ddce8ff8",
+        "fixtureBackendSHA256": "e8a1336969acca9b1cadc633f2bd21e7e0218a8fbc4d6c1fea95f8400f35d9e4",
+        "kindNodeImageDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+        "octavia": {
+          "revision": "0a0c55cbc7c390ffe7bf8084b79517c4b7c74a89",
+          "version": "19.0.1.dev76",
+          "sha256": "7816656e8d93321f70d5be4a702b71e6b16ddaa2226ffb28bcfd679478ea257d",
+          "filesVerified": 666
+        },
+        "octaviaLib": {
+          "revision": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+          "version": "3.12.1.dev19",
+          "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+          "filesVerified": 24
+        },
+        "HAProxy": {
+          "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+          "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287"
+        },
+        "xBackendCRD": {
+          "installed": true,
+          "discovered": true,
+          "servedVersions": [
+            "v1alpha1"
+          ]
+        },
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "capabilitiesDefault": [],
+        "capabilitiesConfigured": [
+          "http_cookie_absolute_timeout_v1",
+          "http_cookie_name_v1",
+          "http_cookie_permanent_v1"
+        ],
+        "phases": {
+          "ordinary-service": {
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              {
+                "type": "ResolvedRefs",
+                "status": "True",
+                "reason": "ResolvedRefs",
+                "observedGeneration": 1
+              },
+              {
+                "type": "gateway-api-openstack.github.io/Programmed",
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            ],
+            "provider": {
+              "pool": "eec70cc53281b1936897f534c0d7771b56930b57b5074ca79e3acc8689239e2d",
+              "rule": "0d11e7c27b54c18d109e83aeae00329ff6e930f14c6583a73f242664f1c19b3e",
+              "policy": "ecc347a860e3173048f52248e83ff95fbda534a0f417f9be0427258189d727e9",
+              "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+              "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+              "provisioning": "ACTIVE",
+              "poolEnabled": true,
+              "poolProtocol": "HTTP",
+              "poolAlgorithm": "ROUND_ROBIN",
+              "nativeSignedCookieLimitUs": null,
+              "nativePolicySelectsPool": true,
+              "sessionPersistence": null,
+              "members": [
+                {
+                  "member": "574766d88d0a76c5cbe52e69e9aaae3723a631d788ee991783bead428050adf4",
+                  "port": 8080,
+                  "provisioning": "ACTIVE",
+                  "enabled": true,
+                  "weight": 1,
+                  "endpointSHA256": "8959edf6884f2c2e223a9319e83a69820ff7a9c39ecd7ebe6413e5297d4347dd"
+                }
+              ],
+              "haproxyServerCount": 1
+            },
+            "wire": [
+              {
+                "path": "/sibling",
+                "startUTC": "2026-11-25T08:37:37.082+00:00",
+                "startMs": 0.0,
+                "endMs": 2.26,
+                "status": 200,
+                "pod": "sibling",
+                "sentCookieSHA256": null,
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 0
+              },
+              {
+                "path": "/sibling",
+                "startUTC": "2026-11-25T08:37:37.085+00:00",
+                "startMs": 0.0,
+                "endMs": 1.476,
+                "status": 200,
+                "pod": "sibling",
+                "sentCookieSHA256": null,
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 0
+              },
+              {
+                "path": "/sibling",
+                "startUTC": "2026-11-25T08:37:37.087+00:00",
+                "startMs": 0.0,
+                "endMs": 1.278,
+                "status": 200,
+                "pod": "sibling",
+                "sentCookieSHA256": null,
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 0
+              }
+            ]
+          },
+          "permanent-300s": {
+            "passed": true,
+            "generation": 1,
+            "persistenceSpec": {
+              "absoluteTimeout": "5m",
+              "cookie": {
+                "name": "fixture_session",
+                "path": "/",
+                "lifetimeType": "Permanent"
+              }
+            },
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              }
+            ],
+            "routes": {
+              "first": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "740a8998830a7a880747e913d6fbd94c811c37f7764684cd3873eba29098c7b4",
+                  "rule": "ddedf9a384eb327714d23f922448cffe6fd0fa01b09a6fefaa4f35b816782579",
+                  "policy": "a425b704f0a744a07f5fb1b14993c96f2516df4a7441324e08240e22527a5d6e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 300000000,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 300000,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e",
+                    "cookie_permanent": true
+                  },
+                  "members": [
+                    {
+                      "member": "4edd4a1abfbfed8bf6fc420c2468c9904aa771d8b1ba897be4fd7d81278d6137",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "e0918c416b53dd07e51a59916d9e89af9b246ee450f5fdeb2f8e515b9f651be0",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              },
+              "second": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "5f1dda9676dd79503385935b89fa2aec119a150003f6fa2297d166cd4be7c70d",
+                  "rule": "72f4aeca1af746fc9e3a71666608029e2e57310dc699c44dd90c82327bfe3668",
+                  "policy": "847aac028849fa5102047616915a4ce629bfd3079ac42cd47be2710ac9450d9e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 300000000,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 300000,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e",
+                    "cookie_permanent": true
+                  },
+                  "members": [
+                    {
+                      "member": "19c80d1b60b10749519a9d536124bd980e7cdba799bd81a991f0b12010af0955",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "79bf29a13a6a1fb0008f2bfdc8ad4aaffbe704eb0321ff9f4ad262ac84d6ef38",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              }
+            },
+            "memberTransitions": {
+              "first": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": true,
+                "drainedBeforeRepopulating": false
+              },
+              "second": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": true,
+                "drainedBeforeRepopulating": false
+              }
+            },
+            "wire": {
+              "freshByRoute": {
+                "first": [
+                  {
+                    "path": "/first/session",
+                    "startUTC": "2026-11-25T08:37:51.078+00:00",
+                    "startMs": 0.0,
+                    "endMs": 2.713,
+                    "status": 200,
+                    "pod": "pod-a",
+                    "sentCookieSHA256": null,
+                    "setCookieCount": 1,
+                    "namedSetCookieCount": 1,
+                    "emptySetCookieCount": 0,
+                    "setCookieSHA256": "19eadde385ad7f731abaf967724e0062dbeec364aaa949aa25ec9bb09b11fc19",
+                    "cookieFormat": "signed-v1",
+                    "explicitRootPath": true,
+                    "domainAttribute": false,
+                    "expiresAttribute": false,
+                    "maxAgeAttribute": true,
+                    "maxAgeSeconds": 300,
+                    "jarEntryCount": 1,
+                    "jarCookieSHA256": "19eadde385ad7f731abaf967724e0062dbeec364aaa949aa25ec9bb09b11fc19",
+                    "clientSession": false,
+                    "clientExpires": true,
+                    "clientRootPath": true,
+                    "clientHostOnly": true
+                  },
+                  {
+                    "path": "/first/session",
+                    "startUTC": "2026-11-25T08:37:51.082+00:00",
+                    "startMs": 0.0,
+                    "endMs": 1.728,
+                    "status": 200,
+                    "pod": "pod-b",
+                    "sentCookieSHA256": null,
+                    "setCookieCount": 1,
+                    "namedSetCookieCount": 1,
+                    "emptySetCookieCount": 0,
+                    "setCookieSHA256": "db688156af8755ec14a3cf761ff592da3d44b76cda73f83d4eed79b471e4b8e9",
+                    "cookieFormat": "signed-v1",
+                    "explicitRootPath": true,
+                    "domainAttribute": false,
+                    "expiresAttribute": false,
+                    "maxAgeAttribute": true,
+                    "maxAgeSeconds": 300,
+                    "jarEntryCount": 1,
+                    "jarCookieSHA256": "db688156af8755ec14a3cf761ff592da3d44b76cda73f83d4eed79b471e4b8e9",
+                    "clientSession": false,
+                    "clientExpires": true,
+                    "clientRootPath": true,
+                    "clientHostOnly": true
+                  }
+                ],
+                "second": [
+                  {
+                    "path": "/second/session",
+                    "startUTC": "2026-11-25T08:37:51.084+00:00",
+                    "startMs": 0.0,
+                    "endMs": 1.198,
+                    "status": 200,
+                    "pod": "pod-a",
+                    "sentCookieSHA256": null,
+                    "setCookieCount": 1,
+                    "namedSetCookieCount": 1,
+                    "emptySetCookieCount": 0,
+                    "setCookieSHA256": "71415da8f71e58ff350cbc9c6827b6b5b89b37e29a539b34244e2621a7ac4421",
+                    "cookieFormat": "signed-v1",
+                    "explicitRootPath": true,
+                    "domainAttribute": false,
+                    "expiresAttribute": false,
+                    "maxAgeAttribute": true,
+                    "maxAgeSeconds": 300,
+                    "jarEntryCount": 1,
+                    "jarCookieSHA256": "71415da8f71e58ff350cbc9c6827b6b5b89b37e29a539b34244e2621a7ac4421",
+                    "clientSession": false,
+                    "clientExpires": true,
+                    "clientRootPath": true,
+                    "clientHostOnly": true
+                  },
+                  {
+                    "path": "/second/session",
+                    "startUTC": "2026-11-25T08:37:51.086+00:00",
+                    "startMs": 0.0,
+                    "endMs": 11.594,
+                    "status": 200,
+                    "pod": "pod-b",
+                    "sentCookieSHA256": null,
+                    "setCookieCount": 1,
+                    "namedSetCookieCount": 1,
+                    "emptySetCookieCount": 0,
+                    "setCookieSHA256": "05ffdf1f025af7219438482607fc8a51a764a5eef5b9ee4c586d1ca55d28933c",
+                    "cookieFormat": "signed-v1",
+                    "explicitRootPath": true,
+                    "domainAttribute": false,
+                    "expiresAttribute": false,
+                    "maxAgeAttribute": true,
+                    "maxAgeSeconds": 300,
+                    "jarEntryCount": 1,
+                    "jarCookieSHA256": "05ffdf1f025af7219438482607fc8a51a764a5eef5b9ee4c586d1ca55d28933c",
+                    "clientSession": false,
+                    "clientExpires": true,
+                    "clientRootPath": true,
+                    "clientHostOnly": true
+                  }
+                ]
+              },
+              "fresh": {
+                "path": "/first/session",
+                "startUTC": "2026-11-25T08:37:51.098+00:00",
+                "startMs": 0.0,
+                "endMs": 2.574,
+                "status": 200,
+                "pod": "pod-a",
+                "sentCookieSHA256": null,
+                "setCookieCount": 1,
+                "namedSetCookieCount": 1,
+                "emptySetCookieCount": 0,
+                "setCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                "cookieFormat": "signed-v1",
+                "explicitRootPath": true,
+                "domainAttribute": false,
+                "expiresAttribute": false,
+                "maxAgeAttribute": true,
+                "maxAgeSeconds": 300,
+                "jarEntryCount": 1,
+                "jarCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                "clientSession": false,
+                "clientExpires": true,
+                "clientRootPath": true,
+                "clientHostOnly": true
+              },
+              "persistedJar": {
+                "reopenedEntryCount": 1,
+                "cookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                "persistent": true,
+                "rootPath": true,
+                "hostOnly": true
+              },
+              "afterClientRestart": [
+                {
+                  "path": "/second/session",
+                  "startUTC": "2026-11-25T08:37:51.102+00:00",
+                  "startMs": 3.436,
+                  "endMs": 5.78,
+                  "status": 200,
+                  "pod": "pod-a",
+                  "sentCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 1,
+                  "jarCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                  "clientSession": false,
+                  "clientExpires": true,
+                  "clientRootPath": true,
+                  "clientHostOnly": true
+                },
+                {
+                  "path": "/first/session",
+                  "startUTC": "2026-11-25T08:37:51.105+00:00",
+                  "startMs": 6.56,
+                  "endMs": 8.128,
+                  "status": 200,
+                  "pod": "pod-a",
+                  "sentCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 1,
+                  "jarCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                  "clientSession": false,
+                  "clientExpires": true,
+                  "clientRootPath": true,
+                  "clientHostOnly": true
+                }
+              ]
+            },
+            "ordinaryService": {
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              ],
+              "provider": {
+                "pool": "eec70cc53281b1936897f534c0d7771b56930b57b5074ca79e3acc8689239e2d",
+                "rule": "0d11e7c27b54c18d109e83aeae00329ff6e930f14c6583a73f242664f1c19b3e",
+                "policy": "ecc347a860e3173048f52248e83ff95fbda534a0f417f9be0427258189d727e9",
+                "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "nativeSignedCookieLimitUs": null,
+                "nativePolicySelectsPool": true,
+                "sessionPersistence": null,
+                "members": [
+                  {
+                    "member": "574766d88d0a76c5cbe52e69e9aaae3723a631d788ee991783bead428050adf4",
+                    "port": 8080,
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1,
+                    "endpointSHA256": "8959edf6884f2c2e223a9319e83a69820ff7a9c39ecd7ebe6413e5297d4347dd"
+                  }
+                ],
+                "haproxyServerCount": 1
+              },
+              "wire": [
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:37:51.259+00:00",
+                  "startMs": 0.0,
+                  "endMs": 2.186,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:37:51.262+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.178,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:37:51.264+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.172,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                }
+              ]
+            }
+          },
+          "session-300s": {
+            "passed": true,
+            "generation": 2,
+            "persistenceSpec": {
+              "absoluteTimeout": "5m",
+              "cookie": {
+                "name": "fixture_session",
+                "path": "/",
+                "lifetimeType": "Session"
+              }
+            },
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 2
+              }
+            ],
+            "routes": {
+              "first": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "740a8998830a7a880747e913d6fbd94c811c37f7764684cd3873eba29098c7b4",
+                  "rule": "ddedf9a384eb327714d23f922448cffe6fd0fa01b09a6fefaa4f35b816782579",
+                  "policy": "a425b704f0a744a07f5fb1b14993c96f2516df4a7441324e08240e22527a5d6e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 300000000,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 300000,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e"
+                  },
+                  "members": [
+                    {
+                      "member": "99431a24379bbf4386f0247e06f7b540586cbf320f393102df0d95293afc111f",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "896f0f422d7bd484618c33be748e7af7def496d475be8a1cdae442b91d0235bb",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              },
+              "second": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "5f1dda9676dd79503385935b89fa2aec119a150003f6fa2297d166cd4be7c70d",
+                  "rule": "72f4aeca1af746fc9e3a71666608029e2e57310dc699c44dd90c82327bfe3668",
+                  "policy": "847aac028849fa5102047616915a4ce629bfd3079ac42cd47be2710ac9450d9e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 300000000,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 300000,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e"
+                  },
+                  "members": [
+                    {
+                      "member": "a1cb372cbdea6fad60adbd3984cf6bc4797020d4d187e62cb1d3910fcc3b7a9f",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "9157a4b982924eaed713c056ee10bfdb23e910e9c9d28f2489ef9e843e75e63e",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              }
+            },
+            "memberTransitions": {
+              "first": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": false,
+                "drainedBeforeRepopulating": true
+              },
+              "second": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": false,
+                "drainedBeforeRepopulating": true
+              }
+            },
+            "wire": {
+              "permanentReplay": {
+                "path": "/second/session",
+                "startUTC": "2026-11-25T08:38:01.073+00:00",
+                "startMs": 9975.057,
+                "endMs": 9977.596,
+                "status": 200,
+                "pod": "pod-a",
+                "sentCookieSHA256": "da8e6a6f58accd1caba87aad46e4c7795630b959e39e0c632bb823b0672899b8",
+                "setCookieCount": 1,
+                "namedSetCookieCount": 1,
+                "emptySetCookieCount": 0,
+                "setCookieSHA256": "8d2785da27506888c2b4348770ef609405f949c3f47f76d2233004bf425750fd",
+                "cookieFormat": "signed-v1",
+                "explicitRootPath": true,
+                "domainAttribute": false,
+                "expiresAttribute": false,
+                "maxAgeAttribute": false,
+                "maxAgeSeconds": null,
+                "jarEntryCount": 1,
+                "jarCookieSHA256": "8d2785da27506888c2b4348770ef609405f949c3f47f76d2233004bf425750fd",
+                "clientSession": true,
+                "clientExpires": false,
+                "clientRootPath": true,
+                "clientHostOnly": true
+              },
+              "persistedJar": {
+                "reopenedEntryCount": 0
+              }
+            },
+            "ordinaryService": {
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              ],
+              "provider": {
+                "pool": "eec70cc53281b1936897f534c0d7771b56930b57b5074ca79e3acc8689239e2d",
+                "rule": "0d11e7c27b54c18d109e83aeae00329ff6e930f14c6583a73f242664f1c19b3e",
+                "policy": "ecc347a860e3173048f52248e83ff95fbda534a0f417f9be0427258189d727e9",
+                "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "nativeSignedCookieLimitUs": null,
+                "nativePolicySelectsPool": true,
+                "sessionPersistence": null,
+                "members": [
+                  {
+                    "member": "574766d88d0a76c5cbe52e69e9aaae3723a631d788ee991783bead428050adf4",
+                    "port": 8080,
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1,
+                    "endpointSHA256": "8959edf6884f2c2e223a9319e83a69820ff7a9c39ecd7ebe6413e5297d4347dd"
+                  }
+                ],
+                "haproxyServerCount": 1
+              },
+              "wire": [
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:01.232+00:00",
+                  "startMs": 0.0,
+                  "endMs": 2.706,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:01.235+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.28,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:01.237+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.175,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                }
+              ]
+            }
+          },
+          "permanent-1500ms": {
+            "passed": true,
+            "generation": 3,
+            "persistenceSpec": {
+              "absoluteTimeout": "1s500ms",
+              "cookie": {
+                "name": "fixture_session",
+                "path": "/",
+                "lifetimeType": "Permanent"
+              }
+            },
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 3
+              }
+            ],
+            "routes": {
+              "first": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "740a8998830a7a880747e913d6fbd94c811c37f7764684cd3873eba29098c7b4",
+                  "rule": "ddedf9a384eb327714d23f922448cffe6fd0fa01b09a6fefaa4f35b816782579",
+                  "policy": "a425b704f0a744a07f5fb1b14993c96f2516df4a7441324e08240e22527a5d6e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 1500000,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 1500,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e",
+                    "cookie_permanent": true
+                  },
+                  "members": [
+                    {
+                      "member": "cbee4c551bdfc6af1280e12f9746412af7b56a8b7625a5b59239e943a6f81c43",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "54cf9e8e81860ef1fee68d2a0c5d8d58f0c640327086afca7a5215ebbbb81bf3",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              },
+              "second": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "5f1dda9676dd79503385935b89fa2aec119a150003f6fa2297d166cd4be7c70d",
+                  "rule": "72f4aeca1af746fc9e3a71666608029e2e57310dc699c44dd90c82327bfe3668",
+                  "policy": "847aac028849fa5102047616915a4ce629bfd3079ac42cd47be2710ac9450d9e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 1500000,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 1500,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e",
+                    "cookie_permanent": true
+                  },
+                  "members": [
+                    {
+                      "member": "dea6ce36b1cdf53e759578dd72b412ce365b926cc1bf1e9f08aa424327ce9355",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "65428e876c0873a16001d9651d40d04e9a4d6b2f8e5e7b4103486eb0990e37d6",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              }
+            },
+            "memberTransitions": {
+              "first": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": false,
+                "drainedBeforeRepopulating": true
+              },
+              "second": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": false,
+                "drainedBeforeRepopulating": true
+              }
+            },
+            "wire": {
+              "fresh": {
+                "path": "/first/session",
+                "startUTC": "2026-11-25T08:38:11.146+00:00",
+                "startMs": 0.0,
+                "endMs": 2.344,
+                "status": 200,
+                "pod": "pod-a",
+                "sentCookieSHA256": null,
+                "setCookieCount": 1,
+                "namedSetCookieCount": 1,
+                "emptySetCookieCount": 0,
+                "setCookieSHA256": "7a9e0a5cfabe6f70b55ae41bcfb7a2cf45d5c4c6d17254e5ad1e1bbbc002902b",
+                "cookieFormat": "signed-v1",
+                "explicitRootPath": true,
+                "domainAttribute": false,
+                "expiresAttribute": false,
+                "maxAgeAttribute": true,
+                "maxAgeSeconds": 2,
+                "jarEntryCount": 1,
+                "jarCookieSHA256": "7a9e0a5cfabe6f70b55ae41bcfb7a2cf45d5c4c6d17254e5ad1e1bbbc002902b",
+                "clientSession": false,
+                "clientExpires": true,
+                "clientRootPath": true,
+                "clientHostOnly": true
+              },
+              "beforeDeadline": {
+                "path": "/second/session",
+                "startUTC": "2026-11-25T08:38:11.747+00:00",
+                "startMs": 601.0,
+                "endMs": 603.689,
+                "status": 200,
+                "pod": "pod-a",
+                "sentCookieSHA256": "7a9e0a5cfabe6f70b55ae41bcfb7a2cf45d5c4c6d17254e5ad1e1bbbc002902b",
+                "setCookieCount": 0,
+                "namedSetCookieCount": 0,
+                "emptySetCookieCount": 0,
+                "jarEntryCount": 1,
+                "jarCookieSHA256": "7a9e0a5cfabe6f70b55ae41bcfb7a2cf45d5c4c6d17254e5ad1e1bbbc002902b",
+                "clientSession": false,
+                "clientExpires": true,
+                "clientRootPath": true,
+                "clientHostOnly": true
+              },
+              "afterDeadlineExplicitReplay": {
+                "path": "/first/session",
+                "startUTC": "2026-11-25T08:38:12.810+00:00",
+                "startMs": 1664.046,
+                "endMs": 1667.837,
+                "status": 200,
+                "pod": "pod-b",
+                "sentCookieSHA256": "7a9e0a5cfabe6f70b55ae41bcfb7a2cf45d5c4c6d17254e5ad1e1bbbc002902b",
+                "setCookieCount": 1,
+                "namedSetCookieCount": 1,
+                "emptySetCookieCount": 0,
+                "setCookieSHA256": "1a4d685e6fe788051a44f4cfd5973dc832ca06f4bcf6ba2128f4b646eca7e900",
+                "cookieFormat": "signed-v1",
+                "explicitRootPath": true,
+                "domainAttribute": false,
+                "expiresAttribute": false,
+                "maxAgeAttribute": true,
+                "maxAgeSeconds": 2,
+                "jarEntryCount": 1,
+                "jarCookieSHA256": "1a4d685e6fe788051a44f4cfd5973dc832ca06f4bcf6ba2128f4b646eca7e900",
+                "clientSession": false,
+                "clientExpires": true,
+                "clientRootPath": true,
+                "clientHostOnly": true
+              }
+            },
+            "ordinaryService": {
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              ],
+              "provider": {
+                "pool": "eec70cc53281b1936897f534c0d7771b56930b57b5074ca79e3acc8689239e2d",
+                "rule": "0d11e7c27b54c18d109e83aeae00329ff6e930f14c6583a73f242664f1c19b3e",
+                "policy": "ecc347a860e3173048f52248e83ff95fbda534a0f417f9be0427258189d727e9",
+                "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "nativeSignedCookieLimitUs": null,
+                "nativePolicySelectsPool": true,
+                "sessionPersistence": null,
+                "members": [
+                  {
+                    "member": "574766d88d0a76c5cbe52e69e9aaae3723a631d788ee991783bead428050adf4",
+                    "port": 8080,
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1,
+                    "endpointSHA256": "8959edf6884f2c2e223a9319e83a69820ff7a9c39ecd7ebe6413e5297d4347dd"
+                  }
+                ],
+                "haproxyServerCount": 1
+              },
+              "wire": [
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:12.966+00:00",
+                  "startMs": 0.0,
+                  "endMs": 2.445,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:12.969+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.202,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:12.970+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.399,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                }
+              ]
+            }
+          },
+          "permanent-zero": {
+            "passed": true,
+            "generation": 4,
+            "persistenceSpec": {
+              "absoluteTimeout": "0s",
+              "cookie": {
+                "name": "fixture_session",
+                "path": "/",
+                "lifetimeType": "Permanent"
+              }
+            },
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 4
+              }
+            ],
+            "routes": {
+              "first": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "740a8998830a7a880747e913d6fbd94c811c37f7764684cd3873eba29098c7b4",
+                  "rule": "ddedf9a384eb327714d23f922448cffe6fd0fa01b09a6fefaa4f35b816782579",
+                  "policy": "a425b704f0a744a07f5fb1b14993c96f2516df4a7441324e08240e22527a5d6e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 0,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 0,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e",
+                    "cookie_permanent": true
+                  },
+                  "members": [
+                    {
+                      "member": "bb39e9407d58b74238ec8eb557b54c3219b9bc355426e88313b1e11b229ba119",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "be629195c8948117d1ef722a5df59d6e9caabfc6bebad54d8cd810d74724bdc5",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              },
+              "second": {
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ],
+                "backendRefWeight": 1,
+                "provider": {
+                  "pool": "5f1dda9676dd79503385935b89fa2aec119a150003f6fa2297d166cd4be7c70d",
+                  "rule": "72f4aeca1af746fc9e3a71666608029e2e57310dc699c44dd90c82327bfe3668",
+                  "policy": "847aac028849fa5102047616915a4ce629bfd3079ac42cd47be2710ac9450d9e",
+                  "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                  "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                  "provisioning": "ACTIVE",
+                  "poolEnabled": true,
+                  "poolProtocol": "HTTP",
+                  "poolAlgorithm": "ROUND_ROBIN",
+                  "nativeSignedCookieLimitUs": 0,
+                  "nativePolicySelectsPool": true,
+                  "sessionPersistence": {
+                    "type": "HTTP_COOKIE",
+                    "cookie_name": "fixture_session",
+                    "cookie_absolute_timeout_ms": 0,
+                    "cookie_scopeSHA256": "e067dbe13cc33151af92f5c839a01ba4ec8ba3aff1e6e2a546319e708b06dc8e",
+                    "cookie_permanent": true
+                  },
+                  "members": [
+                    {
+                      "member": "25f395f4aee536f753c6c8df49eda6695e81c6c1e8e6fc5112fa1eea06a301fc",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+                    },
+                    {
+                      "member": "6a45fa5a94e5f7ff103b5ab2e020c1b28289d48117768c510ac1f4ab053bb71d",
+                      "port": 8080,
+                      "provisioning": "ACTIVE",
+                      "enabled": true,
+                      "weight": 1,
+                      "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+                    }
+                  ],
+                  "haproxyServerCount": 2
+                }
+              }
+            },
+            "memberTransitions": {
+              "first": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": false,
+                "drainedBeforeRepopulating": true
+              },
+              "second": {
+                "sameEndpoints": true,
+                "sameProviderMemberIDs": false,
+                "drainedBeforeRepopulating": true
+              }
+            },
+            "wire": {
+              "fresh": {
+                "path": "/first/session",
+                "startUTC": "2026-11-25T08:38:22.808+00:00",
+                "startMs": 0.0,
+                "endMs": 2.83,
+                "status": 200,
+                "pod": "pod-a",
+                "sentCookieSHA256": null,
+                "setCookieCount": 1,
+                "namedSetCookieCount": 1,
+                "emptySetCookieCount": 0,
+                "setCookieSHA256": "33552ca134aa6725d2e6f2411a1430690c4b5a59a96e06e06f146999fd3e24c6",
+                "cookieFormat": "signed-v1",
+                "explicitRootPath": true,
+                "domainAttribute": false,
+                "expiresAttribute": false,
+                "maxAgeAttribute": true,
+                "maxAgeSeconds": 0,
+                "jarEntryCount": 0
+              },
+              "persistedJar": {
+                "reopenedEntryCount": 0
+              },
+              "explicitReplay": {
+                "path": "/second/session",
+                "startUTC": "2026-11-25T08:38:22.812+00:00",
+                "startMs": 4.048,
+                "endMs": 7.282,
+                "status": 200,
+                "pod": "pod-a",
+                "sentCookieSHA256": "33552ca134aa6725d2e6f2411a1430690c4b5a59a96e06e06f146999fd3e24c6",
+                "setCookieCount": 1,
+                "namedSetCookieCount": 1,
+                "emptySetCookieCount": 0,
+                "setCookieSHA256": "9614914e1f34fb467df3ec28b96ece0e762a22a7aa36e334661929a644e79175",
+                "cookieFormat": "signed-v1",
+                "explicitRootPath": true,
+                "domainAttribute": false,
+                "expiresAttribute": false,
+                "maxAgeAttribute": true,
+                "maxAgeSeconds": 0,
+                "jarEntryCount": 0
+              }
+            },
+            "ordinaryService": {
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              ],
+              "provider": {
+                "pool": "eec70cc53281b1936897f534c0d7771b56930b57b5074ca79e3acc8689239e2d",
+                "rule": "0d11e7c27b54c18d109e83aeae00329ff6e930f14c6583a73f242664f1c19b3e",
+                "policy": "ecc347a860e3173048f52248e83ff95fbda534a0f417f9be0427258189d727e9",
+                "loadBalancer": "6929bc1f3eac3b7621a6541e48a52a1d01b8a63d7937cd65e15936d2dbe4de19",
+                "listener": "ad9e6729eca8e991ca3599d838ec02f47b29058f20bdfc495bc4f59e8e0b2839",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "nativeSignedCookieLimitUs": null,
+                "nativePolicySelectsPool": true,
+                "sessionPersistence": null,
+                "members": [
+                  {
+                    "member": "574766d88d0a76c5cbe52e69e9aaae3723a631d788ee991783bead428050adf4",
+                    "port": 8080,
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1,
+                    "endpointSHA256": "8959edf6884f2c2e223a9319e83a69820ff7a9c39ecd7ebe6413e5297d4347dd"
+                  }
+                ],
+                "haproxyServerCount": 1
+              },
+              "wire": [
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:22.968+00:00",
+                  "startMs": 0.0,
+                  "endMs": 2.024,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:22.971+00:00",
+                  "startMs": 0.0,
+                  "endMs": 1.312,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                },
+                {
+                  "path": "/sibling",
+                  "startUTC": "2026-11-25T08:38:22.973+00:00",
+                  "startMs": 0.0,
+                  "endMs": 8.705,
+                  "status": 200,
+                  "pod": "sibling",
+                  "sentCookieSHA256": null,
+                  "setCookieCount": 0,
+                  "namedSetCookieCount": 0,
+                  "emptySetCookieCount": 0,
+                  "jarEntryCount": 0
+                }
+              ]
+            }
+          }
+        },
+        "permanentWithoutTimeout": {
+          "serverDryRun": true,
+          "exitCode": 1,
+          "matchedCELDiagnostic": "AbsoluteTimeout must be specified when cookie lifetimeType is Permanent"
+        },
+        "pods": {
+          "pod-a": {
+            "ready": true,
+            "object": "3ce3acab4b583ce0e4029cf4e9e6dc81ec8a8167b4aeb153dd20218df3434920",
+            "endpointSHA256": "6ce45278d939063c47d1716f7466a76acba06340ae2460f4ee6262c8654b7f42"
+          },
+          "pod-b": {
+            "ready": true,
+            "object": "4625211bf901c31c307caca2fac1534598512d4264704a412b35fc5d24bd91f8",
+            "endpointSHA256": "e183220b699c10a83ca7be3433d228ed0860a5ecf9480f83e9655f16bad58908"
+          }
+        }
+      }
+    }
+  },
+  "previousFailedAttempts": []
+}

@@ -162,9 +162,37 @@ const (
 	SessionPersistenceUnverified
 	SessionPersistenceDeadlineUnverified
 	SessionPersistenceDeadlineReadbackUnverified
+	SessionPersistencePermanentUnverified
+	SessionPersistencePermanentReadbackUnverified
 	SessionPersistenceUnsupported
 	SessionPersistenceDeadlineUnsupported
+	SessionPersistencePermanentUnsupported
 )
+
+func (requirements HTTPSessionCookieRequirements) DiscoveryIssue(available bool, err error) SessionPersistenceIssue {
+	switch {
+	case err != nil:
+		switch requirements {
+		case HTTPSessionCookiePermanent:
+			return SessionPersistencePermanentUnverified
+		case HTTPSessionCookieTimed:
+			return SessionPersistenceDeadlineUnverified
+		default:
+			return SessionPersistenceUnverified
+		}
+	case !available:
+		switch requirements {
+		case HTTPSessionCookiePermanent:
+			return SessionPersistencePermanentUnsupported
+		case HTTPSessionCookieTimed:
+			return SessionPersistenceDeadlineUnsupported
+		default:
+			return SessionPersistenceUnsupported
+		}
+	default:
+		return SessionPersistenceAvailable
+	}
+}
 
 // RouteReadyResult returns a converged HTTPRoute result.
 func RouteReadyResult(state RouteState) RouteResult {

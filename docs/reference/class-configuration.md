@@ -270,11 +270,26 @@ sessionPersistence:
 
 Omit `name` to generate a stable name from the XBackend UID. All routes to that XBackend use the same generated name, including across route and port edits. Give explicitly named cookies distinct names for different backends sharing a host. Names may contain 1–255 ASCII letters, digits, underscores, dots or hyphens. The prefixes `__Host-`, `__Secure-` and `__Http-` are reserved regardless of case.
 
-Traffic splitting still selects a backend according to the rule's weights. Its cookie selects an eligible endpoint within that backend. The profile covers HTTP and HTTP/1.1, including [ServerOnly backend TLS](../operator-octavia-backend-tls-policy.md#protect-an-experimental-xbackend) with its separate opt-in and Octavia microversion 2.24 or newer. The supported cookie has path `/` and a session lifetime. Other paths, permanent cookies, header persistence, h2c and ExternalHostname are unsupported. The deprecated placement on HTTPRoute and GRPCRoute rules and Service XBackendTrafficPolicy is unsupported.
+Traffic splitting still selects a backend according to the rule's weights. Its cookie selects an eligible endpoint within that backend. The profile covers HTTP and HTTP/1.1, including [ServerOnly backend TLS](../operator-octavia-backend-tls-policy.md#protect-an-experimental-xbackend) with its separate opt-in and Octavia microversion 2.24 or newer. Cookies use path `/` and default to a session lifetime. The permanent option below gives the client an expiry date. Other paths, header persistence, h2c and ExternalHostname remain open. The deprecated placement on HTTPRoute and GRPCRoute rules and Service XBackendTrafficPolicy is unsupported.
 
 To limit the age of endpoint affinity, set `spec.sessionPersistence.absoluteTimeout` on the XBackend, for example `1s500ms`. The existing controller option also requires the region to advertise `http_cookie_absolute_timeout_v1`. Configure the shared worker signing key, apply the database migrations and use eligible Amphora agents before enabling the regional capability. [Octavia configuration and packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-xbackend-cookie-deadline-ebc23c65cea7)
 
-The time starts when the proxy issues the cookie. Reusing it on another route to the same XBackend keeps the original deadline. At expiry the proxy selects an eligible endpoint again. A zero duration expires on the next request. Removing the field restores ordinary named session affinity. Timed cookies use the Amphora wall clock, so clock skew between instances and HAProxy time sampling affect the observed deadline.
+The time starts when the proxy issues the cookie. Reusing it on another route to the same XBackend keeps the original deadline. At expiry the proxy selects an eligible endpoint again. A zero duration expires on the next request. With `lifetimeType: Session`, removing the timeout restores ordinary named session affinity. Timed cookies use the Amphora wall clock, so clock skew between instances and HAProxy time sampling affect the observed deadline.
+
+For a cookie that the client can retain when a session ends, configure the following fields on the XBackend. A permanent cookie requires an absolute timeout. Enable `http_cookie_permanent_v1` in addition to the two named and timed cookie capabilities after updating the database, Octavia workers and eligible Amphora agents. [Octavia packages and pool API](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-xbackend-cookie-permanent-0a0c55cbc7c3)
+
+```yaml
+sessionPersistence:
+  type: Cookie
+  cookie:
+    name: app_affinity
+    lifetimeType: Permanent
+  absoluteTimeout: 30m
+```
+
+The proxy issues `Max-Age` in seconds. It rounds a positive fraction up to the next whole second and enforces the original millisecond deadline on requests. For example, `1s500ms` gives `Max-Age=2` and the gateway expires affinity after 1.5 seconds. A zero duration gives `Max-Age=0`. When switching the same timed cookie back to `Session`, the next request using the old persistent cookie receives a session cookie. [Gateway API cookie lifetimes](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/apis/v1/shared_types.go)
+
+On Experimental, a client saved a five-minute permanent cookie, reopened its cookie jar, and reached the same Pod through both HTTPRoutes. Switching the XBackend to Session replaced the still-valid permanent cookie. The next client save retained no session cookie. With a 1.5-second deadline the proxy issued Max-Age=2. The client kept its endpoint at 0.604 seconds and an explicit replay at 1.664 seconds received a new cookie. A zero deadline issued Max-Age=0 and left the client jar empty. On Standard the ordinary Service answered all 3 requests with HTTP 200. The trial used local kind and HAProxy. Client retention was exercised with Python’s MozillaCookieJar. [Cookie attributes, client storage and endpoint observations](../qualification/v1.7.0/provider/xbackend-permanent-cookie-evidence/receipt.json)
 
 Check the XBackend's current-generation `Accepted` condition under the Gateway ancestor and the HTTPRoute's `ResolvedRefs` and `Programmed` conditions. A missing provider capability reports `UnsupportedValue`. A failed discovery reports `Pending` while the controller retries. During either condition, a direct match uses an empty pool and a weighted rule returns HTTP 500 for the affected share. The controller empties an affected pool before changing or withdrawing the cookie. Once the replacement settings are verified, the pool can serve its eligible endpoints again. [Session persistence contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-1619/index.md)
 

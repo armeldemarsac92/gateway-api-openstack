@@ -144,6 +144,7 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 			group.XBackendCookieDeadline = &cloud.HTTPSessionCookieDeadline{
 				TimeoutMS: *timeout,
 				Scope:     fmt.Sprintf("%x", sha256.Sum256([]byte(backend.UID))),
+				Permanent: XBackendCookieRequirements(*spec.SessionPersistence) == cloud.HTTPSessionCookiePermanent,
 			}
 		}
 	}
@@ -289,13 +290,31 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 		switch {
 		case ptr.Deref(cookie.Path, "/") != "/":
 			return backendDiagnostic(unsupported, "XBackend sessionPersistence requires cookie path /")
-		case ptr.Deref(cookie.LifetimeType, gatewayv1.SessionCookieLifetimeType) != gatewayv1.SessionCookieLifetimeType:
-			return backendDiagnostic(unsupported, "XBackend sessionPersistence requires cookie lifetimeType Session")
 		case cookie.Name != nil && !cloud.ValidHTTPSessionCookieName(string(*cookie.Name)):
 			return backendDiagnostic(unsupported, "XBackend sessionPersistence cookie name must be a safe Octavia token without a reserved cookie prefix")
 		}
+		switch lifetime := ptr.Deref(cookie.LifetimeType, gatewayv1.SessionCookieLifetimeType); lifetime {
+		case gatewayv1.SessionCookieLifetimeType:
+		case gatewayv1.PermanentCookieLifetimeType:
+			if persistence.AbsoluteTimeout == nil {
+				return backendDiagnostic(unsupported, "XBackend sessionPersistence requires absoluteTimeout for cookie lifetimeType Permanent")
+			}
+		default:
+			return backendDiagnostic(unsupported, fmt.Sprintf("XBackend sessionPersistence cookie lifetimeType %q is unsupported", lifetime))
+		}
 	}
 	return nil
+}
+
+// XBackendCookieRequirements selects regional capabilities for a validated cookie configuration.
+func XBackendCookieRequirements(persistence gatewayv1.SessionPersistence) cloud.HTTPSessionCookieRequirements {
+	if persistence.Cookie != nil && ptr.Deref(persistence.Cookie.LifetimeType, gatewayv1.SessionCookieLifetimeType) == gatewayv1.PermanentCookieLifetimeType {
+		return cloud.HTTPSessionCookiePermanent
+	}
+	if persistence.AbsoluteTimeout != nil {
+		return cloud.HTTPSessionCookieTimed
+	}
+	return cloud.HTTPSessionCookieNamed
 }
 
 func xBackendSessionCookieName(persistence gatewayv1.SessionPersistence, uid types.UID) (string, bool) {
