@@ -143,7 +143,7 @@ func (p *Provider) preparePolicyCreation(ctx context.Context, actual observedGat
 
 	route := graphRoutePart(desired, step)
 	rules := rulesFor(step.route.policy, route.hostnameRuleValue)
-	if len(rules) < 2 {
+	if len(rules) == 0 || len(rules) == 1 && (rules[0].ruleType != l7policies.TypePath || rules[0].invert) {
 		return step, nil
 	}
 
