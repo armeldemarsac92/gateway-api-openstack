@@ -62,7 +62,7 @@ type Config struct {
 	HTTPCORS bool
 	// GatewayListenerFilters enables Experimental pre-routing filters on capable Amphora providers.
 	GatewayListenerFilters bool
-	// BackendRequestFilters enables filters on individual weighted HTTP backendRefs.
+	// BackendRequestFilters enables filters on individual weighted HTTPRoute and GRPCRoute backendRefs.
 	BackendRequestFilters bool
 	// HTTPMethodMatch enables exact HTTPRoute method matching on capable Amphora providers.
 	HTTPMethodMatch bool

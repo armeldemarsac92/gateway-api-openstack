@@ -1085,6 +1085,317 @@ func TestGRPCBinaryMetadataSelectsNativeContentTypeOnlyForLists(t *testing.T) {
 	}
 }
 
+func TestGRPCRequestMetadataScopesAndCapabilities(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		grpc    bool
+		target  bool
+		value   string
+		matcher l7policies.RuleType
+	}{
+		{name: "rule binary list", grpc: true, value: "YQ==, Yg", matcher: grpcContentTypeRuleType},
+		{name: "target binary list", grpc: true, target: true, value: "YQ==, Yg", matcher: grpcContentTypeRuleType},
+		{name: "target single binary value", grpc: true, target: true, value: "YQ==", matcher: l7policies.TypeHeader},
+		{name: "HTTP target literal", target: true, value: "YQ==, Yg"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			identity := safetyTestIdentity(t)
+			spec := completeGraphSpec(identity)
+			spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "rpc", Port: 80}}
+			route := &spec.Routes[0].Spec
+			route.GRPC, route.ScopedListenerPorts = scenario.grpc, []int{80}
+			match := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo"}
+			route.Hostname, route.PathType, route.PathValue = "", "", ""
+			route.HTTPBackends = []cloud.HTTPBackend{{Namespace: "application", Name: "echo", Port: 8080,
+				Members: route.Members, BackendH2C: scenario.grpc}}
+			route.Members = nil
+			ops := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderAdd, Name: "request-bin", Value: scenario.value}}
+			underlying := octavia.GatewayCapabilityRequestHeaderOperations
+			if scenario.target {
+				underlying = octavia.GatewayCapabilityTargetRequestFilters
+				route.WeightedHTTPRules = []cloud.HTTPWeightedRule{{
+					Matches: []cloud.HTTPPathMatch{match},
+					Targets: []cloud.HTTPWeightedTarget{{BackendIndex: new(0), Weight: 1, RequestHeaderOperations: ops}},
+				}}
+			} else {
+				match.RequestHeaderOperations = ops
+				route.HTTPBackends[0].Matches = []cloud.HTTPPathMatch{match}
+			}
+			cfg := ProviderConfig{BackendH2C: scenario.grpc, FixedHTTPResponses: true, WeightedHTTPTargets: scenario.target,
+				BackendRequestFilters: scenario.target, RequestHeaderModifier: !scenario.target}
+			var advertised []string
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": advertised})
+			}))
+			provider := NewProvider(ServiceClients{ProjectID: "project-a", LoadBalancer: client}, cfg)
+			desired, err := provider.buildDesiredGatewayGraph(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var part desiredRoute
+			for _, candidate := range desired.routes[0].httpParts {
+				if len(candidate.policies) != 0 {
+					part = candidate
+					break
+				}
+			}
+			if len(part.policies) != 1 || part.policies[0].grpcContentTypeRule != scenario.matcher {
+				t.Fatalf("want one policy using the %q matcher, got %#v", scenario.matcher, part.policies)
+			}
+			policy := part.policies[0]
+			if scenario.target {
+				if len(policy.requestHeaderOperations) != 0 || len(policy.targetRequestFilters) != 1 ||
+					!slices.Equal(policy.targetRequestFilters[0].RequestHeaderOperations, ops) {
+					t.Fatalf("target operations were moved to another scope: %#v", policy)
+				}
+			} else if !slices.Equal(policy.requestHeaderOperations, ops) || len(policy.targetRequestFilters) != 0 {
+				t.Fatalf("rule operations were moved to another scope: %#v", policy)
+			}
+
+			lb := safetyObservedLoadBalancer()
+			lb.Provider = "amphora"
+			actual := observedGatewayGraph{loadBalancer: lb}
+			mutation := routeMutation{kind: routeMutationEnablePolicy, policy: policy, requestHeaderOperations: policy.requestHeaderOperations}
+			updateKind := routeMutationSetPolicyHeaders
+			if scenario.target {
+				updateKind = routeMutationSetPolicyTarget
+			}
+			for _, kind := range []routeMutationKind{routeMutationCreatePolicy, updateKind, routeMutationEnablePolicy} {
+				mutation.kind = kind
+				if kind != routeMutationEnablePolicy && scenario.target {
+					mutation.weightedTargets = &policy.targetRequestFilters
+				} else {
+					mutation.weightedTargets = nil
+				}
+				step := graphMutation{kind: graphRouteMutation, backendKey: part.backendKey, route: mutation}
+				checkMissing := func(capability string) {
+					t.Helper()
+					var unavailable *unavailableRouteCapability
+					if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, step); !errors.As(err, &unavailable) || unavailable.capability != capability {
+						t.Fatalf("expected %s to gate %v, got %v", capability, kind, err)
+					}
+				}
+				advertised = []string{octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses}
+				checkMissing(underlying)
+				advertised = append(advertised, underlying)
+				if scenario.matcher == grpcContentTypeRuleType {
+					checkMissing(octavia.GatewayCapabilityGRPCBinaryRequestMetadata)
+					advertised = append(advertised, octavia.GatewayCapabilityGRPCBinaryRequestMetadata)
+					checkMissing(octavia.GatewayCapabilityGRPCContentType)
+					advertised = append(advertised, octavia.GatewayCapabilityGRPCContentType)
+				}
+				if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, step); err != nil {
+					t.Fatalf("unexpected capability requirement for %v: %v", kind, err)
+				}
+			}
+		})
+	}
+}
+
+func TestGRPCBinaryRequestMigrationKeepsFallbackOffTheWire(t *testing.T) {
+	for _, scope := range []string{"rule", "target"} {
+		t.Run(scope, func(t *testing.T) {
+			spec := completeGraphSpec(safetyTestIdentity(t))
+			spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Port: 80}, {Port: 8080}}
+			main, observation := convergedRoutePlanFixture()
+			main.backendKey, main.spec.GRPC, main.spec.BackendH2C = "backend", true, true
+			main.spec.ScopedListenerPorts = []int{80}
+			main.healthMonitor, observation.monitor, observation.backendH2C = cloud.HealthMonitorConfig{}, nil, true
+			observation.pool.ProvisioningStatus, observation.members[0].ProvisioningStatus = "ACTIVE", "ACTIVE"
+			legacy := &observation.policies[0]
+			legacy.policy.ListenerID, legacy.policy.ProvisioningStatus, legacy.adminObserved = "rpc", "ACTIVE", true
+			legacy.rules[0].flagsObserved, legacy.rules[0].rule.ProvisioningStatus = true, "ACTIVE"
+			legacy.rules = append(legacy.rules, observedRouteRule{
+				role: openstackidentity.RoleRuleGRPCContentType, base: openstackidentity.RoleRuleGRPCContentType, flagsObserved: true,
+				rule: l7policies.Rule{ID: "media", RuleType: string(l7policies.TypeHeader), Key: "content-type",
+					CompareType: string(l7policies.CompareTypeRegex), Value: portableGRPCContentTypePattern, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+			})
+			fallback, fallbackGraph := convergedRoutePlanFixture()
+			fallback.backendKey, fallback.spec.ScopedListenerPorts = "fallback", []int{80}
+			fallback.policies[0].path, fallback.policies[0].compareType, fallback.policies[0].position = "/", l7policies.CompareTypeStartWith, 2
+			fallbackGraph.pool.ID = "fallback-pool"
+			fallbackPolicy := &fallbackGraph.policies[0]
+			fallbackPolicy.policy.ID, fallbackPolicy.policy.ListenerID = "fallback-policy", "rpc"
+			fallbackPolicy.policy.RedirectPoolID, fallbackPolicy.policy.Position = fallbackGraph.pool.ID, 2
+			fallbackPolicy.policy.ProvisioningStatus, fallbackPolicy.adminObserved = "ACTIVE", true
+			fallbackPolicy.rules[0].rule.Value, fallbackPolicy.rules[0].rule.CompareType = "/", string(l7policies.CompareTypeStartWith)
+			fallbackPolicy.rules[0].flagsObserved, fallbackPolicy.rules[0].rule.ProvisioningStatus = true, "ACTIVE"
+
+			lb := safetyObservedLoadBalancer()
+			lb.Provider, lb.AdminStateUp, lb.ProvisioningStatus, lb.VipAddress = "amphora", true, "ACTIVE", "192.0.2.10"
+			actual := observedGatewayGraph{loadBalancer: lb, protocol: cloud.ListenerProtocolHTTP, scoped: true,
+				scopedListeners: []listeners.Listener{
+					{ID: "rpc", ProtocolPort: 80, Protocol: cloud.ListenerProtocolHTTP, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+					{ID: "independent", ProtocolPort: 8080, Protocol: cloud.ListenerProtocolHTTP, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+				}, adminObserved: map[string]bool{"rpc": true, "independent": true},
+				routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{"backend": &observation, "fallback": &fallbackGraph}}}}
+			desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{spec: cloud.RouteSpec{GRPC: true}, httpParts: []desiredRoute{main, fallback}}}}
+			wanted := &desired.routes[0].httpParts[0].policies[0]
+			path := wanted.path
+			ops := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "trace-bin", Value: "YQ==,Yg=="}}
+			wanted.grpcContentTypeRule = grpcContentTypeRuleType
+			advertised := []string{octavia.GatewayCapabilityGRPCContentType}
+			if scope == "target" {
+				// A target operation affects the weighted action only. Keep
+				// the forwarding pools observed so the match is ready to stage.
+				backend := desired.routes[0].httpParts[0]
+				backend.backendKey, backend.policies = "target", nil
+				targetPool := observation
+				targetPool.policies = nil
+				weighted := &desired.routes[0].httpParts[0]
+				weighted.weightedTargets = []desiredHTTPWeightedTarget{{backendKey: "target", weight: 1, requestHeaderOperations: ops}}
+				wanted.weighted = true
+				wanted.targetRequestFilters = []octavia.WeightedHTTPTarget{{RequestHeaderOperations: ops}}
+				legacy.policy.Action, legacy.policy.RedirectPoolID = string(octavia.ActionWeightedTargets), ""
+				legacy.weightedTargets = []octavia.WeightedHTTPTarget{{Weight: 1, PoolID: targetPool.pool.ID}}
+				observation.pool, observation.members = nil, nil
+				actual.routes[0].httpParts["target"] = &targetPool
+				failure, empty := convergedRoutePlanFixture()
+				failure.backendKey, failure.unavailable = grpcFailurePoolKey, true
+				failure.members, failure.policies, failure.healthMonitor = nil, nil, cloud.HealthMonitorConfig{}
+				empty.members, empty.policies, empty.monitor = nil, nil, nil
+				empty.pool.ID, empty.pool.ProvisioningStatus = "unavailable", "ACTIVE"
+				actual.routes[0].httpParts[grpcFailurePoolKey] = &empty
+				desired.routes[0].httpParts = append(desired.routes[0].httpParts, backend, failure)
+				advertised = append(advertised, octavia.GatewayCapabilityTargetRequestFilters,
+					octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses)
+			} else {
+				wanted.requestHeaderOperations = ops
+				advertised = append(advertised, octavia.GatewayCapabilityRequestHeaderOperations)
+			}
+			probes := 0
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+				probes++
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": advertised})
+			}))
+			provider := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{RequestHeaderModifier: scope == "rule", BackendRequestFilters: scope == "target"})
+			raw, _, err := provider.buildGatewayGraphPlan(desired, actual)
+			if err != nil || !slices.ContainsFunc(raw, func(step graphMutation) bool {
+				return step.kind == graphRouteMutation && step.route.kind == routeMutationDisablePolicy && step.route.id == legacy.policy.ID
+			}) {
+				t.Fatalf("the legacy graph never attempted to disable its winning policy: %v %+v", err, raw)
+			}
+			guard := func(plan []graphMutation) []graphMutation {
+				t.Helper()
+				result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+				guarded, _ := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, plan, &result, grpcBinaryRequestMetadataPolicy)
+				return guarded
+			}
+			reopen := []graphMutation{{kind: graphEnableListener, listenerID: "rpc"}, {kind: graphEnableListener, listenerID: "independent"}}
+			for _, available := range []bool{false, true} {
+				if available {
+					advertised = append(advertised, octavia.GatewayCapabilityGRPCBinaryRequestMetadata)
+				}
+				before := probes
+				plan := guard(slices.Clone(raw))
+				if probes <= before || len(plan) != 1 || plan[0].kind != graphDisableListener || plan[0].listenerID != "rpc" ||
+					!legacy.policy.AdminStateUp || !fallbackPolicy.policy.AdminStateUp || !available && !strings.Contains(plan[0].message, octavia.GatewayCapabilityGRPCBinaryRequestMetadata) {
+					t.Fatalf("only a verified physical closure can protect %s from the fallback (available=%v): %#v", path, available, plan)
+				}
+				actual.scopedListeners[0].AdminStateUp = false
+				plan = guard(slices.Clone(raw))
+				canStage := slices.ContainsFunc(plan, func(step graphMutation) bool {
+					return step.kind == graphRouteMutation && step.route.kind == routeMutationDisablePolicy && step.route.id == legacy.policy.ID
+				})
+				if canStage != available {
+					t.Fatalf("the winning policy can change only after capability discovery (available=%v): %#v", available, plan)
+				}
+				plan = guard(slices.Clone(reopen))
+				if len(plan) != 1 || plan[0].listenerID != "independent" {
+					t.Fatalf("keep only the affected listener closed while its priority is unsettled: %#v", plan)
+				}
+				actual.scopedListeners[0].AdminStateUp = true
+			}
+
+			actual.scopedListeners[0].AdminStateUp = false
+			media := &legacy.rules[1].rule
+			media.RuleType, media.Key, media.CompareType, media.Value = string(grpcContentTypeRuleType), "", string(l7policies.CompareTypeEqual), "application/grpc"
+			if scope == "target" {
+				legacy.weightedTargets[0].RequestHeaderOperations = ops
+			} else {
+				legacy.requestHeaderOperations = ops
+			}
+			plan := guard(slices.Clone(reopen))
+			if len(plan) != 2 {
+				t.Fatalf("verified active priority must permit restoring traffic: %#v", plan)
+			}
+
+			// Removing the list remains possible even if enrollment is lost
+			// again after the new policy activated.
+			advertised = advertised[:len(advertised)-1]
+			wanted = &desired.routes[0].httpParts[0].policies[0]
+			wanted.requestHeaderOperations, wanted.targetRequestFilters = nil, nil
+			cleanup := graphMutation{kind: graphRouteMutation, listenerID: "rpc", withdrawHTTPPolicy: true, backendKey: "backend",
+				route: routeMutation{kind: routeMutationDisablePolicy, id: legacy.policy.ID, withdrawHTTPPolicy: true}}
+			if plan := guard([]graphMutation{cleanup}); len(plan) != 1 || plan[0].route.kind != routeMutationDisablePolicy {
+				t.Fatalf("capability withdrawal must not prevent owned policy cleanup on the closed listener: %#v", plan)
+			}
+		})
+	}
+}
+
+func TestGRPCTargetBinaryRequestWithdrawalUsesObservedMatcher(t *testing.T) {
+	part, observation := convergedRoutePlanFixture()
+	part.backendKey, part.spec.GRPC, part.grpcFailurePoolID = "backend", true, "unavailable"
+	part.spec.ScopedListenerPorts = []int{80}
+	policy := &observation.policies[0]
+	policy.policy.ListenerID, policy.policy.AdminStateUp, policy.adminObserved = "affected", true, true
+	policy.backendRequestFiltersTagged = true
+	policy.rules = append(policy.rules, observedRouteRule{base: openstackidentity.RoleRuleGRPCContentType,
+		rule: l7policies.Rule{RuleType: string(grpcContentTypeRuleType)}})
+	ops := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "request-bin", Value: "YQ==, Yg"}}
+	policy.weightedTargets = []octavia.WeightedHTTPTarget{
+		{PoolID: "local", Weight: 75, RequestHeaderOperations: ops},
+		{PoolID: "remote", Weight: 25, RequestHeaderOperations: ops},
+	}
+	part.policies[0].targetRequestFilters = []octavia.WeightedHTTPTarget{{RequestHeaderOperations: ops}, {}}
+	part.policies[0].grpcContentTypeRule = grpcContentTypeRuleType
+	part.weightedAuthorizations = map[string]map[string]int{policy.policy.ID: {"local": 75}}
+	steps := weightedTargetWithdrawals(part, observation)
+	if len(steps) != 1 || !steps[0].withdrawHTTPPolicy || steps[0].weightedTargets == nil ||
+		!steps[0].requiresGRPCBinaryRequestMetadata() || !slices.EqualFunc(*steps[0].weightedTargets, []octavia.WeightedHTTPTarget{
+		{PoolID: "local", Weight: 75, RequestHeaderOperations: ops}, {PoolID: "unavailable", Weight: 25},
+	}, weightedTargetsEqual) {
+		t.Fatalf("target grant withdrawal did not preserve the other scope and its capability gate: %#v", steps)
+	}
+
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Port: 80}, {Port: 8080}}
+	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{httpParts: []desiredRoute{part}}}}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora"
+	actual := observedGatewayGraph{loadBalancer: lb, scoped: true, scopedListeners: []listeners.Listener{
+		{ID: "affected", ProtocolPort: 80, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		{ID: "unrelated", ProtocolPort: 8080, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+	}, adminObserved: map[string]bool{"affected": true, "unrelated": true},
+		routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{"backend": &observation}}}}
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{octavia.GatewayCapabilityGRPCContentType}})
+	}))
+	provider := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
+	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+	plan, _ := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, nil, &result, grpcBinaryRequestMetadataPolicy)
+	if len(plan) != 1 || plan[0].kind != graphDisableListener || plan[0].listenerID != "affected" ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("the restarted controller did not withdraw only the affected listener: %#v, %#v", plan, result)
+	}
+
+	part.policies[0].targetRequestFilters = nil
+	steps = weightedTargetWithdrawals(part, observation)
+	if len(steps) != 1 || steps[0].kind != routeMutationDisablePolicy || !steps[0].withdrawHTTPPolicy {
+		t.Fatalf("removing the last target filter must retire the tagged policy: %#v", steps)
+	}
+}
+
 func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) {
 	t.Run("HTTP headers", func(t *testing.T) { testResponseHeaderPolicyActivationAndWithdrawal(t, false) })
 	t.Run("gRPC binary list", func(t *testing.T) { testResponseHeaderPolicyActivationAndWithdrawal(t, true) })

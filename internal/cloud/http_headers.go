@@ -20,6 +20,7 @@ package cloud
 
 import (
 	"cmp"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -55,6 +56,64 @@ var grpcMetadataName = regexp.MustCompile(`^[a-z0-9_.-]+$`)
 // Each use decides which reserved keys it can modify.
 func ValidGRPCMetadataName(name string) bool {
 	return grpcMetadataName.MatchString(name)
+}
+
+// ValidateGRPCRequestMetadata checks a normalized request modifier list.
+func ValidateGRPCRequestMetadata(operations []HTTPHeaderOperation) error {
+	return validateGRPCMetadata(operations, true)
+}
+
+// ValidateGRPCResponseMetadata checks a normalized response modifier list.
+// The RPC status can share a headers block with application metadata.
+func ValidateGRPCResponseMetadata(operations []HTTPHeaderOperation) error {
+	return validateGRPCMetadata(operations, false)
+}
+
+func validateGRPCMetadata(operations []HTTPHeaderOperation, request bool) error {
+	direction := "response"
+	if request {
+		direction = "request"
+	}
+	fields := 0
+	for _, op := range operations {
+		if op.Name == "content-type" || strings.HasPrefix(op.Name, "grpc-") {
+			return fmt.Errorf("%s header %q is managed by gRPC", direction, op.Name)
+		}
+		if request {
+			switch op.Name {
+			case "connection", "content-length", "host", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade":
+				return fmt.Errorf("request header %q is managed by the gRPC transport", op.Name)
+			}
+		}
+		if !ValidGRPCMetadataName(op.Name) {
+			return fmt.Errorf("invalid gRPC %s metadata name %q", direction, op.Name)
+		}
+		if op.Operation == HTTPHeaderRemove {
+			continue
+		}
+		if strings.HasSuffix(op.Name, "-bin") {
+			fields += 1 + strings.Count(op.Value, ",")
+			for value := range strings.SplitSeq(op.Value, ",") {
+				value = strings.Trim(value, " ")
+				encoding := base64.RawStdEncoding
+				if strings.HasSuffix(value, "=") {
+					encoding = base64.StdEncoding
+				}
+				if _, err := encoding.Strict().DecodeString(value); err != nil {
+					return fmt.Errorf("gRPC binary metadata %q requires base64 values", op.Name)
+				}
+			}
+		} else {
+			if strings.ContainsFunc(op.Value, func(r rune) bool { return r < ' ' || r > '~' }) {
+				return fmt.Errorf("gRPC %s metadata %q requires printable ASCII", direction, op.Name)
+			}
+			fields++
+		}
+		if fields > MaxHTTPHeaderOperations {
+			return fmt.Errorf("gRPC %s metadata can set or add at most %d fields after expanding binary values", direction, MaxHTTPHeaderOperations)
+		}
+	}
+	return nil
 }
 
 // HTTPHeaderMatch compares a case-insensitive field name and a literal value.

@@ -603,6 +603,16 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if err != nil {
 			return err
 		}
+		if r.spec.GRPC {
+			if err := cloud.ValidateGRPCRequestMetadata(operations); err != nil {
+				return err
+			}
+			for _, target := range targetFilters {
+				if err := cloud.ValidateGRPCRequestMetadata(target.RequestHeaderOperations); err != nil {
+					return err
+				}
+			}
+		}
 		if match.CORS != nil {
 			if !p.httpCORS || r.spec.GRPC || r.redirect || r.fixedResponse {
 				return errors.New("CORS requires --octavia-request-cors and a forwarding HTTPRoute policy")
@@ -652,9 +662,10 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			policy.requestURLRewrite = rewrite
 			if r.spec.GRPC {
 				policy.grpcContentTypeRule = l7policies.TypeHeader
-				// The native predicate also identifies policies whose binary
-				// response metadata must be sent as repeated fields.
-				if p.grpcContentType || hasGRPCBinaryMetadataList(responseOperations) {
+				// The native predicate identifies policies whose binary
+				// metadata must be sent as repeated fields.
+				if p.grpcContentType || hasGRPCBinaryMetadataList(operations) ||
+					hasGRPCBinaryMetadataList(responseOperations) || hasGRPCBinaryTargetMetadata(targetFilters) {
 					policy.grpcContentTypeRule = grpcContentTypeRuleType
 				}
 			}

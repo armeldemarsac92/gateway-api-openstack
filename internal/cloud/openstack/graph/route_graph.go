@@ -1337,7 +1337,8 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 				plan = append(plan, routeMutation{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
 						resolvedRequestMirrors: wantedPolicy.resolvedRequestMirrors, weightedPlan: wantedPolicy.weightedPlan,
-						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule, requestURLRewrite: wantedPolicy.requestURLRewrite, requestCORS: wantedPolicy.requestCORS,
+						targetRequestFilters: wantedPolicy.targetRequestFilters,
+						grpcContentTypeRule:  wantedPolicy.grpcContentTypeRule, requestURLRewrite: wantedPolicy.requestURLRewrite, requestCORS: wantedPolicy.requestCORS,
 						requestPolicy:           wantedPolicy.requestPolicy,
 						requestHeaderOperations: wantedPolicy.requestHeaderOperations, responseHeaderOperations: wantedPolicy.responseHeaderOperations},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
@@ -1652,9 +1653,14 @@ func buildRoutePolicyPlan(
 			withdraw := desired.redirect || grpcContentTypeChanged
 			disable := routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
 				retry: withdraw && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: withdraw}
+			if grpcContentTypeChanged && grpcBinaryRequestMetadataPolicy.required(wantedPolicy) {
+				// This disable stages a replacement, so it requires the
+				// listener and capability guard for new binary metadata.
+				disable.withdrawHTTPPolicy = false
+			}
 			// A verified portable policy can keep serving while discovery
 			// recovers. Predicate, target and scope drift still need withdrawal.
-			if grpcContentTypeChanged && wantedPolicy.grpcContentTypeRule == grpcContentTypeRuleType &&
+			if disable.withdrawHTTPPolicy && grpcContentTypeChanged && wantedPolicy.grpcContentTypeRule == grpcContentTypeRuleType &&
 				!targetUpdate && !headersUpdate && !policyActionUpdate &&
 				observedPolicy.httpsListenerHostname == wantedPolicy.httpsListenerHostname && policy.Position == wantedPolicy.position &&
 				policy.AdminStateUp && observedForwardPolicySettled(observedPolicy) {
