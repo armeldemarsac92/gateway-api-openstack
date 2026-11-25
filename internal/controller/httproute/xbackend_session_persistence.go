@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -34,36 +35,43 @@ import (
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 )
 
-type xBackendCookieAvailability func(cloud.HTTPSessionCookieRequirements) (bool, error)
+var errXBackendPersistenceDiscovery = errors.New("regional Octavia session persistence capability discovery is unavailable")
 
-func (r *Reconciler) xBackendCookieCapability(ctx context.Context) xBackendCookieAvailability {
-	type observation struct {
-		available bool
-		err       error
-	}
-	observations := make(map[cloud.HTTPSessionCookieRequirements]observation)
-	return func(requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+func (r *Reconciler) xBackendPersistenceCapability(ctx context.Context) func(gatewayv1.SessionPersistence) cloud.SessionPersistenceIssue {
+	header := sync.OnceValue(func() cloud.SessionPersistenceIssue {
+		if r.XBackendHeaderAvailable == nil {
+			return cloud.SessionPersistenceHeaderUnverified
+		}
+		return cloud.HeaderPersistenceDiscoveryIssue(r.XBackendHeaderAvailable(ctx))
+	})
+	cookies := make(map[cloud.HTTPSessionCookieRequirements]cloud.SessionPersistenceIssue)
+	return func(persistence gatewayv1.SessionPersistence) cloud.SessionPersistenceIssue {
+		if model.IsHeaderSessionPersistence(persistence) {
+			return header()
+		}
+		requirements := model.XBackendCookieRequirements(persistence)
 		if r.XBackendCookieAvailable == nil {
-			return false, errXBackendCookieDiscovery
+			return requirements.DiscoveryIssue(false, errXBackendPersistenceDiscovery)
 		}
-		if seen, ok := observations[requirements]; ok {
-			return seen.available, seen.err
+		if issue, ok := cookies[requirements]; ok {
+			return issue
 		}
-		available, err := r.XBackendCookieAvailable(ctx, requirements)
-		observations[requirements] = observation{available, err}
-		return available, err
+		issue := requirements.DiscoveryIssue(r.XBackendCookieAvailable(ctx, requirements))
+		cookies[requirements] = issue
+		return issue
 	}
 }
 
-var errXBackendCookieDiscovery = errors.New("regional Octavia HTTP cookie capability discovery is unavailable")
-
-func (observe xBackendCookieAvailability) apply(status metav1.ConditionStatus, reason, message string, requirements cloud.HTTPSessionCookieRequirements) (metav1.ConditionStatus, string, string) {
-	available, err := observe(requirements)
-	return xBackendCookieCondition(status, reason, message, requirements.DiscoveryIssue(available, err))
-}
-
-func xBackendCookieCondition(status metav1.ConditionStatus, reason, message string, issue cloud.SessionPersistenceIssue) (metav1.ConditionStatus, string, string) {
+func xBackendPersistenceCondition(status metav1.ConditionStatus, reason, message string, issue cloud.SessionPersistenceIssue) (metav1.ConditionStatus, string, string) {
 	switch issue {
+	case cloud.SessionPersistenceHeaderUnverified:
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP header persistence could not be verified"
+	case cloud.SessionPersistenceHeaderReadbackUnverified:
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested XBackend HTTP header persistence"
+	case cloud.SessionPersistenceRevisionUnverified:
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the current XBackend session persistence configuration"
+	case cloud.SessionPersistenceHeaderUnsupported:
+		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "The regional Octavia provider does not advertise http_header_persistence_v1"
 	case cloud.SessionPersistenceUnverified:
 		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP session cookies could not be verified"
 	case cloud.SessionPersistenceDeadlineUnverified:
@@ -91,18 +99,19 @@ func xBackendCookieCondition(status metav1.ConditionStatus, reason, message stri
 	}
 }
 
-func (s routeReconcileStatus) withXBackendCookieIssue(issue cloud.SessionPersistenceIssue) routeReconcileStatus {
+func (s routeReconcileStatus) withXBackendPersistenceIssue(issue cloud.SessionPersistenceIssue) routeReconcileStatus {
 	if s.resolved != metav1.ConditionFalse {
-		s.resolved, s.resolvedReason, s.resolvedMessage = xBackendCookieCondition(s.resolved, s.resolvedReason, s.resolvedMessage, issue)
+		s.resolved, s.resolvedReason, s.resolvedMessage = xBackendPersistenceCondition(s.resolved, s.resolvedReason, s.resolvedMessage, issue)
 	}
 	return s
 }
 
-const xBackendCookieRevisionCondition = "/XBackendCookieConfiguration"
+// Preserve the condition key used to store cookie revisions on existing routes.
+const xBackendPersistenceRevisionCondition = "/XBackendCookieConfiguration"
 
 // A Route's generation does not include edits to the XBackends it references.
 // Bind deferred Octavia readback to the backend revisions confirmed on that parent.
-func xBackendCookieRevision(route *gatewayv1.HTTPRoute, observations []model.XBackendObservation) string {
+func xBackendPersistenceRevision(route *gatewayv1.HTTPRoute, observations []model.XBackendObservation) string {
 	digest := sha256.New()
 	seen := make(map[types.NamespacedName]bool)
 	for _, key := range model.LocalXBackendReferences(route) {
@@ -118,6 +127,12 @@ func xBackendCookieRevision(route *gatewayv1.HTTPRoute, observations []model.XBa
 			continue
 		}
 		seen[key] = true
+		if model.IsHeaderSessionPersistence(*backend.Spec.SessionPersistence) {
+			// The generation tracks changes in the validated spec, including the
+			// header name, timeout, transport and persistence removal.
+			_, _ = fmt.Fprintf(digest, "header %q %q %q %d\n", key.Namespace, key.Name, backend.UID, backend.Generation)
+			continue
+		}
 		path := "/"
 		if cookie := backend.Spec.SessionPersistence.Cookie; cookie != nil && cookie.Path != nil {
 			path = *cookie.Path

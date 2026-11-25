@@ -58,6 +58,7 @@ type PoolInventory struct {
 	UDPPacketDrop          map[string]PoolUDPPacketDrop
 	CookieDeadline         map[string]PoolCookieDeadline
 	CookiePath             map[string]PoolCookiePath
+	HeaderPersistence      map[string]PoolHeaderPersistence
 }
 
 // PoolCookieDeadline preserves an explicit zero and an invalid readback.
@@ -70,6 +71,13 @@ type PoolCookieDeadline struct {
 type PoolCookiePath struct {
 	Value   *string
 	Invalid bool
+}
+
+// PoolHeaderPersistence distinguishes a reported policy or absence from missing or malformed readback.
+type PoolHeaderPersistence struct {
+	Value    *cloud.HTTPSessionHeaderPersistence
+	Observed bool
+	Invalid  bool
 }
 
 // PoolBackendTLS records which transport fields the API actually reported.
@@ -109,7 +117,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS),
 		BackendRetryBudget: make(map[string]PoolBackendRetryBudget), TCPConnectionRejection: make(map[string]PoolTCPConnectionRejection),
 		UDPPacketDrop: make(map[string]PoolUDPPacketDrop), CookieDeadline: make(map[string]PoolCookieDeadline),
-		CookiePath: make(map[string]PoolCookiePath)}
+		CookiePath: make(map[string]PoolCookiePath), HeaderPersistence: make(map[string]PoolHeaderPersistence)}
 	query, err := opts.ToPoolListQuery()
 	if err != nil {
 		return inventory, fmt.Errorf("list pools: %w", err)
@@ -171,13 +179,14 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			pool.TLSEnabled = pool.Enabled != nil && *pool.Enabled
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
 			inventory.BackendTLS[pool.ID] = tls
-			persistence, deadline, path, err := decodePoolCookie(pool.SessionPersistence)
+			persistence, deadline, path, header, err := decodePoolPersistence(pool.SessionPersistence)
 			if err != nil {
 				return inventory, fmt.Errorf("decode Octavia pool session persistence: %w", err)
 			}
 			pool.Persistence = persistence
 			inventory.CookieDeadline[pool.ID] = deadline
 			inventory.CookiePath[pool.ID] = path
+			inventory.HeaderPersistence[pool.ID] = header
 			inventory.BackendRetryBudget[pool.ID] = decodeBackendRetryBudget(pool.BackendRetryBudget)
 			rejection := decodeTCPConnectionRejection(pool.TCPConnectionRejection)
 			drop := decodeUDPPacketDrop(pool.UDPPacketDrop)
@@ -206,20 +215,41 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 	return inventory, nil
 }
 
-func decodePoolCookie(raw json.RawMessage) (pools.SessionPersistence, PoolCookieDeadline, PoolCookiePath, error) {
+func decodePoolPersistence(raw json.RawMessage) (pools.SessionPersistence, PoolCookieDeadline, PoolCookiePath, PoolHeaderPersistence, error) {
 	var persistence struct {
 		pools.SessionPersistence
-		Timeout   json.RawMessage `json:"cookie_absolute_timeout_ms"`
-		Scope     json.RawMessage `json:"cookie_scope"`
-		Permanent json.RawMessage `json:"cookie_permanent"`
-		Path      json.RawMessage `json:"cookie_path"`
+		Timeout       json.RawMessage `json:"cookie_absolute_timeout_ms"`
+		Scope         json.RawMessage `json:"cookie_scope"`
+		Permanent     json.RawMessage `json:"cookie_permanent"`
+		Path          json.RawMessage `json:"cookie_path"`
+		Header        json.RawMessage `json:"header_name"`
+		HeaderTimeout json.RawMessage `json:"header_absolute_timeout_ms"`
 	}
 	if len(raw) != 0 {
 		if err := json.Unmarshal(raw, &persistence); err != nil {
-			return persistence.SessionPersistence, PoolCookieDeadline{}, PoolCookiePath{}, err
+			return persistence.SessionPersistence, PoolCookieDeadline{}, PoolCookiePath{}, PoolHeaderPersistence{}, err
 		}
 	}
-	return persistence.SessionPersistence, decodePoolCookieDeadline(persistence.Timeout, persistence.Scope, persistence.Permanent), decodePoolCookiePath(persistence.Path), nil
+	return persistence.SessionPersistence, decodePoolCookieDeadline(persistence.Timeout, persistence.Scope, persistence.Permanent),
+		decodePoolCookiePath(persistence.Path), decodePoolHeaderPersistence(len(raw) != 0, persistence.Type, persistence.Header, persistence.HeaderTimeout), nil
+}
+
+func decodePoolHeaderPersistence(observed bool, kind string, rawName, rawTimeout json.RawMessage) PoolHeaderPersistence {
+	readback := PoolHeaderPersistence{Observed: observed}
+	if kind != cloud.HTTPHeaderPersistenceType {
+		readback.Invalid = len(rawName) != 0 && !bytes.Equal(rawName, []byte("null")) ||
+			len(rawTimeout) != 0 && !bytes.Equal(rawTimeout, []byte("null"))
+		return readback
+	}
+	var policy cloud.HTTPSessionHeaderPersistence
+	if json.Unmarshal(rawName, &policy.Name) != nil ||
+		len(rawTimeout) != 0 && json.Unmarshal(rawTimeout, &policy.TimeoutMS) != nil || !policy.Valid() {
+		readback.Invalid = true
+		return readback
+	}
+	policy.Name = strings.ToLower(policy.Name)
+	readback.Value = &policy
+	return readback
 }
 
 func decodePoolCookiePath(raw json.RawMessage) PoolCookiePath {
@@ -408,8 +438,9 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 // UpdatePoolOpts adds optional backend transport to a stock pool update request.
 type UpdatePoolOpts struct {
 	pools.UpdateOpts
-	CookieDeadline *cloud.HTTPSessionCookieDeadline
-	CookiePath     *string
+	CookieDeadline    *cloud.HTTPSessionCookieDeadline
+	CookiePath        *string
+	HeaderPersistence *cloud.HTTPSessionHeaderPersistence
 	// ClearCookiePermanent explicitly restores a session cookie while retaining its deadline.
 	ClearCookiePermanent bool
 	BackendRetryBudget   *BackendRetryBudgetUpdate
@@ -438,7 +469,16 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		return nil, err
 	}
 	pool := body["pool"].(map[string]any)
-	if opts.ClearCookiePermanent && opts.Persistence == nil && opts.CookieDeadline == nil && opts.CookiePath == nil {
+	if header := opts.HeaderPersistence; header != nil {
+		if !header.Valid() || opts.Persistence != nil || opts.CookieDeadline != nil || opts.CookiePath != nil || opts.ClearCookiePermanent {
+			return nil, fmt.Errorf("invalid HTTP header persistence or conflicting cookie settings")
+		}
+		persistence := map[string]any{"type": cloud.HTTPHeaderPersistenceType, "header_name": strings.ToLower(header.Name)}
+		if header.TimeoutMS != nil {
+			persistence["header_absolute_timeout_ms"] = *header.TimeoutMS
+		}
+		pool["session_persistence"] = persistence
+	} else if opts.ClearCookiePermanent && opts.Persistence == nil && opts.CookieDeadline == nil && opts.CookiePath == nil {
 		pool["session_persistence"] = map[string]any{"cookie_permanent": false}
 	} else if opts.CookieDeadline != nil || opts.CookiePath != nil || opts.ClearCookiePermanent {
 		pool["session_persistence"], err = extendedCookiePersistence(opts.Persistence, opts.CookieDeadline, opts.CookiePath, opts.ClearCookiePermanent)

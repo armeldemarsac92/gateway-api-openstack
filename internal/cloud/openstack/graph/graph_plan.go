@@ -138,7 +138,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
 	var zeroWeightPoolEnsures []graphMutation
-	var cookiePoolRecoveries []graphMutation
+	var persistencePoolRecoveries []graphMutation
 	routeResults := make([]cloud.RouteGraphResult, 0, len(desired.routes))
 	canRestoreTraffic := !groupedHTTP || len(handovers.protected) == 0
 	holdPolicyOrder := make(map[int]bool)
@@ -199,7 +199,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			observed = actual.routes[index]
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
-		routeResult.BackendSessionPersistenceIssue = route.cookieSupportIssue()
+		routeResult.BackendSessionPersistenceIssue = route.sessionPersistenceIssue()
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
 		optionalPool := route.zeroWeightOnly || route.mirrorOnly
@@ -257,7 +257,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			} else if errors.Is(err, errRequestMirrorsUnverified) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errXBackendCookieUnavailable) || errors.Is(err, errXBackendCookieDeadlineUnavailable) || errors.Is(err, errXBackendCookieUnverified) ||
-				errors.Is(err, errXBackendCookiePermanentUnavailable) || errors.Is(err, errXBackendCookiePermanentReadback) || errors.Is(err, errXBackendCookiePathUnavailable) {
+				errors.Is(err, errXBackendHeaderPersistence) || errors.Is(err, errXBackendCookiePermanentUnavailable) || errors.Is(err, errXBackendCookiePermanentReadback) || errors.Is(err, errXBackendCookiePathUnavailable) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errBackendRetryBudgetAncestor) || errors.Is(err, errBackendRetryBudgetCapability) || errors.Is(err, errBackendRetryBudgetReadback) {
 				ensureHold = err.Error()
@@ -467,11 +467,11 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				if observed.backendProvisioningIssue(true, true) == "" {
 					ensures = append(ensures, mutation)
 				}
-			case step.kind == routeMutationSetXBackendCookie && step.retry:
+			case step.kind == routeMutationSetXBackendPersistence && step.retry:
 				// Recovery of an ERROR pool may fail repeatedly. Finish
 				// other routes' withdrawals and ready mutations first.
 				if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
-					cookiePoolRecoveries = append(cookiePoolRecoveries, mutation)
+					persistencePoolRecoveries = append(persistencePoolRecoveries, mutation)
 				}
 			case ensureHold != "":
 				continue
@@ -588,7 +588,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			plan = append(plan, *step)
 		}
 	}
-	plan = append(plan, cookiePoolRecoveries...)
+	plan = append(plan, persistencePoolRecoveries...)
 	if len(plan) != 0 {
 		result.Outcome = p.progressingOutcome(plan[0].message)
 	} else if result.Gateway.Outcome.State == cloud.OutcomeProgressing && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
@@ -909,7 +909,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			required = append(required, octavia.GatewayCapabilityRequestURLRewrite)
 		}
 		if step.route.reenableH2CPool || step.route.backendH2C != nil && *step.route.backendH2C ||
-			step.route.kind == routeMutationCreatePool && part.spec.BackendH2C && part.backendTLS.allowsMembers() {
+			step.route.kind == routeMutationCreatePool && !step.route.persistenceFallback && part.spec.BackendH2C && part.backendTLS.allowsMembers() {
 			required = append(required, octavia.GatewayCapabilityBackendH2C)
 		}
 		if len(step.route.requestHeaderOperations) != 0 || requiresRewrite && len(step.route.policy.requestHeaderOperations) != 0 {

@@ -115,6 +115,9 @@ type desiredRoute struct {
 	xBackendH2CPending          bool
 	xBackend                    bool
 	xBackendPlaintext           bool
+	sessionHeader               *cloud.HTTPSessionHeaderPersistence
+	sessionHeaderCapability     xBackendCookieCapability
+	headerReadbackPending       bool
 	sessionCookieName           string
 	sessionCookiePath           *string
 	cookiePathReadbackPending   bool
@@ -437,6 +440,11 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
 			return invalid(errors.New("HTTP session persistence requires a valid cookie name and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
 		}
+		if header := backend.SessionHeader; header != nil && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
+			len(spec.BackendSecurityGroupIDs) != 0 || backend.RoutedExternal || backend.SessionCookieName != "" ||
+			mirrorsUsed[index] || !header.Valid()) {
+			return invalid(errors.New("HTTP header persistence requires a valid header and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
+		}
 		if path := backend.SessionCookiePath; path != nil && (backend.SessionCookieName == "" || !cloud.ValidHTTPSessionCookiePath(*path)) {
 			return invalid(errors.New("HTTP session persistence path requires a cookie name and a valid cookie path"))
 		}
@@ -462,6 +470,11 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.xBackendH2CPending = backend.BackendH2CPending
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
+		// Invalid backends keep their match for the rejection response. Leaving
+		// the header unset withdraws any persistence from the former pool.
+		if !backend.InvalidReference {
+			part.sessionHeader = backend.SessionHeader
+		}
 		part.sessionCookieName = backend.SessionCookieName
 		if path := backend.SessionCookiePath; path != nil && *path != "/" {
 			part.sessionCookiePath = path

@@ -158,7 +158,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject unavailable TCPRoute and TLSRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
-	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend session cookies and optional absolute timeout")
+	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend session cookies or HTTP headers with optional absolute timeout")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
 	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
 		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
@@ -399,6 +399,7 @@ func run(ctx context.Context) error {
 		TelemetryBackendTLSAvailable:   openStackProvider.TelemetryBackendTLSAvailable,
 		BackendRetryBudgetAvailable:    openStackProvider.BackendRetryBudgetAvailable,
 		XBackendCookieAvailable:        openStackProvider.XBackendCookieAvailable,
+		XBackendHeaderAvailable:        openStackProvider.XBackendHeaderAvailable,
 		TCPBackendTLSAvailable:         openStackProvider.TCPBackendTLSAvailable,
 		TCPWeightedBackendTLSAvailable: openStackProvider.TCPWeightedBackendTLSAvailable,
 		GRPCBackendTLSAvailable:        openStackProvider.GRPCBackendTLSAvailable,

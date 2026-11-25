@@ -47,7 +47,7 @@ type routeGraphResult struct {
 	rejectedSections          []model.ListenerSection
 	backendObserved           bool
 	usesXBackendClientTLS     bool
-	xBackendCookieRevision    *string
+	persistenceRevision       *string
 	xBackendTransportRevision *string
 	backendDiagnostic         model.Diagnostic
 	corsFallback              bool
@@ -95,13 +95,13 @@ func (r *Reconciler) ensureRouteGraph(
 	request := graph.Request{
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
-		HTTPRouteBackendDiagnostic:         &prepared.backendDiagnostic,
-		HTTPRouteCORSFallback:              &prepared.corsFallback,
-		HTTPRouteRejectedSections:          &prepared.rejectedSections,
-		HTTPRouteRetryBudgetAncestorFull:   &prepared.retryBudgetAncestorFull,
-		HTTPRouteUsesXBackendClientTLS:     &prepared.usesXBackendClientTLS,
-		HTTPRouteXBackendCookieRevision:    prepared.xBackendCookieRevision,
-		HTTPRouteXBackendTransportRevision: prepared.xBackendTransportRevision,
+		HTTPRouteBackendDiagnostic:           &prepared.backendDiagnostic,
+		HTTPRouteCORSFallback:                &prepared.corsFallback,
+		HTTPRouteRejectedSections:            &prepared.rejectedSections,
+		HTTPRouteRetryBudgetAncestorFull:     &prepared.retryBudgetAncestorFull,
+		HTTPRouteUsesXBackendClientTLS:       &prepared.usesXBackendClientTLS,
+		HTTPRouteXBackendPersistenceRevision: prepared.persistenceRevision,
+		HTTPRouteXBackendTransportRevision:   prepared.xBackendTransportRevision,
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
@@ -174,8 +174,8 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 			revision := xBackendTransportRevision(route, snapshot.backends.input.XBackends)
 			prepared.xBackendTransportRevision = &revision
 			if r.Config.XBackendSessionPersistence {
-				revision := xBackendCookieRevision(route, snapshot.backends.input.XBackends)
-				prepared.xBackendCookieRevision = &revision
+				revision := xBackendPersistenceRevision(route, snapshot.backends.input.XBackends)
+				prepared.persistenceRevision = &revision
 			}
 		}
 	}
