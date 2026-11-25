@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-On both Gateway API channels, the signed controller reported certificate permissions separately for two HTTPS sections on a shared port. [Build record](image.json) · [Per-listener status](provider/shared-https-secret-grant-evidence/receipt.json)
+Experimental route rules with one Service reused an endpoint with an HTTP cookie or an HTTP or gRPC header. [Build record](image.json) · [Local session and lifecycle results](provider/route-rule-session-persistence/receipt.json)
+
+On both Gateway API channels, the signed controller reported certificate permissions separately for two HTTPS sections on a shared port. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-04bb56309d8a199a43e132d76e3ac4c26580692f/image.json) · [Per-listener status](provider/shared-https-secret-grant-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-04bb56309d8a199a43e132d76e3ac4c26580692f)
 
 On both Gateway API channels, the controller applied the selected backend’s HTTP headers and binary gRPC metadata before the rule’s response modifier. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-421558c9513aaaeaa8b0791939ad0005b96149c8/image.json) · [Controller, provider and traffic observations](provider/backend-response-header-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-421558c9513aaaeaa8b0791939ad0005b96149c8)
 

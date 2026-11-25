@@ -211,8 +211,17 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 		}
 		ResolveRequestMirrorBackends(route, mirrors, input)
 		compiled.RequestMirrors = mirrors
-		if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("session persistence is not implemented", ScopeRule))
+		if persistence := RouteRulePersistence(rule); persistence != nil {
+			if diagnostic := ValidateRouteSessionPersistence(rule, kind, input.RouteSessionPersistence); diagnostic != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+			} else {
+				position := i
+				if original := input.OriginalRulePositions[route.UID]; len(original) > i {
+					position = original[i]
+				}
+				backend := &compiled.Backends[0]
+				backend.RouteSessionPersistence = routeSessionPersistence(route.UID, rule.Name, position, *backend, *persistence)
+			}
 		}
 		requestPolicy, diagnostic := NormalizeHTTPRequestPolicy(rule, input.HTTPRequestPolicy && HTTPProfileRouteKind(route) == HTTPRouteKind)
 		if diagnostic != nil {
