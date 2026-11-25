@@ -10,6 +10,8 @@ When an attached pool is ready for the change, the controller sends the complete
 
 Modify a test route with two identifiable backend responses to verify the region after rollout. Open fresh TCP connections before withdrawing a grant, after confirmed provisioning, and after restoring it. Check that the revoked backend receives no new connections and the valid backend continues to receive its intended share. Include a route on another listener when qualifying a shared Gateway.
 
+The Standard kind trial rejected 207 of 800 new connections after the cross-namespace ReferenceGrant was removed. The Experimental trial rejected 202 of 800. The affected backend received zero new connections on both channels. Restoring the grant sent 600 and 200 connections to the two Services on Standard, and 600 and 200 on Experimental. A route on the other listener delivered all 80 control connections in each phase. [Route conditions, pool configurations and connection counts](qualification/v1.7.0/provider/tcproute-connection-rejection-evidence/receipt.json)
+
 ## Disable this mode
 
 Keep the patched Octavia API and worker running while withdrawing the feature. Remove the flag from the controller deployment. A pool that can forward all desired traffic clears its stored fraction with an explicit null in the same write as its authorized members. When a route still has an unusable positive-weight backend, the ordinary fail-closed route withdrawal applies. Verify affected listener defaults and pool readback before reverting Octavia to a version that lacks the field.
