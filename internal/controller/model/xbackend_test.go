@@ -17,7 +17,10 @@ limitations under the License.
 package model
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -184,4 +187,39 @@ func TestXBackendExternalHostnameProfile(t *testing.T) {
 	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonInvalidKind) {
 		t.Fatalf("Standard must reject Experimental XBackend references: %+v", group)
 	}
+}
+
+func TestXBackendHeaderPersistenceValidation(t *testing.T) {
+	spec := gatewayx.BackendSpec{
+		Type: gatewayx.BackendTypeEndpointSelector,
+		Port: gatewayx.BackendPort{Number: 8080},
+		EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+			MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "reports"},
+		}},
+		SessionPersistence: &gatewayv1.SessionPersistence{
+			Type:            ptr.To(gatewayv1.HeaderBasedSessionPersistence),
+			Header:          &gatewayv1.HeaderConfig{Name: "X-Reports-Session"},
+			AbsoluteTimeout: ptr.To(gatewayv1.Duration("99999h99999h99999h99999h")),
+		},
+	}
+	profile := XBackendProfile{MemberMode: cloud.MemberModeEndpoint, SessionPersistence: true, H2C: true, ServerTLS: true}
+	for _, protocol := range []gatewayx.BackendProtocol{gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolH2C} {
+		spec.Protocol = ptr.To(protocol)
+		require.Nil(t, ValidateXBackend(spec, profile), "transport %s", protocol)
+	}
+	spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedProtocol), ValidateXBackend(spec, profile).Reason)
+	spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{Hostname: "reports.example"}}
+	require.Nil(t, ValidateXBackend(spec, profile))
+
+	for _, invalid := range []gatewayv1.HeaderName{"AUTHORIZATION", "SeC-Example", "x affinity", gatewayv1.HeaderName(strings.Repeat("a", 257))} {
+		spec.SessionPersistence.Header.Name = invalid
+		require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), ValidateXBackend(spec, profile).Reason, "name %q", invalid)
+	}
+	spec.SessionPersistence.Header.Name = "x-affinity"
+	spec.SessionPersistence.Cookie = &gatewayv1.CookieConfig{}
+	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), ValidateXBackend(spec, profile).Reason)
+	spec.SessionPersistence.Cookie = nil
+	profile.SessionPersistence = false
+	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), ValidateXBackend(spec, profile).Reason)
 }

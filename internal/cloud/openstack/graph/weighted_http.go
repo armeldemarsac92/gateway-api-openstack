@@ -451,7 +451,7 @@ func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph,
 func deniedHTTPBackendKeys(route desiredRoute) map[string]bool {
 	denied := make(map[string]bool)
 	for _, backend := range route.httpParts {
-		issue := backend.cookieSupportIssue()
+		issue := backend.sessionPersistenceIssue()
 		if backend.backendTLS.denies() || issue >= cloud.SessionPersistenceUnverified {
 			denied[backend.backendKey] = true
 		}

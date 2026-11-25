@@ -74,8 +74,8 @@ type Request struct {
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
 	// HTTPRouteUsesXBackendClientTLS binds deferred status to the observed TLS mode.
 	HTTPRouteUsesXBackendClientTLS *bool
-	// HTTPRouteXBackendCookieRevision ties a status checkpoint to the writer's observation.
-	HTTPRouteXBackendCookieRevision *string
+	// HTTPRouteXBackendPersistenceRevision ties a status checkpoint to the writer's observation.
+	HTTPRouteXBackendPersistenceRevision *string
 	// HTTPRouteXBackendTransportRevision ties per-parent programming to the observed transports.
 	HTTPRouteXBackendTransportRevision *string
 	// HTTPRouteRetryBudgetAncestorFull binds its status to the live capacity check.

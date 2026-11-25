@@ -151,8 +151,8 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteUsesXBackendClientTLS != nil && *request.HTTPRouteUsesXBackendClientTLS != backends.routeUsesXBackendClientTLS(route) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
-			if requested && request.HTTPRouteXBackendCookieRevision != nil &&
-				*request.HTTPRouteXBackendCookieRevision != xBackendCookieRevision(route, backends.input.XBackends) {
+			if requested && request.HTTPRouteXBackendPersistenceRevision != nil &&
+				*request.HTTPRouteXBackendPersistenceRevision != xBackendPersistenceRevision(route, backends.input.XBackends) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			if requested && request.HTTPRouteXBackendTransportRevision != nil &&

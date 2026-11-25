@@ -143,7 +143,7 @@ type RouteResult struct {
 	ObservationDeferred bool
 	// UnsupportedBackendProtocol is populated when the provider explicitly lacks a requested transport.
 	UnsupportedBackendProtocol string
-	// BackendSessionPersistenceIssue reports regional availability for an XBackend's requested session cookie.
+	// BackendSessionPersistenceIssue reports availability and readback for XBackend session persistence.
 	BackendSessionPersistenceIssue SessionPersistenceIssue
 	// UnsupportedMatch reports an incompatible match without discarding other programmed rules.
 	UnsupportedMatch string
@@ -166,11 +166,26 @@ const (
 	SessionPersistencePermanentReadbackUnverified
 	SessionPersistencePathUnverified
 	SessionPersistencePathReadbackUnverified
+	SessionPersistenceHeaderUnverified
+	SessionPersistenceHeaderReadbackUnverified
+	SessionPersistenceRevisionUnverified
 	SessionPersistenceUnsupported
 	SessionPersistenceDeadlineUnsupported
 	SessionPersistencePermanentUnsupported
 	SessionPersistencePathUnsupported
+	SessionPersistenceHeaderUnsupported
 )
+
+func HeaderPersistenceDiscoveryIssue(available bool, err error) SessionPersistenceIssue {
+	switch {
+	case err != nil:
+		return SessionPersistenceHeaderUnverified
+	case !available:
+		return SessionPersistenceHeaderUnsupported
+	default:
+		return SessionPersistenceAvailable
+	}
+}
 
 func (requirements HTTPSessionCookieRequirements) DiscoveryIssue(available bool, err error) SessionPersistenceIssue {
 	switch {

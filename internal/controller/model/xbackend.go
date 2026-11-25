@@ -141,7 +141,12 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 	group.XBackendRoutedExternal = spec.Type == gatewayx.BackendTypeExternalHostname
 	group.XBackendTLS = backend.TLS.Validation
 	group.XBackendClientCertificateReference = backend.ClientCertificateReference
-	if spec.SessionPersistence != nil {
+	if persistence := spec.SessionPersistence; persistence != nil && IsHeaderSessionPersistence(*persistence) {
+		timeout, _ := durationMilliseconds(persistence.AbsoluteTimeout)
+		group.XBackendSessionHeader = &cloud.HTTPSessionHeaderPersistence{
+			Name: strings.ToLower(string(persistence.Header.Name)), TimeoutMS: timeout,
+		}
+	} else if persistence != nil {
 		var resolved bool
 		group.XBackendCookieName, resolved = xBackendSessionCookieName(*spec.SessionPersistence, backend.UID)
 		if !resolved {
@@ -189,7 +194,7 @@ func CheckXBackendObservation(key types.NamespacedName, backend *XBackendObserva
 	if diagnostic := ValidateXBackend(backend.Spec, profile); diagnostic != nil {
 		return diagnostic
 	}
-	if persistence := backend.Spec.SessionPersistence; persistence != nil && persistence.AbsoluteTimeout != nil && backend.UID == "" {
+	if persistence := backend.Spec.SessionPersistence; persistence != nil && !IsHeaderSessionPersistence(*persistence) && persistence.AbsoluteTimeout != nil && backend.UID == "" {
 		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "XBackend session cookie absoluteTimeout needs an observed XBackend UID")
 	}
 	if XBackendRequiresTLS(backend.Spec) && backend.TLS.Validation == nil {
@@ -295,13 +300,26 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires the controller's Experimental Octavia session persistence opt-in")
 	case kind != gatewayx.BackendTypeEndpointSelector:
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires EndpointSelector")
-	case protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11:
-		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
-	case ptr.Deref(persistence.Type, gatewayv1.CookieBasedSessionPersistence) != gatewayv1.CookieBasedSessionPersistence || persistence.Header != nil:
-		return backendDiagnostic(unsupported, "XBackend sessionPersistence supports Cookie persistence")
 	}
-	if _, valid := durationMilliseconds(persistence.AbsoluteTimeout); !valid {
+	timeout, valid := durationMilliseconds(persistence.AbsoluteTimeout)
+	if !valid {
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence absoluteTimeout must be a Gateway API duration")
+	}
+	if IsHeaderSessionPersistence(persistence) {
+		if persistence.Header == nil || persistence.Cookie != nil {
+			return backendDiagnostic(unsupported, "XBackend Header sessionPersistence requires header settings and cannot include cookie settings")
+		}
+		header := cloud.HTTPSessionHeaderPersistence{Name: string(persistence.Header.Name), TimeoutMS: timeout}
+		if !header.Valid() {
+			return backendDiagnostic(unsupported, "XBackend Header sessionPersistence requires a valid, unprotected HTTP header name and a supported absoluteTimeout")
+		}
+		return nil
+	}
+	if protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
+	}
+	if ptr.Deref(persistence.Type, gatewayv1.CookieBasedSessionPersistence) != gatewayv1.CookieBasedSessionPersistence || persistence.Header != nil {
+		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires Cookie or Header with matching settings")
 	}
 	if cookie := persistence.Cookie; cookie != nil {
 		switch {
@@ -321,6 +339,10 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 		}
 	}
 	return nil
+}
+
+func IsHeaderSessionPersistence(persistence gatewayv1.SessionPersistence) bool {
+	return ptr.Deref(persistence.Type, gatewayv1.CookieBasedSessionPersistence) == gatewayv1.HeaderBasedSessionPersistence
 }
 
 // XBackendCookieRequirements selects regional capabilities for a validated cookie configuration.

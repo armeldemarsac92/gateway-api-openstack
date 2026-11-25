@@ -111,7 +111,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		}
 	}
 	ancestors := make(map[types.NamespacedName]metav1.Condition, len(byGateway))
-	cookieCapability := r.routes.xBackendCookieCapability(ctx)
+	persistenceCapability := r.routes.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.routes.xBackendH2CDiagnostic(ctx) })
 	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
 	for gatewayKey, gateway := range byGateway {
@@ -162,8 +162,8 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			}
 		}
 		if condition.Status == metav1.ConditionTrue && backend.Spec.SessionPersistence != nil {
-			condition.Status, condition.Reason, condition.Message = cookieCapability.apply(condition.Status, condition.Reason, condition.Message,
-				model.XBackendCookieRequirements(*backend.Spec.SessionPersistence))
+			condition.Status, condition.Reason, condition.Message = xBackendPersistenceCondition(condition.Status, condition.Reason, condition.Message,
+				persistenceCapability(*backend.Spec.SessionPersistence))
 		}
 		ancestors[gatewayKey] = condition
 	}
@@ -217,7 +217,7 @@ func xBackendAcceptedCondition(backend *gatewayx.XBackend, profile model.XBacken
 	}
 	if diagnostic := model.ValidateXBackend(backend.Spec, profile); diagnostic != nil {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
-	} else if persistence := backend.Spec.SessionPersistence; persistence != nil && persistence.AbsoluteTimeout != nil && backend.UID == "" {
+	} else if persistence := backend.Spec.SessionPersistence; persistence != nil && !model.IsHeaderSessionPersistence(*persistence) && persistence.AbsoluteTimeout != nil && backend.UID == "" {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend session cookie absoluteTimeout needs an observed XBackend UID"
 	} else if pending {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"

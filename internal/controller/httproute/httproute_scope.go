@@ -61,7 +61,7 @@ type routeStatusPlan struct {
 	rejectedSections          []model.ListenerSection
 	gateway                   *gatewayv1.Gateway
 	cleanupIdentity           cloud.Identity
-	xBackendCookieRevision    *string
+	persistenceRevision       *string
 	xBackendTransportRevision *string
 }
 
@@ -206,7 +206,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 				return err
 			}
 			if xBackendTransportRevision(current, observations) != *plan.xBackendTransportRevision ||
-				plan.xBackendCookieRevision != nil && xBackendCookieRevision(current, observations) != *plan.xBackendCookieRevision {
+				plan.persistenceRevision != nil && xBackendPersistenceRevision(current, observations) != *plan.persistenceRevision {
 				return errHTTPRouteChanged
 			}
 		}
@@ -509,7 +509,7 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionResolvedRefs), update.status.resolved, update.status.resolvedReason, update.status.resolvedMessage, resolvedGeneration))
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(config.Domain()+"/Programmed", update.status.programmed, update.status.programmedReason, update.status.programmedMessage, programmedGeneration))
-		setXBackendRevision(&parentStatus, config.Domain()+xBackendCookieRevisionCondition, p.xBackendCookieRevision, update.status.programmed, route.Generation)
+		setXBackendRevision(&parentStatus, config.Domain()+xBackendPersistenceRevisionCondition, p.persistenceRevision, update.status.programmed, route.Generation)
 		setXBackendRevision(&parentStatus, config.Domain()+xBackendTransportRevisionCondition, p.xBackendTransportRevision, update.status.programmed, route.Generation)
 		if existing >= 0 {
 			parents[existing] = parentStatus

@@ -65,7 +65,7 @@ func activationListenerMatches(current *octavia.PolicyActivationListener, proven
 func plainActivationPool(route observedRouteGraph) bool {
 	pool := route.pool
 	return pool.Protocol == cloud.ListenerProtocolHTTP && !pool.TLSEnabled && !route.backendH2C &&
-		pool.Persistence == (pools.SessionPersistence{}) && !slices.Contains(pool.Tags, xBackendCookieTag) &&
+		pool.Persistence == (pools.SessionPersistence{}) && !slices.Contains(pool.Tags, xBackendCookieTag) && !enrolledHeader(route) &&
 		!hasObservedBackendTLS(*pool, route.backendTLS)
 }
 

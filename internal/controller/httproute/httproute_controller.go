@@ -83,6 +83,8 @@ type Reconciler struct {
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
 	// XBackendCookieAvailable checks regional Amphora support for the requested HTTP cookie.
 	XBackendCookieAvailable func(context.Context, cloud.HTTPSessionCookieRequirements) (bool, error)
+	// XBackendHeaderAvailable checks regional Amphora support for header persistence.
+	XBackendHeaderAvailable func(context.Context) (bool, error)
 	// BackendTLSSystemCAAvailable checks system trust for the selected HTTP backend profile.
 	BackendTLSSystemCAAvailable func(context.Context, bool, bool, bool) (bool, error)
 	// TCPBackendTLSSystemCAAvailable checks system trust for terminating TLSRoutes.
@@ -439,12 +441,12 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			transport := xBackendTransportRevision(httpRoute, observations)
 			xBackendRevisionCurrent = err == nil && transport == *graphResult.xBackendTransportRevision &&
 				r.currentXBackendRevision(httpRoute, parent.ref, xBackendTransportRevisionCondition, transport)
-			if graphResult.xBackendCookieRevision != nil {
-				cookie := xBackendCookieRevision(httpRoute, observations)
-				if err != nil || cookie != *graphResult.xBackendCookieRevision ||
-					!r.currentXBackendRevision(httpRoute, parent.ref, xBackendCookieRevisionCondition, cookie) {
+			if graphResult.persistenceRevision != nil {
+				persistence := xBackendPersistenceRevision(httpRoute, observations)
+				if err != nil || persistence != *graphResult.persistenceRevision ||
+					!r.currentXBackendRevision(httpRoute, parent.ref, xBackendPersistenceRevisionCondition, persistence) {
 					xBackendRevisionCurrent = false
-					graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistencePathReadbackUnverified)
+					graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistenceRevisionUnverified)
 				}
 			}
 		}
@@ -455,7 +457,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
 			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot).
-				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull).withXBackendCookieIssue(graphResult.BackendSessionPersistenceIssue)
+				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull).withXBackendPersistenceIssue(graphResult.BackendSessionPersistenceIssue)
 			status.partiallyInvalid = graphResult.PartiallyInvalid
 			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
@@ -470,7 +472,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		status.programmedMessage = "Octavia configuration for the supported rules is active"
 	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
-	scope.statusPlan.xBackendCookieRevision = graphResult.xBackendCookieRevision
+	scope.statusPlan.persistenceRevision = graphResult.persistenceRevision
 	scope.statusPlan.xBackendTransportRevision = graphResult.xBackendTransportRevision
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: resyncAfter}, nil

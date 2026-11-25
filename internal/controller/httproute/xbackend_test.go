@@ -450,6 +450,21 @@ func TestXBackendExternalHostnameReferencesUseActualGatewayMode(t *testing.T) {
 }
 
 func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
+	t.Run("Cookie", func(t *testing.T) {
+		testWeightedXBackendPersistence(t, &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{
+			Name: ptr.To(gatewayv1.CookieName("reports_session")), Path: ptr.To("/"),
+		}})
+	})
+	t.Run("Header", func(t *testing.T) {
+		testWeightedXBackendPersistence(t, &gatewayv1.SessionPersistence{
+			Type: ptr.To(gatewayv1.HeaderBasedSessionPersistence), Header: &gatewayv1.HeaderConfig{Name: "X-Reports-Session"},
+			AbsoluteTimeout: ptr.To(gatewayv1.Duration("2s")),
+		})
+	})
+}
+
+func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.SessionPersistence) {
+	t.Helper()
 	f := newRouteModelInputFixture(t)
 	f.reconciler.Config.GatewayAPIChannel = "experimental"
 	f.reconciler.Config.XBackendSessionPersistence = true
@@ -460,11 +475,9 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	backend := &gatewayx.XBackend{
 		ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: f.service.Name, UID: "xbackend-uid", Generation: 1},
 		Spec: gatewayx.BackendSpec{
-			Type: gatewayx.BackendTypeEndpointSelector,
-			Port: gatewayx.BackendPort{Number: gatewayx.PortNumber(f.service.Spec.Ports[0].Port)},
-			SessionPersistence: &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{
-				Name: ptr.To(gatewayv1.CookieName("reports_session")), Path: ptr.To("/"),
-			}},
+			Type:               gatewayx.BackendTypeEndpointSelector,
+			Port:               gatewayx.BackendPort{Number: gatewayx.PortNumber(f.service.Spec.Ports[0].Port)},
+			SessionPersistence: persistence,
 			EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
 				MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "direct"},
 			}},
@@ -492,10 +505,31 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	before := f.observe(t)
 	spec := before.Nodes[0].Spec
 	if len(spec.HTTPBackends) != 2 || spec.HTTPBackends[0].Kind != "" || spec.HTTPBackends[1].Kind != cloud.HTTPBackendKindXBackend ||
-		spec.HTTPBackends[0].SessionCookieName != "" || spec.HTTPBackends[1].SessionCookieName != "reports_session" || spec.HTTPBackends[1].SessionCookiePath != nil ||
+		spec.HTTPBackends[0].SessionCookieName != "" || spec.HTTPBackends[0].SessionHeader != nil || spec.HTTPBackends[1].SessionCookiePath != nil ||
 		identity.HTTPBackendPoolKey(spec.HTTPBackends[0]) == identity.HTTPBackendPoolKey(spec.HTTPBackends[1]) ||
 		!reflect.DeepEqual(spec.HTTPBackends[1].Members, []cloud.Member{{Address: pod.Status.PodIP, Port: int(backend.Spec.Port.Number)}}) {
 		t.Fatalf("expected two distinct pools, got %+v", spec.HTTPBackends)
+	}
+	if model.IsHeaderSessionPersistence(*persistence) {
+		require.Empty(t, spec.HTTPBackends[1].SessionCookieName)
+		require.Equal(t, &cloud.HTTPSessionHeaderPersistence{Name: "x-reports-session", TimeoutMS: ptr.To(int64(2000))}, spec.HTTPBackends[1].SessionHeader)
+		for _, condition := range []struct {
+			available bool
+			err       error
+			want      metav1.ConditionStatus
+		}{
+			{false, nil, metav1.ConditionFalse},
+			{false, context.DeadlineExceeded, metav1.ConditionUnknown},
+			{true, nil, metav1.ConditionTrue},
+		} {
+			f.reconciler.XBackendHeaderAvailable = func(context.Context) (bool, error) { return condition.available, condition.err }
+			status := programmedRouteStatus()
+			require.NoError(t, f.reconciler.resolveRouteReferences(t.Context(), f.route, f.gateway, &status))
+			require.Equal(t, condition.want, status.resolved)
+		}
+	} else {
+		require.Equal(t, "reports_session", spec.HTTPBackends[1].SessionCookieName)
+		require.Nil(t, spec.HTTPBackends[1].SessionHeader)
 	}
 	want := []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 3}, {BackendIndex: ptr.To(1), Weight: 7}}
 	if len(spec.WeightedHTTPRules) != 1 || !reflect.DeepEqual(spec.WeightedHTTPRules[0].Targets, want) {

@@ -1,0 +1,380 @@
+{
+  "capability": "http_header_persistence_v1",
+  "controller": "a11c1656f731cb8589903a587421b3feef9a502a",
+  "image": "sha256:dc2c6bb31067137b9535fd7d6d02bb65b181ae831fb793ea550a5d029f8fe18b",
+  "managerSHA256": "e18247e52c335f76c051d8f1170db77ce63d92bdf56dc0b2044b59bdb5a39c48",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "providerPackages": {
+    "octavia": {
+      "revision": "3aa1cc04e714612b0e0d711c06c96ce675321770",
+      "tree": "9ddfa5d5cbc33a59c686208deb332431becb32db",
+      "wheelSHA256": "78435c444c205a70fa2c3dcbaa4dd5b4f04df31c52e2d18380cfc924d16f954c",
+      "version": "19.0.1.dev83",
+      "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-header-persistence-3aa1cc04e714"
+    },
+    "octaviaLib": {
+      "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+      "tree": "d82d52461368d70ceb4436388d7403081702234a",
+      "wheelSHA256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+      "version": "3.12.1.dev21",
+      "release": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-header-persistence-eb4c646b5975"
+    }
+  },
+  "kindGateway": {
+    "channels": {
+      "standard": {
+        "xBackendCRD": {
+          "installed": false,
+          "discovered": false
+        },
+        "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "fixtureBackendSHA256": "7707763eb5d97fc5b9d563c453ba67d1c2a3b61cd912320fe4fb492bae45541e",
+        "ordinaryRouteHTTP200": 2
+      },
+      "experimental": {
+        "xBackendCRD": {
+          "installed": true,
+          "discovered": true,
+          "servedVersions": [
+            "v1alpha1"
+          ]
+        },
+        "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "fixtureBackendSHA256": "7707763eb5d97fc5b9d563c453ba67d1c2a3b61cd912320fe4fb492bae45541e",
+        "ordinaryRouteHTTP200": 2,
+        "phases": {
+          "two-members": {
+            "responses": [
+              200,
+              200,
+              200,
+              200,
+              200,
+              200,
+              200,
+              200
+            ],
+            "originProtocols": [
+              "HTTP/2.0"
+            ],
+            "podHits": {
+              "header-a": 4,
+              "header-b": 4
+            },
+            "responseHeaderCounts": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "ordinaryRouteHTTP200": 2,
+            "pool": "13a2cdb25298e804fade26a31e419d68c5262795554af5aa8361c4e26041a4b2",
+            "poolStatus": "ACTIVE",
+            "routeConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ],
+              "ResolvedRefs": [
+                "True",
+                "ResolvedRefs",
+                1
+              ],
+              "gateway-api-openstack.github.io/Programmed": [
+                "True",
+                "Programmed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendCookieConfiguration": [
+                "True",
+                "Observed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendTransportConfiguration": [
+                "True",
+                "Observed",
+                1
+              ]
+            },
+            "backendConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ]
+            }
+          },
+          "selector-withdrawal": {
+            "responses": [
+              200,
+              200,
+              200
+            ],
+            "originProtocols": [
+              "HTTP/2.0"
+            ],
+            "podHits": {
+              "header-a": 0,
+              "header-b": 3
+            },
+            "responseHeaderCounts": [
+              1,
+              1,
+              1
+            ],
+            "ordinaryRouteHTTP200": 2,
+            "pool": "13a2cdb25298e804fade26a31e419d68c5262795554af5aa8361c4e26041a4b2",
+            "poolStatus": "ACTIVE",
+            "routeConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ],
+              "ResolvedRefs": [
+                "True",
+                "ResolvedRefs",
+                1
+              ],
+              "gateway-api-openstack.github.io/Programmed": [
+                "True",
+                "Programmed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendCookieConfiguration": [
+                "True",
+                "Observed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendTransportConfiguration": [
+                "True",
+                "Observed",
+                1
+              ]
+            },
+            "backendConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ]
+            }
+          },
+          "missing-key": {
+            "responses": [
+              503,
+              503,
+              503
+            ],
+            "originProtocols": [],
+            "podHits": {
+              "header-a": 0,
+              "header-b": 0
+            },
+            "responseHeaderCounts": [
+              0,
+              0,
+              0
+            ],
+            "ordinaryRouteHTTP200": 2,
+            "pool": "13a2cdb25298e804fade26a31e419d68c5262795554af5aa8361c4e26041a4b2",
+            "poolStatus": "ERROR",
+            "routeConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ],
+              "ResolvedRefs": [
+                "True",
+                "ResolvedRefs",
+                1
+              ],
+              "gateway-api-openstack.github.io/Programmed": [
+                "True",
+                "Programmed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendCookieConfiguration": [
+                "True",
+                "Observed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendTransportConfiguration": [
+                "True",
+                "Observed",
+                1
+              ]
+            },
+            "backendConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ]
+            }
+          },
+          "key-restored": {
+            "responses": [
+              200,
+              200
+            ],
+            "originProtocols": [
+              "HTTP/2.0"
+            ],
+            "podHits": {
+              "header-a": 0,
+              "header-b": 2
+            },
+            "responseHeaderCounts": [
+              1,
+              1
+            ],
+            "ordinaryRouteHTTP200": 2,
+            "pool": "13a2cdb25298e804fade26a31e419d68c5262795554af5aa8361c4e26041a4b2",
+            "poolStatus": "ACTIVE",
+            "routeConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ],
+              "ResolvedRefs": [
+                "True",
+                "ResolvedRefs",
+                1
+              ],
+              "gateway-api-openstack.github.io/Programmed": [
+                "True",
+                "Programmed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendCookieConfiguration": [
+                "True",
+                "Observed",
+                1
+              ],
+              "gateway-api-openstack.github.io/XBackendTransportConfiguration": [
+                "True",
+                "Observed",
+                1
+              ]
+            },
+            "backendConditions": {
+              "Accepted": [
+                "True",
+                "Accepted",
+                1
+              ]
+            }
+          }
+        },
+        "affinity": {
+          "successfulReplaysPerInitialPod": 3,
+          "renewedAfterSelectorWithdrawal": true
+        },
+        "recovery": {
+          "controllerPersistenceUpdates": [
+            null,
+            "HTTP_HEADER"
+          ],
+          "sameOctaviaMember": false,
+          "tokenRenewed": true,
+          "originalPoolRetained": true,
+          "restoredWorkerConfigurationSHA256": "bc6420757b19932acf78c568b80456ef919715baa8748f45a4a7cc677005bae8"
+        }
+      }
+    },
+    "precedingExperimental": {
+      "controller": "52eae75209ad7bf2b2cbc1fbecf203f23f0e463a",
+      "octavia": "3d73d50eb78d89402cc5c828d9e54aefaf5b83cd",
+      "responses": [
+        503,
+        503,
+        503
+      ],
+      "applicationHits": {
+        "header-a": 0,
+        "header-b": 0
+      },
+      "ordinaryRouteHTTP200": 2
+    }
+  },
+  "localProvider": {
+    "controllerExercised": false,
+    "clientHTTP": "HTTP/1.1",
+    "haproxy": {
+      "version": "3.0.19",
+      "sha256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+      "capabilities": [
+        "backend_tls_h2_alpn_v1",
+        "backend_tls_hostname_v1",
+        "http_header_persistence_v1"
+      ]
+    },
+    "originFixtureSHA256": "19ee9e8889abc8b9e11253ba63bf4cfd14305d645c187fcaeb1f93d0fe7d6d4f",
+    "h2c": {
+      "status": 200,
+      "originHTTP": "HTTP/2.0",
+      "originTLS": false,
+      "originALPN": null,
+      "originSNIValidated": false,
+      "issuedByMember": {
+        "blue": 1,
+        "green": 1
+      },
+      "replayedByMember": {
+        "blue": 3,
+        "green": 3
+      },
+      "witnessByMember": {
+        "blue": 1,
+        "green": 1
+      },
+      "originRequestsByMember": {
+        "blue": 5,
+        "green": 5
+      }
+    },
+    "tlsH2": {
+      "status": 200,
+      "originHTTP": "HTTP/2.0",
+      "originTLS": true,
+      "originALPN": "h2",
+      "originSNIValidated": true,
+      "issuedByMember": {
+        "blue": 1,
+        "green": 1
+      },
+      "replayedByMember": {
+        "blue": 3,
+        "green": 3
+      },
+      "witnessByMember": {
+        "blue": 1,
+        "green": 1
+      },
+      "originRequestsByMember": {
+        "blue": 5,
+        "green": 5
+      },
+      "rejectedTLS": {
+        "wrongHostname": {
+          "status": 503,
+          "originRequests": 0
+        },
+        "untrustedCA": {
+          "status": 503,
+          "originRequests": 0
+        }
+      }
+    }
+  }
+}
