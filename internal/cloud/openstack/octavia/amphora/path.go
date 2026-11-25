@@ -17,48 +17,58 @@ limitations under the License.
 package amphora
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-// PathRules carries either an anchored REGEX rule or the literal L7 rules.
+// PathRules contains the stock pair or one raw value for HTTP_PATH_LITERAL.
+// The provider applies the segment boundary when comparing a literal prefix.
 type PathRules struct {
-	Exact  string
-	Prefix string
-	Regex  string
+	Exact   string
+	Prefix  string
+	Literal string
 }
 
-// PathRuleValues validates the Octavia rule values for a path match. A non-root
-// prefix uses two literal rules or an anchored regex with a segment boundary.
-func PathRuleValues(path string, isPrefix bool) (PathRules, error) {
+// PathRuleValues keeps the stock encoding when its rule values fit and the
+// legacy renderer can pass the path to HAProxy unchanged.
+func PathRuleValues(path string, isPrefix, allowLiteralPaths bool) (PathRules, error) {
 	if path == "" {
 		path = "/"
 	}
-	if isPrefix {
-		path = strings.TrimRight(path, "/")
+	if !cloud.ValidHTTPPath(path) {
+		return PathRules{}, fmt.Errorf("path %q is not a valid absolute Gateway API path of at most 1024 ASCII bytes", path)
 	}
-	rules := PathRules{Exact: path}
-	if isPrefix {
-		rules.Prefix = path + "/"
+	if isPrefix && path != "/" {
+		path = strings.TrimSuffix(path, "/")
 	}
-	if strings.Contains(path, "'") {
-		// Amphora inserts the expression as an HAProxy token. Quote each
-		// apostrophe at the token boundary so both libc and PCRE receive
-		// the literal character. Keep dollar signs outside double quotes.
-		end := "$"
-		if isPrefix {
-			end = "($|/)"
+
+	stockLength := len(path)
+	if isPrefix && path != "/" {
+		stockLength++
+	}
+	// Octavia's legacy Jinja template HTML-escapes these otherwise legal
+	// characters before HAProxy parses the rule. Percent escapes stay raw.
+	if stockLength > maxL7RuleValueLength || strings.ContainsAny(path, "'&") {
+		if allowLiteralPaths {
+			return PathRules{Literal: path}, nil
 		}
-		literal := strings.ReplaceAll(regexp.QuoteMeta(path), "'", `"'"`)
-		rules = PathRules{Regex: "^" + literal + end}
+		if stockLength > maxL7RuleValueLength {
+			return PathRules{}, fmt.Errorf("path requires an Octavia L7 rule value of %d characters, exceeding the stock %d character limit. Enable --octavia-literal-http-paths", stockLength, maxL7RuleValueLength)
+		}
+		return PathRules{}, errors.New("HTTP paths containing apostrophes or ampersands require --octavia-literal-http-paths because the stock Octavia renderer changes those characters")
 	}
-	length := max(utf8.RuneCountInString(rules.Exact), utf8.RuneCountInString(rules.Prefix), utf8.RuneCountInString(rules.Regex))
-	if length > maxL7RuleValueLength {
-		return PathRules{}, fmt.Errorf("path requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", length, maxL7RuleValueLength)
+
+	if !isPrefix {
+		return PathRules{Exact: path}, nil
 	}
-	return rules, nil
+	if path == "/" {
+		return PathRules{Prefix: path}, nil
+	}
+	return PathRules{Exact: path, Prefix: path + "/"}, nil
 }
 
 var literalPathSegments = regexp.MustCompile(`^/[a-zA-Z0-9_/-]+$`)

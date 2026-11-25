@@ -51,6 +51,8 @@ type Config struct {
 	HTTPHeaderExact bool
 	// LongHTTPHostnames allows host match expressions above the stock Octavia limit.
 	LongHTTPHostnames bool
+	// LiteralHTTPPaths permits paths that the stock Octavia renderer cannot represent.
+	LiteralHTTPPaths bool
 	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.
 	HTTPQueryParamExact bool
 

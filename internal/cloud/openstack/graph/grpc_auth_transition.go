@@ -374,7 +374,7 @@ func tagGRPCAuthTransition(change *octavia.GRPCAuthTransitionPolicy, part desire
 			return observed.rule.RuleType == string(rule.ruleType) && observed.rule.Value == rule.value &&
 				observed.rule.CompareType == string(rule.compareType)
 		})
-		if rule.invert || rule.ruleType != l7policies.TypePath && rule.ruleType != l7policies.TypeHostName || index < 0 {
+		if rule.invert || !isHTTPPathRule(rule.ruleType) && rule.ruleType != l7policies.TypeHostName || index < 0 {
 			return false
 		}
 		old := current.rules[index]

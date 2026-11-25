@@ -25,11 +25,12 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
-// Evaluate only the stock predicates emitted for redirects. HAProxy checks
+// Evaluate the path and hostname predicates emitted for redirects. HAProxy checks
 // the same wire cases independently in the qualification fixture.
 func redirectGuardMatches(t *testing.T, rule redirectGuard, host, path string) bool {
 	t.Helper()
@@ -41,6 +42,9 @@ func redirectGuardMatches(t *testing.T, rule redirectGuard, host, path string) b
 	case l7policies.CompareTypeEqual:
 		return value == rule.value
 	case l7policies.CompareTypeStartWith:
+		if rule.ruleType == octavia.RuleTypeHTTPPathLiteral {
+			return value == rule.value || strings.HasPrefix(value, rule.value+"/")
+		}
 		return strings.HasPrefix(value, rule.value)
 	case l7policies.CompareTypeRegex:
 		return regexp.MustCompile(rule.value).MatchString(value)

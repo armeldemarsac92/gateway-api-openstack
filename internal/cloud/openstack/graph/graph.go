@@ -36,19 +36,19 @@ import (
 )
 
 type desiredGatewayGraph struct {
-	fixedHTTPResponses     bool
-	httpRequestPolicies    httpRequestPolicyAvailability
-	longHTTPHostnamePorts  map[int]bool
-	plainHTTPRuleLimits    map[int]string
-	spec                   cloud.GatewayGraphSpec
-	identity               Identity
-	routes                 []desiredRoute
-	protocol               string
-	sni                    []desiredSNIFragment
-	sniHeldClosed          map[sniFragmentKey]bool
-	sniPaused              map[sniFragmentKey]bool
-	sniBlockedRoutes       map[string]bool
-	sniBackendPoolsCapable bool
+	fixedHTTPResponses      bool
+	httpRequestPolicies     httpRequestPolicyAvailability
+	httpRuleCapabilityPorts map[int]httpRuleCapabilities
+	plainHTTPRuleLimits     map[int]string
+	spec                    cloud.GatewayGraphSpec
+	identity                Identity
+	routes                  []desiredRoute
+	protocol                string
+	sni                     []desiredSNIFragment
+	sniHeldClosed           map[sniFragmentKey]bool
+	sniPaused               map[sniFragmentKey]bool
+	sniBlockedRoutes        map[string]bool
+	sniBackendPoolsCapable  bool
 
 	sniPassthroughBackendPoolsCapable bool
 	sniBackendPoolDiscoveryPending    bool
@@ -449,7 +449,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
 		desired.httpRequestPolicies != httpRequestPolicyAvailable ||
 		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes) || containsObservedCORS(actual.routes) ||
-		len(desired.longHTTPHostnamePorts) != 0 || observedScalarLongHTTPHostname(actual)
+		len(desired.httpRuleCapabilityPorts) != 0 || observedScalarHTTPRuleCapabilities(actual)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -492,7 +492,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
 		}
 	}
-	plan = p.protectLongHTTPHostnames(ctx, desired, actual, plan, &result)
+	plan = p.protectHTTPRuleCapabilities(ctx, desired, actual, plan, &result)
 	if desired.httpRequestPolicies == httpRequestPolicyUnverified && len(plan) != 0 {
 		// Preserve the observed configuration while discovery is unavailable.
 		// Permission withdrawals are urgent and do not authorize other writes.
@@ -789,7 +789,7 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 			}
 		}
 	}
-	plan = p.protectLongHTTPHostnames(ctx, desired, actual, plan, &result)
+	plan = p.protectHTTPRuleCapabilities(ctx, desired, actual, plan, &result)
 	if len(plan) != 1 || !canWithdrawHTTPWithoutAddress(plan[0], desired, actual) {
 		if confirmedClosed {
 			// The Octavia readback is enough to report the closed listener
@@ -1178,7 +1178,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return spec.Gateway.Spec.ScopedListeners[i].Port < spec.Gateway.Spec.ScopedListeners[j].Port
 		})
 	}
-	longHTTPHostnamePorts := make(map[int]bool)
+	httpRuleCapabilityPorts := make(map[int]httpRuleCapabilities)
 	for port, hosts := range spec.Gateway.Spec.HTTPListenerHostnames {
 		_, httpsPort := unauthorizedHTTPSPorts[port]
 		if protocol != cloud.ListenerProtocolHTTP || spec.Gateway.Disposition != cloud.GraphEnsure ||
@@ -1196,7 +1196,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 					return invalid(err.Error())
 				}
 				if !p.longHTTPHostnames && amphora.IsLongHostnameRuleValue(value) {
-					longHTTPHostnamePorts[port] = true
+					httpRuleCapabilityPorts[port] |= longHostnameCapability
 				}
 			}
 		}
@@ -1225,7 +1225,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	// protected. Keep the request's authority snapshot immutable.
 	spec.Routes = slices.Clone(spec.Routes)
 	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol,
-		fixedHTTPResponses: p.fixedHTTPResponses, longHTTPHostnamePorts: longHTTPHostnamePorts}
+		fixedHTTPResponses: p.fixedHTTPResponses, httpRuleCapabilityPorts: httpRuleCapabilityPorts}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
 	portWinners := make(map[int]bool, len(ports))
@@ -1454,8 +1454,8 @@ func (p *Provider) collectHTTPPortPolicies(desired *desiredGatewayGraph, portRou
 				}
 				desired.plainHTTPRuleLimits[physicalPort] = err.Error()
 			}
-			if p.longHTTPHostnames && !desired.longHTTPHostnamePorts[physicalPort] && usesLongHTTPHostname(*policy, portRoute.hostnameRuleValue) {
-				desired.longHTTPHostnamePorts[physicalPort] = true
+			if required := desiredHTTPRuleCapabilities(*policy, portRoute.hostnameRuleValue); required != 0 {
+				desired.httpRuleCapabilityPorts[physicalPort] |= required
 			}
 			if policy.redirect == nil && policy.position == 1 {
 				if err := addRank(httpPort, listenerScope(policy.httpListenerHostname, policy.httpsListenerHostname), policy.precedence); err != nil {

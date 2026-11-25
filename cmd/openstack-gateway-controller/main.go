@@ -119,7 +119,7 @@ func run(ctx context.Context) error {
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
 	var l7PolicyConditionalRemoval bool
 	var frontendClientValidation, clusterTrustBundles bool
-	var httpRequestRedirect, longHTTPHostnames bool
+	var httpRequestRedirect, longHTTPHostnames, literalHTTPPaths bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
 	var tcpConnectionRejection, udpPacketDrop bool
@@ -142,6 +142,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
 	flag.BoolVar(&gatewayAddressRoutabilityCluster, "gateway-address-routability-cluster", false, "serve Cluster Gateway addresses through Kubernetes Service ClusterIPs")
 	flag.BoolVar(&longHTTPHostnames, "octavia-long-http-hostnames", false, "use the advertised Octavia capability for long HTTP hostname matches")
+	flag.BoolVar(&literalHTTPPaths, "octavia-literal-http-paths", false, "use the advertised Octavia capability for HTTP path matches the stock renderer cannot represent")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
 	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
@@ -249,6 +250,7 @@ func run(ctx context.Context) error {
 		ControllerVersion:             version,
 		GatewayAPIChannel:             gatewayAPIChannel,
 		LongHTTPHostnames:             longHTTPHostnames,
+		LiteralHTTPPaths:              literalHTTPPaths,
 		HTTPHeaderExact:               exactHTTPHeaders,
 		HTTPQueryParamExact:           exactHTTPQueryParams,
 		HTTPRequestURLRewrite:         httpRequestURLRewrite,
@@ -333,6 +335,7 @@ func run(ctx context.Context) error {
 		BackendCA:              backendca.New(clusterID, serviceClients),
 		BackendTLSPolicy:       backendTLSPolicy,
 		LongHTTPHostnames:      longHTTPHostnames,
+		LiteralHTTPPaths:       literalHTTPPaths,
 		HTTPHeaderExact:        exactHTTPHeaders,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
 		HTTPRequestURLRewrite:  httpRequestURLRewrite,

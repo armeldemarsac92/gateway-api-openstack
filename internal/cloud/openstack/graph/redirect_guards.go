@@ -299,7 +299,7 @@ func (p *Provider) redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTT
 			cell.guards = append(cell.guards, redirectGuard{ruleType: l7policies.TypeHostName, compareType: l7policies.CompareTypeRegex, value: regex})
 		}
 		for _, path := range d.paths {
-			guards, err := redirectPathGuards(path)
+			guards, err := p.redirectPathGuards(path)
 			if err != nil {
 				return nil, err
 			}
@@ -329,7 +329,7 @@ func (p *Provider) redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTT
 				continue
 			}
 			var err error
-			alternatives, err = excludeRedirectQueryMatch(alternatives, exception, positives)
+			alternatives, err = p.excludeRedirectQueryMatch(alternatives, exception, positives)
 			if err != nil {
 				return nil, err
 			}
@@ -339,14 +339,14 @@ func (p *Provider) redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTT
 	return cells, nil
 }
 
-func redirectPathGuards(path redirectPath) ([]redirectGuard, error) {
-	policies, _, err := httpPathPolicies(cloud.HTTPPathMatch{PathType: path.kind, PathValue: path.value}, true, false)
+func (p *Provider) redirectPathGuards(path redirectPath) ([]redirectGuard, error) {
+	policies, _, err := httpPathPolicies(cloud.HTTPPathMatch{PathType: path.kind, PathValue: path.value}, true, false, p.literalHTTPPaths)
 	if err != nil {
 		return nil, err
 	}
 	var guards []redirectGuard
 	for _, policy := range policies {
-		guards = append(guards, redirectGuard{ruleType: l7policies.TypePath, compareType: policy.compareType, value: policy.path})
+		guards = append(guards, redirectGuard{ruleType: policy.pathRuleType(), compareType: policy.compareType, value: policy.path})
 	}
 	return guards, nil
 }
@@ -354,10 +354,10 @@ func redirectPathGuards(path redirectPath) ([]redirectGuard, error) {
 // Octavia requires all rules in a policy to match. To exclude a higher
 // forwarding match, create an alternative for each of its conditions that
 // could fail. A path with multiple encodings fails only if they all fail.
-func excludeRedirectQueryMatch(cells []redirectCell, exception redirectQueryException, positives int) ([]redirectCell, error) {
+func (p *Provider) excludeRedirectQueryMatch(cells []redirectCell, exception redirectQueryException, positives int) ([]redirectCell, error) {
 	options := make([][]redirectGuard, 0, len(exception.params)+1)
 	if exception.path.kind != "" {
-		pathGuards, err := redirectPathGuards(exception.path)
+		pathGuards, err := p.redirectPathGuards(exception.path)
 		if err != nil {
 			return nil, err
 		}

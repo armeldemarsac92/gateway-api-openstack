@@ -223,7 +223,7 @@ func (p *Provider) ownedHTTPFilterListener(actual observedGatewayGraph, listener
 }
 
 func requestTransformListenerNeedsRecovery(desired desiredGatewayGraph, actual observedGatewayGraph, listener listeners.Listener) bool {
-	return longHTTPHostnameNeedsRecovery(desired, actual, listener) || rewriteListenerNeedsRecovery(desired, actual, listener) ||
+	return httpRuleListenerNeedsRecovery(desired, actual, listener) || rewriteListenerNeedsRecovery(desired, actual, listener) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendRequestFiltersPolicy) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendResponseHeadersPolicy) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, requestCORSPolicy) ||

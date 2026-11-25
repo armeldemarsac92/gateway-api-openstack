@@ -55,6 +55,7 @@ type desiredPolicy struct {
 	compareType              l7policies.CompareType
 	path                     string
 	pathInvert               bool
+	literalPath              bool
 	precedence               int
 	backendKey               string
 	matchKey                 string
@@ -94,7 +95,7 @@ type desiredRule struct {
 
 func (rule desiredRule) matchesKey(key string) bool {
 	switch rule.ruleType {
-	case httpMethodRuleType, grpcContentTypeRuleType:
+	case httpMethodRuleType, grpcContentTypeRuleType, octavia.RuleTypeHTTPPathLiteral:
 		return key == ""
 	default:
 		return rule.key == "" || key == rule.key
@@ -780,7 +781,7 @@ func usesHTTPPathPredicate(match cloud.HTTPPathMatch) bool {
 const impossibleHTTPPathPattern = "(^$)."
 
 func (p *Provider) httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
-	policies, hostname, err := httpPathPolicies(match, grouped, p.longHTTPHostnames)
+	policies, hostname, err := httpPathPolicies(match, grouped, p.longHTTPHostnames, p.literalHTTPPaths)
 	if err == nil && p.httpMethodMatch && match.Method == "" && match.PathType == cloud.PathMatchPrefix && strings.TrimRight(match.PathValue, "/") == "" {
 		policies[0].path = impossibleHTTPPathPattern
 		policies[0].compareType = l7policies.CompareTypeRegex
@@ -789,11 +790,11 @@ func (p *Provider) httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]
 	return policies, hostname, err
 }
 
-func httpPathPolicies(match cloud.HTTPPathMatch, grouped, allowLongHostnames bool) ([]desiredPolicy, string, error) {
+func httpPathPolicies(match cloud.HTTPPathMatch, grouped, allowLongHostnames, allowLiteralPaths bool) ([]desiredPolicy, string, error) {
 	if match.PathType != cloud.PathMatchExact && match.PathType != cloud.PathMatchPrefix {
 		return nil, "", fmt.Errorf("unsupported path match type %q", match.PathType)
 	}
-	pathRules, err := amphora.PathRuleValues(match.PathValue, match.PathType == cloud.PathMatchPrefix)
+	pathRules, err := amphora.PathRuleValues(match.PathValue, match.PathType == cloud.PathMatchPrefix, allowLiteralPaths)
 	if err != nil {
 		return nil, "", err
 	}
@@ -807,18 +808,22 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped, allowLongHostnames boo
 	if !usesHTTPPathPredicate(match) {
 		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, method: match.Method, headers: match.Headers, queryParams: match.QueryParams}}, hostnameRuleValue, nil
 	}
-	role := rolePolicyExact
-	pattern := pathRules.Regex
-	if match.PathType == cloud.PathMatchPrefix {
-		role = rolePolicyPrefix
-		if pattern == "" && grouped {
-			pattern, _ = amphora.LiteralPathPrefixPattern(pathRules.Exact)
-		}
+	var pattern string
+	if grouped && match.PathType == cloud.PathMatchPrefix && pathRules.Exact != "" {
+		pattern, _ = amphora.LiteralPathPrefixPattern(pathRules.Exact)
 	}
 	var policies []desiredPolicy
-	if pattern != "" {
-		policies = []desiredPolicy{{role: role, position: 1, compareType: l7policies.CompareTypeRegex, path: pattern}}
-	} else {
+	switch {
+	case pathRules.Literal != "":
+		role := rolePolicyExact
+		compare := l7policies.CompareTypeEqual
+		if match.PathType == cloud.PathMatchPrefix {
+			role, compare = rolePolicyPrefix, l7policies.CompareTypeStartWith
+		}
+		policies = []desiredPolicy{{role: role, position: 1, compareType: compare, path: pathRules.Literal, literalPath: true}}
+	case pattern != "":
+		policies = []desiredPolicy{{role: rolePolicyPrefix, position: 1, compareType: l7policies.CompareTypeRegex, path: pattern}}
+	default:
 		policies = policiesFor(pathRules.Exact, pathRules.Prefix)
 	}
 	for i := range policies {
@@ -840,6 +845,17 @@ func policiesFor(exactPath, prefixPath string) []desiredPolicy {
 	return policies
 }
 
+func (policy desiredPolicy) pathRuleType() l7policies.RuleType {
+	if policy.literalPath {
+		return octavia.RuleTypeHTTPPathLiteral
+	}
+	return l7policies.TypePath
+}
+
+func isHTTPPathRule(kind l7policies.RuleType) bool {
+	return kind == l7policies.TypePath || kind == octavia.RuleTypeHTTPPathLiteral
+}
+
 func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 	if policy.matchKey != "" {
 		hostnameRuleValue = policy.hostnameRuleValue
@@ -848,7 +864,7 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 	if policy.path != "" {
 		rules = append(rules, desiredRule{
 			role:        policyRuleRole(policy, roleRulePath, ""),
-			ruleType:    l7policies.TypePath,
+			ruleType:    policy.pathRuleType(),
 			compareType: policy.compareType,
 			value:       policy.path,
 			invert:      policy.pathInvert,
