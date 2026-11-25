@@ -304,8 +304,12 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 	if diagnostic := validateSessionPersistence(persistence, "XBackend"); diagnostic != nil {
 		return diagnostic
 	}
-	if !IsHeaderSessionPersistence(persistence) && protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
-		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
+	if !IsHeaderSessionPersistence(persistence) {
+		switch protocol {
+		case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolH2C:
+		default:
+			return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend Cookie sessionPersistence requires HTTP, HTTP11 or H2C")
+		}
 	}
 	return nil
 }

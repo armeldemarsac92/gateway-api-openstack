@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,10 +31,21 @@ import (
 )
 
 func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
+	t.Run("HTTP11", func(t *testing.T) { testXBackendCookieOctaviaPoolLifecycle(t, false) })
+	t.Run("H2C", func(t *testing.T) { testXBackendCookieOctaviaPoolLifecycle(t, true) })
+}
+
+func testXBackendCookieOctaviaPoolLifecycle(t *testing.T, h2c bool) {
+	t.Helper()
 	var pool map[string]any
 	var writes []map[string]json.RawMessage
+	var siblingEnabled bool
 	capabilityResponse := http.StatusOK
-	capabilities := []string{octavia.GatewayCapabilityHTTPCookieName}
+	namedCapabilities := []string{octavia.GatewayCapabilityHTTPCookieName}
+	if h2c {
+		namedCapabilities = append(namedCapabilities, octavia.GatewayCapabilityBackendH2C)
+	}
+	capabilities := slices.Clone(namedCapabilities)
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /lbaas/providers/amphora/gateway_capabilities":
@@ -44,6 +56,15 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case "GET /lbaas/pools":
 			safetyWriteJSON(t, w, map[string]any{"pools": []any{pool}})
+		case "PUT /lbaas/pools/ordinary":
+			var request struct {
+				Pool struct {
+					AdminStateUp bool `json:"admin_state_up"`
+				} `json:"pool"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			siblingEnabled = request.Pool.AdminStateUp
+			safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "ordinary"}})
 		case "POST /lbaas/pools", "PUT /lbaas/pools/pool":
 			var request struct {
 				Pool map[string]json.RawMessage `json:"pool"`
@@ -66,7 +87,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 					require.NoError(t, err)
 				}
 			}
-			for _, field := range []string{"session_persistence", "admin_state_up", "tags"} {
+			for _, field := range []string{"session_persistence", "admin_state_up", "backend_h2c", "tags"} {
 				if value := request.Pool[field]; value != nil {
 					pool[field] = value
 				}
@@ -80,23 +101,31 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{XBackendSessionPersistence: true})
+	p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{XBackendSessionPersistence: true, BackendH2C: h2c})
 	spec := completeGraphSpec(safetyTestIdentity(t))
 	route := &spec.Routes[0].Spec
 	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
 	route.MemberMode = cloud.MemberModeEndpoint
 	route.HTTPBackends = []cloud.HTTPBackend{{
 		Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "reports", Port: 8080,
-		SessionCookieName: "reports_session",
-		Members:           []cloud.Member{{Address: "192.0.2.20", Port: 8080}},
-		Matches:           []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/reports"}},
+		SessionCookieName: "reports_session", BackendH2C: h2c,
+		Members: []cloud.Member{{Address: "192.0.2.20", Port: 8080}},
+		Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/reports"}},
+	}, {
+		Namespace: "apps", Name: "ordinary", Port: 80,
+		Members: []cloud.Member{{Address: "192.0.2.30", Port: 8080}},
+		Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/ordinary", Precedence: 1}},
 	}}
 	desired, err := p.buildDesiredGatewayGraph(spec)
 	require.NoError(t, err)
 	lb := safetyObservedLoadBalancer()
 	lb.Provider, lb.ProvisioningStatus = "amphora", "ACTIVE"
 	actual := observedGatewayGraph{loadBalancer: lb, protocol: cloud.ListenerProtocolHTTP, routes: []observedRouteGraph{{}}}
-	wanted := &desired.routes[0].httpParts[0]
+	parts := desired.routes[0].httpParts
+	require.Len(t, parts, 2)
+	cookieIndex := slices.IndexFunc(parts, func(part desiredRoute) bool { return part.xBackend })
+	require.GreaterOrEqual(t, cookieIndex, 0)
+	wanted, sibling := &parts[cookieIndex], &parts[1-cookieIndex]
 	wanted.healthMonitor = cloud.HealthMonitorConfig{}
 	wanted.spec.Gateway.LoadBalancerID = lb.ID
 	require.Nil(t, p.prepareXBackendPersistence(t.Context(), &desired, actual))
@@ -118,7 +147,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 		inventory, err := p.octavia.ListPoolInventory(t.Context(), pools.ListOpts{})
 		require.NoError(t, err)
 		require.Len(t, inventory.Items, 1)
-		return observedRouteGraph{pool: &inventory.Items[0], backendTLS: inventory.BackendTLS["pool"],
+		return observedRouteGraph{pool: &inventory.Items[0], backendH2C: inventory.BackendH2C["pool"], backendTLS: inventory.BackendTLS["pool"],
 			cookieDeadline: inventory.CookieDeadline["pool"], cookiePath: inventory.CookiePath["pool"]}
 	}
 	create := converge(observedRouteGraph{})
@@ -126,7 +155,13 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	execute(create)
 	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_session"}`, string(writes[0]["session_persistence"]))
 	require.Equal(t, "false", string(writes[0]["admin_state_up"]))
+	if h2c {
+		require.Equal(t, "true", string(writes[0]["backend_h2c"]))
+	} else {
+		require.NotContains(t, writes[0], "backend_h2c")
+	}
 	persisted := observe()
+	require.Equal(t, h2c, persisted.backendH2C)
 	require.False(t, persisted.pool.AdminStateUp)
 	require.Equal(t, "reports_session", persisted.pool.Persistence.CookieName)
 	require.False(t, plainActivationPool(persisted))
@@ -135,7 +170,38 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 		SubnetID: wanted.spec.MemberSubnetID, AdminStateUp: true, ProvisioningStatus: "ACTIVE", Weight: 1}}
 	enable := converge(persisted)
 	require.Equal(t, routeMutationUpdatePool, enable.kind)
-	execute(enable)
+	plan := []graphMutation{{kind: graphRouteMutation, backendKey: wanted.backendKey, route: enable}}
+	siblingEnable := graphMutation{kind: graphRouteMutation, backendKey: sibling.backendKey,
+		route: routeMutation{kind: routeMutationUpdatePool, id: "ordinary", poolAdmin: boolPointer(true)}}
+	applyNext := func(plan []graphMutation) (bool, cloud.RouteResult) {
+		t.Helper()
+		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+		step, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, actual, plan, &result)
+		require.NoError(t, err)
+		if prepared {
+			require.NoError(t, p.executeGraphMutation(t.Context(), desired, actual, step))
+		}
+		return prepared, result.Routes[0].Result
+	}
+	if h2c {
+		// The cookie capability stays enrolled while the regional transport
+		// capability is withdrawn after the closed pool's members converge.
+		capabilities = []string{octavia.GatewayCapabilityHTTPCookieName}
+		applied, result := applyNext(plan)
+		require.False(t, applied)
+		require.Contains(t, result.UnsupportedBackendProtocol, octavia.GatewayCapabilityBackendH2C)
+		require.Len(t, writes, 1)
+		require.False(t, observe().pool.AdminStateUp)
+
+		applied, _ = applyNext(append(plan, siblingEnable))
+		require.True(t, applied)
+		require.True(t, siblingEnabled)
+		require.Len(t, writes, 1)
+		capabilities = slices.Clone(namedCapabilities)
+	}
+	applied, result := applyNext(plan)
+	require.True(t, applied)
+	require.Empty(t, result.UnsupportedBackendProtocol)
 	require.Equal(t, "true", string(writes[1]["admin_state_up"]))
 	require.NotContains(t, writes[1], "session_persistence")
 
@@ -228,7 +294,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	_, err = planXBackendCookie(*wanted, active)
 	require.ErrorIs(t, err, errXBackendCookieUnverified)
 	capabilityResponse = http.StatusOK
-	capabilities = []string{octavia.GatewayCapabilityHTTPCookieName}
+	capabilities = slices.Clone(namedCapabilities)
 	withdraw := p.prepareXBackendPersistence(t.Context(), &desired, actual)
 	require.NotNil(t, withdraw)
 	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, wanted.sessionPersistenceIssue())

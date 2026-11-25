@@ -453,7 +453,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		if backend.SessionCookieName != "" && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
 			backend.BackendTLS != nil && backend.BackendTLS.RequireH2 ||
-			len(spec.BackendSecurityGroupIDs) != 0 || backend.RoutedExternal || backend.BackendH2C ||
+			len(spec.BackendSecurityGroupIDs) != 0 || backend.RoutedExternal ||
 			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
 			return invalid(errors.New("HTTP session persistence requires a valid cookie name and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
 		}
