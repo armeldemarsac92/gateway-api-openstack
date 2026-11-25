@@ -320,7 +320,7 @@ func (r *Reconciler) resolveFrontendClientValidation(ctx context.Context, gatewa
 	switch {
 	case !r.Config.FrontendClientValidation:
 		return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "Octavia frontend client certificate validation is disabled"}}
-	case validation.Mode != "" && validation.Mode != gatewayv1.AllowValidOnly:
+	case validation.Mode != "" && validation.Mode != gatewayv1.AllowValidOnly && validation.Mode != gatewayv1.AllowInsecureFallback:
 		message := "Octavia does not support frontend client certificate validation mode " + string(validation.Mode)
 		return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, message}}
 	}
@@ -332,6 +332,7 @@ func (r *Reconciler) resolveFrontendClientValidation(ctx context.Context, gatewa
 			resolvedRefs: &resolved,
 		}
 	}
+	clientValidation.InsecureFallback = validation.Mode == gatewayv1.AllowInsecureFallback
 	return tlsResolution{tls: cloud.ListenerTLS{ClientValidation: clientValidation}}
 }
 
@@ -572,7 +573,7 @@ type httpsListenerStatusIssue struct {
 	resolvedRefs *metav1.Condition
 }
 
-func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway, sets ListenerSetProjection) map[gatewayv1.SectionName]httpsListenerStatusIssue {
+func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway, sets ListenerSetProjection, fallbackUnavailable []int) map[gatewayv1.SectionName]httpsListenerStatusIssue {
 	issues := make(map[gatewayv1.SectionName]httpsListenerStatusIssue)
 	resolutions := make(map[int]tlsResolution)
 	for port, sections := range httpsSections(httpsProfileListeners(r.Config, gateway)) {
@@ -593,6 +594,10 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 			if issue == nil {
 				issue = resolutions[int(listener.Port)].issue
 				resolvedRefs = resolutions[int(listener.Port)].resolvedRefs
+			}
+			if issue == nil && slices.Contains(fallbackUnavailable, int(listener.Port)) {
+				issue = &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+					"Octavia frontend client certificate validation mode AllowInsecureFallback is unavailable in this region"}
 			}
 			if issue != nil && issue.condition == gatewayv1.ListenerConditionConflicted {
 				resolvedRefs = r.conflictedHTTPSReferenceCondition(ctx, gateway, listener)

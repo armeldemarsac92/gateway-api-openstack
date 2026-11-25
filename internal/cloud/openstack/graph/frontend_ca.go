@@ -23,23 +23,40 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
 type frontendCAObservation struct {
-	ref          string
-	needsPublish bool
-	canClear     bool
-	issue        string
+	ref                 string
+	needsPublish        bool
+	canClear            bool
+	issue               string
+	fallbackState       octavia.ClientAuthFallback
+	fallbackTracked     bool
+	fallbackUnavailable bool
 }
 
+// The tag is written atomically with fallback and survives controller restarts.
+// Only an untracked listener may interpret an omitted field as historical.
+var frontendFallbackTag = openstackidentity.Tag("frontend-client-auth-fallback", "v1")
+
 func (ca frontendCAObservation) canCreate(spec cloud.ScopedListener) bool {
-	return spec.TLS == nil || spec.TLS.ClientValidation == nil || ca.ref != ""
+	return !ca.fallbackUnavailable && (spec.TLS == nil || spec.TLS.ClientValidation == nil || ca.ref != "")
 }
 
 func (ca frontendCAObservation) matches(listener listeners.Listener, spec *cloud.ListenerTLS) bool {
-	if listener.ClientCRLContainerRef != "" {
+	if listener.ClientCRLContainerRef != "" || ca.fallbackUnavailable {
+		return false
+	}
+	if spec.ClientValidation != nil && spec.ClientValidation.InsecureFallback {
+		if !ca.fallbackTracked || ca.fallbackState != octavia.ClientAuthFallbackEnabled {
+			return false
+		}
+	} else if ca.fallbackState != octavia.ClientAuthFallbackDisabled &&
+		(ca.fallbackTracked || ca.fallbackState != octavia.ClientAuthFallbackAbsent) {
 		return false
 	}
 	if spec.ClientValidation != nil {
@@ -51,13 +68,28 @@ func (ca frontendCAObservation) matches(listener listeners.Listener, spec *cloud
 }
 
 func (ca frontendCAObservation) canUpdate(listener listeners.Listener, spec *cloud.ListenerTLS) bool {
-	if listener.ClientCRLContainerRef != "" {
+	if listener.ClientCRLContainerRef != "" || ca.fallbackUnavailable || ca.fallbackNeedsClear(spec) {
 		return false
 	}
 	if spec.ClientValidation != nil {
 		return ca.ref != ""
 	}
 	return ca.matches(listener, spec) || ca.canClear
+}
+
+func (ca frontendCAObservation) fallbackNeedsClear(spec *cloud.ListenerTLS) bool {
+	switch ca.fallbackState {
+	case octavia.ClientAuthFallbackEnabled:
+		validation := spec.ClientValidation
+		return !ca.fallbackTracked || ca.fallbackUnavailable || ca.ref == "" ||
+			spec.CertificateRef == "" || validation == nil || !validation.InsecureFallback
+	case octavia.ClientAuthFallbackUnreadable:
+		return true
+	case octavia.ClientAuthFallbackAbsent:
+		return ca.fallbackTracked
+	default:
+		return false
+	}
 }
 
 // Observe only owned, verified revisions. A failed or incomplete Barbican
@@ -70,17 +102,28 @@ func (p *Provider) observeFrontendCAs(ctx context.Context, desired desiredGatewa
 	var owned []backendca.Revision
 	listed := false
 	var listErr error
+	capabilityChecked, fallbackAvailable := false, false
 	for _, spec := range desired.spec.Gateway.Spec.ScopedListeners {
-		if spec.TLS == nil || !hasAuthorizedListener(spec) {
+		if spec.TLS == nil {
 			continue
 		}
 		var listener listeners.Listener
 		if i := slices.IndexFunc(actual.scopedListeners, func(l listeners.Listener) bool { return l.ProtocolPort == spec.Port }); i >= 0 {
 			listener = actual.scopedListeners[i]
 		}
-		var observed frontendCAObservation
-		if ca := spec.TLS.ClientValidation; ca != nil {
-			if p.backendCA == nil {
+		observed := frontendCAObservation{
+			fallbackState:   actual.clientAuthFallback[listener.ID],
+			fallbackTracked: slices.Contains(listener.Tags, frontendFallbackTag),
+		}
+		if ca := spec.TLS.ClientValidation; hasAuthorizedListener(spec) && ca != nil {
+			if ca.InsecureFallback && !capabilityChecked {
+				capabilityChecked = true
+				fallbackAvailable = p.octavia.VerifyGatewayCapabilities(ctx, actual.loadBalancer.Provider, octavia.GatewayCapabilityFrontendAuthFallback) == nil
+			}
+			if ca.InsecureFallback && !fallbackAvailable {
+				observed.fallbackUnavailable = true
+				observed.issue = "Octavia frontend client certificate validation mode AllowInsecureFallback is unavailable in this region"
+			} else if p.backendCA == nil {
 				observed.issue = "The Barbican client for HTTPS client CAs is unavailable"
 			} else {
 				rev, err := p.backendCA.Find(ctx, desired.spec.Identity.GatewayUID, ca.ConfigMapUID, ca.Digest, listener.ClientCATLSContainerRef)
@@ -91,7 +134,7 @@ func (p *Provider) observeFrontendCAs(ctx context.Context, desired desiredGatewa
 					observed.issue = frontendCAReadIssue(err)
 				}
 			}
-		} else if p.backendCA != nil && disposition == cloud.GraphEnsure && desired.spec.Gateway.BackendCAOwned &&
+		} else if hasAuthorizedListener(spec) && p.backendCA != nil && disposition == cloud.GraphEnsure && desired.spec.Gateway.BackendCAOwned &&
 			listener.ClientCATLSContainerRef != "" && listener.ClientAuthentication == string(listeners.ClientAuthenticationMandatory) {
 			// A valid spec can explicitly remove validation. Only undo native
 			// settings on a listener whose current CA this Gateway published.
@@ -103,14 +146,37 @@ func (p *Provider) observeFrontendCAs(ctx context.Context, desired desiredGatewa
 				observed.issue = frontendCAReadIssue(listErr)
 			}
 			observed.canClear = slices.ContainsFunc(owned, func(rev backendca.Revision) bool { return rev.Reference() == listener.ClientCATLSContainerRef })
-		} else {
-			continue
 		}
 		if actual.frontendCA == nil {
 			actual.frontendCA = make(map[int]frontendCAObservation)
 		}
 		actual.frontendCA[spec.Port] = observed
 	}
+}
+
+// A disabled listener with an uncertain fallback mode must read back false
+// before it can be reopened or receive another request to set fallback.
+func (actual observedGatewayGraph) nextFrontendFallbackClear(desired desiredGatewayGraph) *graphMutation {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+		return nil
+	}
+	configured := scopedHTTPListeners(desired)
+	for _, listener := range actual.scopedListeners {
+		spec, present := configured[listener.ProtocolPort]
+		if !present || spec.TLS == nil || listener.Protocol != terminatedHTTPS || listener.ProvisioningStatus != "ACTIVE" ||
+			!actual.adminObserved[listener.ID] || listener.AdminStateUp {
+			continue
+		}
+		ca := actual.frontendCA[spec.Port]
+		// Listener identity authorizes closure. Changing client auth also
+		// requires evidence that this Gateway managed the fallback or CA.
+		ownsClientAuth := ca.fallbackTracked || ca.canClear || ca.ref != "" && ca.ref == listener.ClientCATLSContainerRef
+		if ownsClientAuth && ca.fallbackNeedsClear(spec.TLS) {
+			return &graphMutation{kind: graphDisableFrontendClientAuthFallback, listenerID: listener.ID, scopedListener: spec,
+				redactTLSError: true, message: "Clearing insecure client certificate fallback on a disabled Octavia HTTPS listener"}
+		}
+	}
+	return nil
 }
 
 func (actual observedGatewayGraph) nextFrontendCAMutation(desired desiredGatewayGraph) *graphMutation {
@@ -149,7 +215,7 @@ func (actual observedGatewayGraph) closedDeniedHTTPSPorts(spec cloud.GatewaySpec
 	}
 	var ports []int
 	for _, config := range spec.ScopedListeners {
-		if hasAuthorizedListener(config) {
+		if hasAuthorizedListener(config) && !actual.frontendCA[config.Port].fallbackUnavailable {
 			continue
 		}
 		i := slices.IndexFunc(actual.scopedListeners, func(listener listeners.Listener) bool { return listener.ProtocolPort == config.Port })

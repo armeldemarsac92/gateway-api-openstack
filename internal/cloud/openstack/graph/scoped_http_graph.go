@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -36,13 +37,16 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		routeRecovery = &desired.identity
 	}
-	poolInventory, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
-	if err != nil {
-		return actual, err
-	}
-	actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolInventory, routeRecovery, actual.httpsIsolationPolicies)
-	if err != nil {
-		return actual, err
+	var err error
+	if actual.routes == nil {
+		poolInventory, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
+		if err != nil {
+			return actual, err
+		}
+		actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolInventory, routeRecovery, actual.httpsIsolationPolicies)
+		if err != nil {
+			return actual, err
+		}
 	}
 	for _, listener := range actual.scopedListeners {
 		if !actual.isHTTPSIsolated(listener) && slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool {
@@ -202,10 +206,12 @@ func singleServerCertificate(listener listeners.Listener) bool {
 }
 
 func (actual observedGatewayGraph) scopedHTTPListenerMatches(listener listeners.Listener, spec cloud.ScopedListener) bool {
-	if listener.Protocol != scopedHTTPProtocol(spec) || !actual.httpsBindingMatches(listener, spec) {
-		return false
-	}
-	return spec.TLS == nil || actual.adminObserved[listener.ID] && hasAuthorizedListener(spec) &&
+	return listener.Protocol == scopedHTTPProtocol(spec) && actual.httpsBindingMatches(listener, spec) &&
+		(spec.TLS == nil || actual.httpsTLSMaterialMatches(listener, spec))
+}
+
+func (actual observedGatewayGraph) httpsTLSMaterialMatches(listener listeners.Listener, spec cloud.ScopedListener) bool {
+	return spec.TLS != nil && actual.adminObserved[listener.ID] && hasAuthorizedListener(spec) &&
 		listener.DefaultPoolID == "" && singleServerCertificate(listener) && listener.DefaultTlsContainerRef == spec.TLS.CertificateRef &&
 		actual.frontendCA[spec.Port].matches(listener, spec.TLS)
 }
@@ -224,6 +230,9 @@ func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual
 	configured := scopedHTTPListeners(desired)
 	var retry *graphMutation
 	for _, listener := range actual.scopedListeners {
+		if actual.httpsHostTransition[listener.ID] {
+			continue
+		}
 		spec, present := configured[listener.ProtocolPort]
 		https := listener.Protocol == terminatedHTTPS
 		adminObserved := actual.adminObserved[listener.ID]
@@ -304,7 +313,40 @@ func scopedHTTPRoutePort(route desiredRoute) int {
 	return 0
 }
 
+func (actual observedGatewayGraph) verifiedHTTPSServingPorts() []int {
+	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.state.VIPAddress == "" {
+		return nil
+	}
+	ports := slices.Clone(actual.httpsServingPorts)
+	if actual.withdrawTLS != nil {
+		ports = slices.DeleteFunc(ports, func(port int) bool { return port == actual.withdrawTLS.scopedListener.Port })
+	}
+	return ports
+}
+
+func (actual observedGatewayGraph) hasVerifiedHTTPSAction(listener listeners.Listener, proof map[string]httpsLivePolicy) bool {
+	inventory := actual.httpsIsolationPolicies[listener.ID]
+	if !inventory.complete {
+		return false
+	}
+	serving := false
+	for _, item := range inventory.items {
+		if item.AdminState == nil {
+			return false
+		}
+		if *item.AdminState {
+			if !proof[item.Policy.ID].authorized {
+				return false
+			}
+			serving = true
+		}
+	}
+	return serving
+}
+
 func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
+	source, readback := desired, actual
+	proveRoutes := sync.OnceValue(func() map[string]httpsLivePolicy { return liveHTTPSPolicies(source, readback) })
 	if hasHTTPRouteParts(desired, actual) {
 		desired, actual, _ = httpPlanningParts(desired, actual)
 	}
@@ -315,6 +357,7 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 		}
 	}
 	result := scopedGatewayResult(desired.spec.Gateway.Spec, actual, pending)
+	result.ScopedListenerServingPorts = actual.verifiedHTTPSServingPorts()
 	if actual.routes == nil && actual.loadBalancer != nil {
 		result.Outcome, result.ScopedListenerReadyPorts = pending, []int{}
 		return result
@@ -324,11 +367,13 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 	unverified := make(map[int]bool)
 	for _, listener := range actual.scopedListeners {
 		portsByID[listener.ID] = listener.ProtocolPort
-		if spec, found := configured[listener.ProtocolPort]; !found || actual.httpsIsolationUnverified[listener.ID] ||
-			!actual.scopedHTTPListenerMatches(listener, spec) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
-			!actual.isolatedPoliciesReady(desired, listener) {
+		spec, found := configured[listener.ProtocolPort]
+		matches := found && !actual.httpsIsolationUnverified[listener.ID] &&
+			actual.scopedHTTPListenerMatches(listener, spec) && actual.httpFallbackReady(listener, desired.fixedHTTPResponses)
+		if !matches || !actual.isolatedPoliciesReady(desired, listener) {
 			unverified[listener.ProtocolPort] = true
 		}
+
 	}
 	if len(unverified) != 0 {
 		result.ScopedListenerReadyPorts = slices.DeleteFunc(result.ScopedListenerReadyPorts, func(port int) bool { return unverified[port] })
@@ -355,6 +400,21 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 	if len(held) != 0 {
 		result.HTTPPolicyTransition = true
 		result.ScopedListenerReadyPorts = slices.DeleteFunc(result.ScopedListenerReadyPorts, func(port int) bool { return held[port] })
+	}
+	if actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp && actual.state.VIPAddress != "" {
+		for _, listener := range actual.scopedListeners {
+			port := listener.ProtocolPort
+			spec := configured[port]
+			if slices.Contains(result.ScopedListenerReadyPorts, port) || slices.Contains(result.ScopedListenerServingPorts, port) ||
+				actual.httpsIsolationUnverified[listener.ID] || !listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" ||
+				!actual.scopedHTTPListenerMatches(listener, spec) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
+				len(httpsVirtualHosts(spec)) == 0 || !independentHTTPSHosts(httpsVirtualHosts(spec)) {
+				continue
+			}
+			if actual.hasVerifiedHTTPSAction(listener, proveRoutes()) {
+				result.ScopedListenerServingPorts = append(result.ScopedListenerServingPorts, port)
+			}
+		}
 	}
 	return result
 }

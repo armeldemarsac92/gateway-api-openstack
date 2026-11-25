@@ -265,11 +265,7 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		policy.Message,
 		programmedGeneration,
 	)
-	var scopedReadyPorts []int
-	if policy.Category == cloud.ErrorCategoryResourceFailure && observation.Outcome.State == cloud.OutcomeProgressing &&
-		controller.GatewayListenerScope(r.Config, gateway) != "" {
-		scopedReadyPorts = observation.ScopedListenerReadyPorts
-	}
+	scopedReadyPorts := scopedGatewayFailurePorts(r.Config, gateway, policy.Category, observation)
 	if err := r.setGatewayListenerStatuses(
 		ctx,
 		gateway,
@@ -311,6 +307,14 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		scope.patchCause = controller.SafeProviderReconcileError(policy, providerErr)
 	}
 	return controller.ProviderFailureResult(policy, providerErr, string(gateway.UID))
+}
+
+func scopedGatewayFailurePorts(config controller.Config, gateway *gatewayv1.Gateway, category cloud.ErrorCategory, observation cloud.GatewayResult) []int {
+	if category == cloud.ErrorCategoryResourceFailure && observation.Outcome.State == cloud.OutcomeProgressing &&
+		controller.GatewayListenerScope(config, gateway) != "" {
+		return observation.ScopedListenerReadyPorts
+	}
+	return nil
 }
 
 func (r *Reconciler) handleGatewayDeleteFailure(
@@ -437,19 +441,20 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	listener *gatewayv1.Listener,
 	result cloud.GatewayResult,
 	progress cloud.Outcome,
+	cluster clusterAddressAssignments,
 ) error {
 	readyPorts := result.ScopedListenerReadyPorts
 	if controller.GatewayListenerScope(r.Config, gateway) == "" && progress.State == cloud.OutcomeReady {
 		readyPorts = []int{int(listener.Port)}
 	}
 	if r.Config.GatewayAddressRoutabilityEnabled() {
-		retained := r.observeAddressAssignment(gateway, result)
+		serving := r.observeAddressAssignment(gateway, result, cluster) || len(cluster.addresses) != 0
 		if !r.usesLegacyAddressAdmission(gateway) {
-			if retained && progress.State == cloud.OutcomeReady {
+			if serving && progress.State == cloud.OutcomeReady {
 				return r.setGatewayProgrammed(ctx, gateway, listener, "")
 			}
 			reason := gatewayv1.GatewayReasonAddressNotAssigned
-			if retained {
+			if serving {
 				reason = gatewayv1.GatewayReasonNoResources
 			}
 			return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,
@@ -776,7 +781,23 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
 }
 
-// A rejected CA is a Kubernetes authorization result. Separately report
+func setFrontendFallbackStatus(gateway *gatewayv1.Gateway) {
+	insecureMode := func(config gatewayv1.TLSConfig) bool {
+		return config.Validation != nil && config.Validation.Mode == gatewayv1.AllowInsecureFallback
+	}
+	conditionType := string(gatewayv1.GatewayConditionInsecureFrontendValidationMode)
+	if tls := gateway.Spec.TLS; tls != nil && tls.Frontend != nil &&
+		(insecureMode(tls.Frontend.Default) || slices.ContainsFunc(tls.Frontend.PerPort, func(port gatewayv1.TLSPortConfig) bool {
+			return insecureMode(port.TLS)
+		})) {
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(conditionType, metav1.ConditionTrue,
+			string(gatewayv1.GatewayReasonConfigurationChanged), "The Gateway is configured to allow HTTPS connections without a valid client certificate", gateway.Generation))
+		return
+	}
+	meta.RemoveStatusCondition(&gateway.Status.Conditions, conditionType)
+}
+
+// A rejected CA or unsupported mode is a configuration result. Separately report
 // whether Octavia has confirmed the affected listener is closed.
 func (r *Reconciler) reportFrontendCAWithdrawal(gateway *gatewayv1.Gateway, issues map[gatewayv1.SectionName]httpsListenerStatusIssue, closedPorts []int) {
 	for i := range gateway.Status.Listeners {
@@ -819,8 +840,8 @@ func preserveProgrammedListeners(gateway *gatewayv1.Gateway, previous gatewayv1.
 		if !slices.Contains(ports, int(listener.Port)) {
 			continue
 		}
-		old := meta.FindStatusCondition(existingListenerConditionsFrom(previous.Listeners, listener.Name), string(gatewayv1.ListenerConditionProgrammed))
-		if old == nil || old.ObservedGeneration != gateway.Generation || old.Status != metav1.ConditionTrue {
+		old := programmedListenerAtGeneration(previous.Listeners, listener.Name, gateway.Generation)
+		if old == nil {
 			continue
 		}
 		for i := range gateway.Status.Listeners {
@@ -831,4 +852,12 @@ func preserveProgrammedListeners(gateway *gatewayv1.Gateway, previous gatewayv1.
 			}
 		}
 	}
+}
+
+func programmedListenerAtGeneration(statuses []gatewayv1.ListenerStatus, name gatewayv1.SectionName, generation int64) *metav1.Condition {
+	programmed := meta.FindStatusCondition(existingListenerConditionsFrom(statuses, name), string(gatewayv1.ListenerConditionProgrammed))
+	if programmed == nil || programmed.ObservedGeneration != generation || programmed.Status != metav1.ConditionTrue {
+		return nil
+	}
+	return programmed
 }

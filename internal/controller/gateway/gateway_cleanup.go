@@ -77,7 +77,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		if err != nil {
 			return ctrl.Result{}, errors.Join(errGatewayChanged, err)
 		}
-		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listeners[0], result.Gateway, result.Gateway.Outcome); err != nil {
+		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listeners[0], result.Gateway, result.Gateway.Outcome, clusterAddressAssignments{}); err != nil {
 			return ctrl.Result{}, err
 		}
 		if r.Config.GatewayAddressRoutabilityEnabled() && !result.Gateway.AddressActivityObserved && !result.Gateway.AddressBlocked &&
@@ -87,7 +87,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
 	}
 	if r.Config.GatewayAddressRoutabilityEnabled() && result.Gateway.AddressAbsent {
-		r.observeAddressAssignment(scope.gateway, result.Gateway)
+		r.observeAddressAssignment(scope.gateway, result.Gateway, clusterAddressAssignments{})
 	}
 	outcome := result.Outcome
 	if err := outcome.Validate(); err != nil {

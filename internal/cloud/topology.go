@@ -69,6 +69,11 @@ type TopologyResolver interface {
 	ResolveTopology(context.Context, TopologyRequest) (Topology, error)
 }
 
+// VIPSubnetFamilyResolver reads the IP version of a previously bound VIP subnet.
+type VIPSubnetFamilyResolver interface {
+	VIPSubnetIPVersion(context.Context, string) (int, error)
+}
+
 // HealthMonitorConfig describes route pool health checks. Only HTTP checks use Path.
 type HealthMonitorConfig struct {
 	Path           string `json:"path"`

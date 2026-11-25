@@ -32,6 +32,7 @@ The [architecture](docs/design/architecture.md) defines ownership, resource mapp
 
 The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its implemented routing scope includes:
 
+- An operator can expose a Gateway’s private Octavia VIP under a stable in-cluster Service name and propagate the Gateway infrastructure metadata to its discovery objects. [Enable Gateway discovery](docs/operator-gateway-infrastructure-metadata.md)
 - A Gateway can request one private IPv4 VIP at creation on a class with Floating IP mode `None`. [Configuration and allocation results](docs/qualification/v1.7.0/provider/private-gateway-address.md)
 - A plain HTTP Gateway can serve separate backends on several ports of one VIP, including when the requests use the same host and path. Several sections can share one port when each section has a different exact hostname. A port with one section also supports a wildcard or an omitted hostname. An HTTPRoute can attach to eligible sections on several ports through one Gateway parent reference. Each section enforces its namespace policy and reports its attachments. [Distinct HTTP ports](docs/qualification/v1.7.0/provider/http-distinct-ports.md) · [Same-port sections](docs/qualification/v1.7.0/provider/http-disjoint-sections.md)
 - A platform operator can enable HTTPS with a verified Secret revision in Barbican. An additional regional option lets applications share an HTTPS port using distinct hostnames and the same enrolled certificate. [Set up HTTPS, rotate and revoke](docs/operator-https.md)
