@@ -40,6 +40,7 @@ const (
 	GatewayCapabilityResponseHeaderOperations  = "response_header_operations_v1"
 	GatewayCapabilityFrontendAuthFallback      = "frontend_client_auth_insecure_fallback_v1"
 	GatewayCapabilityBackendRetryBudget        = "backend_retry_budget_v1"
+	GatewayCapabilityHTTPCookieName            = "http_cookie_name_v1"
 	GatewayCapabilityBackendH2C                = "backend_h2c_v1"
 	GatewayCapabilityGRPCContentType           = "grpc_content_type_v1"
 	GatewayCapabilityBackendTLSHostname        = "backend_tls_hostname_v1"

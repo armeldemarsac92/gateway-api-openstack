@@ -73,6 +73,7 @@ type BackendGroup struct {
 	BackendTLS      backendtls.Selection
 
 	XBackendRoutedExternal bool
+	XBackendCookieName     string
 	XBackendTLSRequired    bool
 	XBackendTLS            *backendtls.Validation `json:"-"`
 

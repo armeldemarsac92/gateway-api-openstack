@@ -255,6 +255,25 @@ spec:
 
 The backend supplies the port, so omit `backendRefs[].port`. The controller selects ready, nonterminating Pods with routable IPv4 addresses. Pods using the host network are ineligible for this endpoint profile. Changes to the selector, Pod labels, readiness and Pod addresses update pool membership. The Route and XBackend must share a namespace. Use the HTTPRoute parent conditions and the XBackend's `status.ancestors` to check the current generation for your Gateway. [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go) · [Namespace contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-4894/index.md#route-attachment-and-consumer-overrides)
 
+#### Keep a session on one selected endpoint
+
+With the Experimental bundle, add `--octavia-xbackend-session-persistence` to the controller. The effective regional Amphora provider must advertise `http_cookie_name_v1`. Add the following under `spec` of an `EndpointSelector` XBackend:
+
+```yaml
+sessionPersistence:
+  type: Cookie
+  cookie:
+    name: reports_session
+    path: /
+    lifetimeType: Session
+```
+
+Omit `name` to generate a stable name from the XBackend UID. All routes to that XBackend use the same generated name, including across route and port edits. Give explicitly named cookies distinct names for different backends sharing a host. Names may contain 1–255 ASCII letters, digits, underscores, dots or hyphens. The prefixes `__Host-`, `__Secure-` and `__Http-` are reserved regardless of case.
+
+Traffic splitting still selects a backend according to the rule's weights. Its cookie selects an eligible endpoint within that backend. The profile covers HTTP and HTTP/1.1, including [ServerOnly backend TLS](../operator-octavia-backend-tls-policy.md#protect-an-experimental-xbackend) with its separate opt-in and Octavia microversion 2.24 or newer. The supported cookie has path `/` and a session lifetime. Other paths, absolute timeouts, permanent cookies, header persistence, h2c and ExternalHostname are unsupported. The deprecated placement on HTTPRoute and GRPCRoute rules and Service XBackendTrafficPolicy is unsupported.
+
+Check the XBackend's current-generation `Accepted` condition under the Gateway ancestor and the HTTPRoute's `ResolvedRefs` and `Programmed` conditions. A missing provider capability reports `UnsupportedValue`. A failed discovery reports `Pending` while the controller retries. During either condition, a direct match uses an empty pool and a weighted rule returns HTTP 500 for the affected share. The controller empties an affected pool before changing or withdrawing the cookie. Once the replacement settings are verified, the pool can serve its eligible endpoints again. [Session persistence contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-1619/index.md)
+
 ### Route HTTP to an Experimental XBackend hostname
 
 Install the v1.7.0 Experimental bundle and controller overlay. Select an Amphora GatewayClass with `memberMode: Endpoint` and `backendSecurity.mode: Unmanaged`. Add these manager arguments for each permitted GatewayClass and destination prefix. The example uses a documentation-only IPv4 range.

@@ -859,6 +859,7 @@ const (
 	routeMutationCreatePool routeMutationKind = iota
 	routeMutationUpdatePool
 	routeMutationSetBackendRetryBudget
+	routeMutationSetXBackendCookie
 	routeMutationClaimBackendCA
 	routeMutationPublishBackendCA
 	routeMutationClearPoolMembers
@@ -900,6 +901,9 @@ type routeMutation struct {
 	rule                     desiredRule
 	retry                    bool
 	clearPoolPersistence     bool
+	poolPersistence          *pools.SessionPersistence
+	xBackendCookieFallback   bool
+	xBackendCookieDrain      bool
 	backendH2C               *bool
 	poolAdmin                *bool
 	poolALPNProtocols        *[]string
@@ -932,11 +936,19 @@ func (s routeMutation) message() string {
 		return "Updated Octavia pool"
 	case routeMutationSetBackendRetryBudget:
 		return "Updated Octavia Service retry budget"
+	case routeMutationSetXBackendCookie:
+		if s.retry {
+			return "Recovering Octavia XBackend pool before withdrawing session traffic"
+		}
+		return "Updated Octavia XBackend session persistence"
 	case routeMutationClaimBackendCA:
 		return "Checkpointed Gateway ownership of backend CAs"
 	case routeMutationPublishBackendCA:
 		return "Publishing the backend CA in Barbican"
 	case routeMutationClearPoolMembers:
+		if s.xBackendCookieDrain {
+			return "Withdrawing Octavia XBackend members before changing session persistence"
+		}
 		return "Withdrawing Octavia backend members until TLS authorization is verified"
 	case routeMutationSetBackendTLS:
 		return "Updating authenticated TLS on the Octavia pool"
@@ -1007,6 +1019,40 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 }
 
 func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
+	step, err := planXBackendCookie(desired, actual)
+	switch {
+	case step != nil:
+		return []routeMutation{*step}, routeStateFromObservation(actual), nil
+	case err == nil:
+		return buildRouteEnsureBackendPlan(desired, actual, batchActivations)
+	case !desired.cookieFallback(actual):
+		return nil, routeStateFromObservation(actual), err
+	case actual.pool == nil:
+		fallback := routeMutation{kind: routeMutationCreatePool, xBackendCookieFallback: true}
+		return []routeMutation{fallback}, cloud.RouteState{}, nil
+	}
+	// Reconcile the exact policy against an independently observed empty
+	// pool. Keep its existing transport; only cookie readback can admit
+	// members or resume the authenticated transport configuration.
+	desired.members, desired.healthMonitor = nil, cloud.HealthMonitorConfig{}
+	desired.sessionCookieName, desired.backendTLS = "", backendTLSPlan{}
+	desired.spec.BackendH2C = actual.backendH2C
+	if !actual.pool.AdminStateUp && (hasBackendTLSSettings(*actual.pool, actual.backendTLS) || hasObservedBackendTLS(*actual.pool, actual.backendTLS)) {
+		return nil, routeStateFromObservation(actual), err
+	}
+	poolOnly := actual
+	poolOnly.monitor = nil
+	steps, state, fallbackErr := buildRouteEnsureBackendPlan(desired, poolOnly, batchActivations)
+	if actual.monitor != nil {
+		state.MonitorID = actual.monitor.ID
+	}
+	if len(steps) != 0 || fallbackErr != nil {
+		return steps, state, fallbackErr
+	}
+	return nil, state, err
+}
+
+func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
 	budgetStep, budgetErr := planBackendRetryBudget(desired, actual)
 	if step := desired.backendTLS.poolMutation(desired, actual); step != nil {
 		state := routeStateFromObservation(actual)
@@ -1091,11 +1137,13 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 		if desired.backendTLS.denies() {
 			break
 		}
-		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
+		clearPersistence := desired.sessionCookieName == "" && pool.Persistence != (pools.SessionPersistence{}) &&
 			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
-		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
+		enableCookiePool := desired.sessionCookieName != "" && !pool.AdminStateUp
+		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp && !enableCookiePool || clearPersistence {
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{
 				kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence,
+				poolAdmin:       boolPointer(!enableCookiePool),
 				reenableH2CPool: actual.backendH2C && !pool.AdminStateUp,
 			})
 		}
@@ -1188,6 +1236,9 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 				httpDrift || !monitor.AdminStateUp {
 				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdateMonitor, id: monitor.ID, parentID: pool.ID})
 			}
+		}
+		if enableCookiePool {
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, poolAdmin: boolPointer(true)})
 		}
 	}
 
@@ -1637,6 +1688,11 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if step.poolTags != nil {
 			opts.Tags = append(opts.Tags, (*step.poolTags)...)
 		}
+		if desired.sessionCookieName != "" && !step.xBackendCookieFallback {
+			opts.AdminStateUp = boolPointer(false)
+			opts.Persistence = &pools.SessionPersistence{Type: httpCookiePersistence, CookieName: desired.sessionCookieName}
+			opts.Tags = append(opts.Tags, xBackendCookieTag)
+		}
 		var budget *cloud.BackendRetryBudget
 		if desired.backendRetryBudgetAvailable {
 			budget = desired.spec.BackendRetryBudget
@@ -1667,6 +1723,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		opts := pools.UpdateOpts{LBMethod: pools.LBMethodRoundRobin}
 		if step.backendH2C == nil {
 			opts.AdminStateUp = boolPointer(true)
+			if step.poolAdmin != nil {
+				opts.AdminStateUp = step.poolAdmin
+			}
 		}
 		if step.clearPoolPersistence {
 			// Gophercloud encodes a non-nil empty persistence as a JSON null.
@@ -1675,6 +1734,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C})
 	case routeMutationSetBackendRetryBudget:
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{BackendRetryBudget: step.backendRetryBudget})
+	case routeMutationSetXBackendCookie:
+		opts := pools.UpdateOpts{Persistence: step.poolPersistence, Tags: step.poolTags, AdminStateUp: step.poolAdmin}
+		_, err = p.octavia.UpdatePool(ctx, step.id, opts)
 	case routeMutationPublishBackendCA:
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:

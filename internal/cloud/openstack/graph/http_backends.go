@@ -144,6 +144,7 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 			combined.Outcome = fragment.Result.Outcome
 		}
 		combined.ImplementedRules = combined.ImplementedRules || fragment.Result.ImplementedRules
+		combined.BackendSessionPersistenceIssue = max(combined.BackendSessionPersistenceIssue, fragment.Result.BackendSessionPersistenceIssue)
 		if combined.UnsupportedMatch == "" {
 			combined.UnsupportedMatch = fragment.Result.UnsupportedMatch
 		}
