@@ -250,7 +250,7 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			compiled.Backends[i].RequestMirrors = mirrors
 			backend.Filters = WithoutRequestMirrorFilters(backend.Filters)
 			request, rewrite, diagnostic := NormalizeHTTPBackendRequestFilters(rule, backend,
-				input.BackendRequestFilters && HTTPProfileRouteKind(route) == HTTPRouteKind,
+				kind, input.BackendRequestFilters,
 				compiled.RequestHeaderOperations, compiled.URLRewrite)
 			if diagnostic != nil {
 				if diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) {

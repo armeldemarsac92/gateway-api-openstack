@@ -80,7 +80,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support an optional exact service and method, exact header matches, and rule-level request and response header modifiers")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support an optional exact service and method, exact header matches, rule-level request and response header modifiers, and backendRef request header modifiers")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -198,7 +198,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 	rule.Filters = model.WithoutRequestMirrorFilters(rule.Filters)
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
 	weightedTargets := r.Config.WeightedHTTPTargets && (!grpc || len(rule.BackendRefs) > 1 ||
-		len(rule.BackendRefs) == 1 && ptr.Deref(rule.BackendRefs[0].Weight, 1) == 0)
+		len(rule.BackendRefs) == 1 && (ptr.Deref(rule.BackendRefs[0].Weight, 1) == 0 || len(rule.BackendRefs[0].Filters) != 0))
 	exactHeaders := r.Config.HTTPHeaderExact
 	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
@@ -228,7 +228,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 				return routeActionError(diagnostic)
 			}
 			backend.Filters = model.WithoutRequestMirrorFilters(backend.Filters)
-			operations, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters && !grpc, request, rewrite)
+			operations, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, kind, r.Config.BackendRequestFilters, request, rewrite)
 			if diagnostic != nil && diagnostic.Condition != string(gatewayv1.RouteConditionResolvedRefs) {
 				return routeActionError(diagnostic)
 			}
@@ -251,8 +251,8 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 		return newRouteBuildError(routeErrorUnsupported, "backendRef RequestMirror requires --octavia-http-request-mirror and --octavia-weighted-http-targets")
 	}
 	if len(backend.Filters) != 0 {
-		_, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, false, nil, nil)
-		if diagnostic != nil && (diagnostic.Scope == model.ScopeRoute ||
+		_, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, kind, false, nil, nil)
+		if diagnostic != nil && (grpc || diagnostic.Scope == model.ScopeRoute ||
 			slices.ContainsFunc(backend.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return filter.Type == gatewayv1.HTTPRouteFilterCORS })) {
 			return routeActionError(diagnostic)
 		}

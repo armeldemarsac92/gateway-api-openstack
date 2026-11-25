@@ -116,11 +116,18 @@ func invalidURLRewrite(message string) *Diagnostic {
 
 // NormalizeHTTPBackendRequestFilters validates filters for one backend occurrence
 // using the enclosing rule's path matches and request transformations.
-func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend gatewayv1.HTTPBackendRef, enabled bool,
+func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend gatewayv1.HTTPBackendRef, kind gatewayv1.Kind, enabled bool,
 	ruleRequest []cloud.HTTPHeaderOperation, ruleRewrite *cloud.HTTPURLRewrite,
 ) ([]cloud.HTTPHeaderOperation, *cloud.HTTPURLRewrite, *Diagnostic) {
 	if len(backend.Filters) == 0 {
 		return nil, nil, nil
+	}
+	if kind == GRPCRouteKind {
+		for _, filter := range backend.Filters {
+			if filter.Type != gatewayv1.HTTPRouteFilterRequestHeaderModifier {
+				return nil, nil, unsupported(fmt.Sprintf("GRPCRoute backendRef filter %q is not supported", filter.Type), ScopeRule)
+			}
+		}
 	}
 	for _, filter := range backend.Filters {
 		if !knownFilter(filter.Type) {
@@ -161,6 +168,11 @@ func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend ga
 	}, true, false, true)
 	if diagnostic != nil {
 		return nil, nil, diagnostic
+	}
+	if kind == GRPCRouteKind {
+		if err := cloud.ValidateGRPCRequestMetadata(request); err != nil {
+			return nil, nil, unsupported(err.Error(), ScopeRule)
+		}
 	}
 	if err := cloud.ValidateHTTPBackendRequestFilterComposition(ruleRequest, request, ruleRewrite, rewrite); err != nil {
 		return nil, nil, &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonIncompatibleFilters),

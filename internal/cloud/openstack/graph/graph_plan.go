@@ -808,7 +808,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityHTTPRequestMirror ||
 		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType ||
-		blocked.capability == octavia.GatewayCapabilityGRPCBinaryMetadata
+		blocked.capability == octavia.GatewayCapabilityGRPCBinaryMetadata || blocked.capability == octavia.GatewayCapabilityGRPCBinaryRequestMetadata
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -923,6 +923,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType && hasGRPCBinaryMetadataList(step.route.responseHeaderOperations) {
 			required = append(required, octavia.GatewayCapabilityGRPCBinaryMetadata)
 		}
+		binaryRequestMetadata := step.route.requiresGRPCBinaryRequestMetadata()
+		if binaryRequestMetadata {
+			required = append(required, octavia.GatewayCapabilityGRPCBinaryRequestMetadata)
+		}
 		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
@@ -935,7 +939,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpMethodRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPMethodMatch)
 		}
-		if step.route.probeBeforeGRPCMigration || step.route.rule.ruleType == grpcContentTypeRuleType ||
+		if binaryRequestMetadata || step.route.probeBeforeGRPCMigration || step.route.rule.ruleType == grpcContentTypeRuleType ||
 			step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType &&
 				(step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
 			required = append(required, octavia.GatewayCapabilityGRPCContentType)
@@ -1009,6 +1013,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityGRPCBinaryMetadata) && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityGRPCBinaryMetadata) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityGRPCBinaryMetadata}
+			} else if slices.Contains(required, octavia.GatewayCapabilityGRPCBinaryRequestMetadata) && !step.withdrawHTTPPolicy &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityGRPCBinaryRequestMetadata) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityGRPCBinaryRequestMetadata}
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}
@@ -1039,6 +1046,19 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		return step, err
 	}
 	return p.preparePolicyCreation(ctx, actual, desired, step)
+}
+
+func (step routeMutation) requiresGRPCBinaryRequestMetadata() bool {
+	if step.policy.grpcContentTypeRule != grpcContentTypeRuleType {
+		return false
+	}
+	if hasGRPCBinaryMetadataList(step.requestHeaderOperations) {
+		return true
+	}
+	if step.weightedTargets != nil {
+		return hasGRPCBinaryTargetMetadata(*step.weightedTargets)
+	}
+	return step.kind == routeMutationEnablePolicy && hasGRPCBinaryTargetMetadata(step.policy.targetRequestFilters)
 }
 
 func isResponseHeaderCapability(capability string) bool {

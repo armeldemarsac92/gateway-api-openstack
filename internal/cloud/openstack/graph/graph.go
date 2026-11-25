@@ -447,6 +447,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
 	}
 	if !isHTTPListenerWithdrawal(plan) {
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcBinaryRequestMetadataPolicy)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectBackendRequestFilterTraffic(ctx, desired, actual, plan, &result)
 	}
 	if !isHTTPListenerWithdrawal(plan) {
@@ -665,7 +668,9 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	if !isHTTPListenerWithdrawal(plan) {
 		// An empty plan allows only confirmed capability withdrawal to
 		// request a listener closure while the address read is failing.
-		predicates := []protectedHTTPPredicate{grpcBinaryResponseMetadataPolicy}
+		binaryRequest := grpcBinaryRequestMetadataPolicy
+		binaryRequest.stageWhileClosed = false
+		predicates := []protectedHTTPPredicate{grpcBinaryResponseMetadataPolicy, binaryRequest}
 		if p.grpcContentType {
 			predicates = append(predicates, grpcContentTypePredicate)
 		}
