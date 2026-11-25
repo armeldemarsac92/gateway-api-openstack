@@ -227,13 +227,15 @@ func matchesBackendTarget(checkpoint, target string) bool {
 	return current == desired
 }
 
-// A previous target can prove an unchanged backend across a ParentRef edit.
-// Its hash covers the Gateway UID, route UID, Services and desired members.
-func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, target string, checkpoint controller.RouteGatewayTarget) bool {
-	if checkpoint.Value != "" {
-		return checkpoint.Observed && checkpoint.Generation < route.GetGeneration() && matchesBackendTarget(checkpoint.Value, target)
+// A previous target can preserve freshly authorized forwarding across a
+// ParentRef edit. UDP requires an identical target, including listener ports.
+func (r *Reconciler) canRetainObservedTarget(route *transportRoute, target string, checkpoint controller.RouteGatewayTarget) bool {
+	matches := func(previous string) bool {
+		return previous == target || r.protocol() == gatewayv1.TCPProtocolType && matchesBackendTarget(previous, target)
 	}
-	backend, _, _ := strings.Cut(target, "/")
+	if checkpoint.Value != "" {
+		return checkpoint.Observed && checkpoint.Generation < route.GetGeneration() && matches(checkpoint.Value)
+	}
 	for _, parent := range route.status.Parents {
 		if parent.ControllerName != r.Config.ControllerName {
 			continue
@@ -243,8 +245,7 @@ func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, tar
 			condition.ObservedGeneration >= route.GetGeneration() {
 			continue
 		}
-		previous, _, _ := strings.Cut(condition.Message, "/")
-		if previous == backend {
+		if matches(condition.Message) {
 			return true
 		}
 	}

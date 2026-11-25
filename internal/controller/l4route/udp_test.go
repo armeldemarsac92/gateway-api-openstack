@@ -657,8 +657,67 @@ func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T
 		t.Fatal(err)
 	}
 	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphPreserve ||
-		input.Nodes[0].RetainScopedListenerPorts == nil || len(input.Nodes[0].RetainScopedListenerPorts) != 0 {
+		input.Nodes[0].RetainListenerPorts == nil || len(input.Nodes[0].RetainListenerPorts) != 0 {
 		t.Fatalf("losing UDP pool should withdraw every default before cleanup: %+v", input.Nodes)
+	}
+}
+
+func TestUDPRouteRejectsAChangedElectionBeforeReportingProgrammed(t *testing.T) {
+	gateway, class, route := udpRouteFixture()
+	gateway.Status.Conditions = []metav1.Condition{{Type: "Programmed", Status: metav1.ConditionTrue, ObservedGeneration: gateway.Generation}}
+	primary := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &gateway.Spec.Listeners[0].Name}
+	secondary := gatewayv1.ParentReference{Name: primary.Name, SectionName: ptr.To(gatewayv1.SectionName("second"))}
+	ref, service, endpoints := udpBackendFixture(route.Namespace, "backend", 1, "10.1.2.1")
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{ref}
+	older := route.DeepCopy()
+	older.Name, older.UID = "older", "older-uid"
+	older.CreationTimestamp = metav1.NewTime(route.CreationTimestamp.Add(-time.Minute))
+	older.Spec.ParentRefs = []gatewayv1.ParentReference{secondary}
+	r := testReconciler(t, gateway, class, route, service, endpoints)
+	r.Protocol, r.Coordinator = gatewayv1.UDPProtocolType, &graph.Coordinator{}
+	bindGatewayFixture(t, r, gateway, cloud.MemberModeEndpoint)
+	controller.SetGatewayListenerScope(r.Config, gateway, gatewayv1.UDPProtocolType)
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: *secondary.SectionName, Protocol: gatewayv1.UDPProtocolType, Port: 9311})
+	if err := r.Update(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{primary, secondary}
+	if err := r.Update(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	route = reconcileUDPRoute(t, r, route)
+	r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		if err := r.Create(ctx, older); err != nil {
+			t.Fatal(err)
+		}
+		input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.ScopedListenerPorts, []int{8080}) {
+			t.Fatalf("expected the older route to win the second port: %+v", input.Nodes)
+		}
+		return cloud.GatewayGraphResult{
+			Outcome: cloud.ReadyOutcome(),
+			Routes:  []cloud.RouteGraphResult{{Identity: request.Identity, Result: cloud.RouteReadyResult(cloud.RouteState{})}},
+		}, input.Validate(ctx)
+	})
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	if _, err := r.Reconcile(t.Context(), request); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("expected a changed election to fence the planned route status, got %v", err)
+	}
+	if err := r.Get(t.Context(), request.NamespacedName, route); err != nil {
+		t.Fatal(err)
+	}
+	programmed := r.Config.Domain() + "/Programmed"
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionFalse, "Pending")
+
+	r.Writer = readyRouteWriter(t, r)
+	route = reconcileUDPRoute(t, r, route)
+	route = reconcileUDPRoute(t, r, route)
+	if first, second := r.currentParentCondition(viewRoute(route), primary, programmed), r.currentParentCondition(viewRoute(route), secondary, programmed); first == nil ||
+		first.Status != metav1.ConditionTrue || second == nil || second.Status != metav1.ConditionFalse || second.Reason != "NotSelected" {
+		t.Fatalf("route did not report the current winner: first=%+v, second=%+v", first, second)
 	}
 }
 

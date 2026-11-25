@@ -36,8 +36,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
+	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -588,6 +591,36 @@ func TestSNIGatewayCannotReplaceStoredNodePortTopology(t *testing.T) {
 	}
 }
 
+func requireSNIGatewayAttachment(t *testing.T, r *Reconciler, route *gatewayv1.TLSRoute, parent *gatewayv1.Gateway, forwards bool) {
+	t.Helper()
+	original := route.Spec.DeepCopy()
+	listener := &parent.Spec.Listeners[0]
+	snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listener}
+	observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	targets := observation.targets()
+	if forwards {
+		require.Len(t, targets, 1)
+		require.False(t, targets[0].Deny)
+		require.Equal(t, parent.Name, targets[0].Identity.GatewayName)
+	} else {
+		require.Empty(t, targets)
+	}
+	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{
+		Identity: controller.RouteIdentity(r.Config, parent, route), Result: cloud.RouteReadyResult(cloud.RouteState{}),
+	}}}
+	require.NoError(t, r.reportSNIRoutes(t.Context(), snapshot, observation, result, nil))
+	require.NoError(t, r.Get(t.Context(), client.ObjectKeyFromObject(route), route))
+	require.Equal(t, original, &route.Spec)
+	counts, err := r.attachedRoutes(t.Context(), parent, []*gatewayv1.Listener{listener})
+	require.NoError(t, err)
+	if forwards {
+		require.EqualValues(t, 1, counts.counts[listener.Name])
+	} else {
+		require.Zero(t, counts.counts[listener.Name])
+	}
+}
+
 func TestTLSRouteDefaultGatewayAttachments(t *testing.T) {
 	cfg := testConfig()
 	cfg.GatewayAPIChannel, cfg.TLSSNIPassthrough = "experimental", true
@@ -599,40 +632,12 @@ func TestTLSRouteDefaultGatewayAttachments(t *testing.T) {
 	route := testSNIRoute(first, "tenant", first.Namespace, "tenant.example.test")
 	route.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
 	route.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName("absent"))
-	original := route.Spec.DeepCopy()
 	service, endpoints := testSNIBackend(first.Namespace, "service", "192.0.2.100")
 	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).
 		WithObjects(route, service, endpoints).Build()
 	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
-	report := func(parent *gatewayv1.Gateway, forwards bool) {
-		t.Helper()
-		listener := &parent.Spec.Listeners[0]
-		snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listener}
-		observation, err := r.observeSNIRoutes(t.Context(), snapshot)
-		require.NoError(t, err)
-		targets := observation.targets()
-		if forwards {
-			require.Len(t, targets, 1)
-			require.Equal(t, parent.Name, targets[0].Identity.GatewayName)
-		} else {
-			require.Empty(t, targets)
-		}
-		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{
-			Identity: controller.RouteIdentity(cfg, parent, route), Result: cloud.RouteReadyResult(cloud.RouteState{}),
-		}}}
-		require.NoError(t, r.reportSNIRoutes(t.Context(), snapshot, observation, result, nil))
-		require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(route), route))
-		require.Equal(t, original, &route.Spec)
-		counts, err := r.attachedRoutes(t.Context(), parent, []*gatewayv1.Listener{listener})
-		require.NoError(t, err)
-		if forwards {
-			require.EqualValues(t, 1, counts.counts[listener.Name])
-		} else {
-			require.Zero(t, counts.counts[listener.Name])
-		}
-	}
-	report(first, true)
-	report(second, true)
+	requireSNIGatewayAttachment(t, r, route, first, true)
+	requireSNIGatewayAttachment(t, r, route, second, true)
 	require.Len(t, route.Status.Parents, 3)
 	for _, status := range route.Status.Parents {
 		if status.ParentRef.SectionName == nil {
@@ -643,7 +648,7 @@ func TestTLSRouteDefaultGatewayAttachments(t *testing.T) {
 	}
 
 	first.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
-	report(first, false)
+	requireSNIGatewayAttachment(t, r, route, first, false)
 	require.Len(t, route.Status.Parents, 2)
 	for _, status := range route.Status.Parents {
 		if status.ParentRef.SectionName == nil {
@@ -651,6 +656,150 @@ func TestTLSRouteDefaultGatewayAttachments(t *testing.T) {
 			require.True(t, meta.IsStatusConditionTrue(status.Conditions, "Accepted"))
 		}
 	}
+}
+
+func TestTLSRouteExplicitGatewayAttachments(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = "standard"
+	cfg.OperatorHTTPS, cfg.TCPTLSTermination, cfg.BackendTLSPolicy = true, true, true
+	listener := testHTTPSListener("sni", 443)
+	listener.Protocol = gatewayv1.TLSProtocolType
+	first := programmedTestGateway(cfg)
+	first.Spec.Listeners = []gatewayv1.Listener{listener}
+	first.Annotations[cfg.GatewayListenerPortAnnotation()] = fmt.Sprint(listener.Port)
+	first.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(listenerBindingProtocol(cfg, first, &listener))
+	controller.ClearGatewayTopology(cfg, first)
+	topology := testBoundTopology()
+	topology.Topology.MemberMode = cloud.MemberModeEndpoint
+	require.NoError(t, controller.BindGatewayTopology(cfg, first, topology))
+	second := first.DeepCopy()
+	second.ObjectMeta = metav1.ObjectMeta{Name: "second", Namespace: first.Namespace, UID: "second-uid", Generation: 1}
+	second.Status = gatewayv1.GatewayStatus{}
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: string(first.Spec.GatewayClassName)},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName},
+	}
+	route := testSNIRoute(first, "tenant", first.Namespace, "tenant.example.test")
+	secondRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(second.Name)}
+	route.Spec.ParentRefs = append(route.Spec.ParentRefs, secondRef)
+	service, endpoints := testSNIBackend(first.Namespace, "service", "192.0.2.100")
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "trust", Namespace: service.Namespace, UID: "policy", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{Hostname: "backend.example.test",
+				WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem)},
+		},
+	}
+	policy.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{{
+		AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(first.Name)},
+		ControllerName: cfg.ControllerName,
+	}}
+	parameters := testClassParameters()
+	parameters.Spec.MemberMode = configv1alpha1.MemberModeNodePort
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route, policy).
+		WithObjects(class, parameters, first, second, route, service, endpoints, policy).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg, TopologyResolver: &recordingProvider{}}
+
+	t.Run("only checkpointed Endpoint Gateways hold an ancestor", func(t *testing.T) {
+		secondKey := client.ObjectKeyFromObject(second)
+		require.NoError(t, kube.Get(t.Context(), secondKey, second))
+		unbound := second.DeepCopy()
+		ancestors, err := r.ObserveTLSRouteBackendTLSPolicy(t.Context(), policy)
+		require.NoError(t, err)
+		require.ErrorContains(t, r.bindGateway(t.Context(), second, fmt.Sprint(listener.Port)), "TLSRoute requires Endpoint member mode")
+		parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
+		require.NoError(t, kube.Update(t.Context(), parameters))
+		require.NoError(t, r.bindGateway(t.Context(), second, fmt.Sprint(listener.Port)))
+		require.NoError(t, kube.Get(t.Context(), secondKey, second))
+		require.True(t, controller.GatewayForHTTPRoutePredicate(cfg).Update(event.UpdateEvent{ObjectOld: unbound, ObjectNew: second}))
+		boundAncestors, err := r.ObserveTLSRouteBackendTLSPolicy(t.Context(), policy)
+		require.NoError(t, err)
+		require.Contains(t, boundAncestors, secondKey)
+		require.Contains(t, ancestors, client.ObjectKeyFromObject(first))
+		require.NotContains(t, ancestors, secondKey)
+	})
+
+	policy.Status.Ancestors = append(policy.Status.Ancestors, gatewayv1.PolicyAncestorStatus{AncestorRef: secondRef, ControllerName: cfg.ControllerName})
+	require.NoError(t, kube.Status().Update(t.Context(), policy))
+	requireSNIGatewayAttachment(t, r, route, first, true)
+	requireSNIGatewayAttachment(t, r, route, second, true)
+	require.Len(t, route.Status.Parents, 2)
+	for _, status := range route.Status.Parents {
+		require.True(t, meta.IsStatusConditionTrue(status.Conditions, string(gatewayv1.RouteConditionAccepted)))
+		require.True(t, meta.IsStatusConditionTrue(status.Conditions, cfg.Domain()+"/Programmed"))
+	}
+
+	ancestors, err := r.ObserveTLSRouteBackendTLSPolicy(t.Context(), policy)
+	require.NoError(t, err)
+	require.Len(t, ancestors, 2)
+	for _, parent := range []*gatewayv1.Gateway{first, second} {
+		require.Equal(t, policy.UID, ancestors[client.ObjectKeyFromObject(parent)].UID)
+		require.Equal(t, metav1.ConditionTrue, ancestors[client.ObjectKeyFromObject(parent)].Accepted.Status)
+	}
+
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{secondRef}
+	route.Generation++
+	require.NoError(t, kube.Update(t.Context(), route))
+	requireSNIGatewayAttachment(t, r, route, first, false)
+	requireSNIGatewayAttachment(t, r, route, second, true)
+	require.Len(t, route.Status.Parents, 1)
+	require.Equal(t, secondRef, route.Status.Parents[0].ParentRef)
+	require.True(t, meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed"))
+
+	ancestors, err = r.ObserveTLSRouteBackendTLSPolicy(t.Context(), policy)
+	require.NoError(t, err)
+	require.Len(t, ancestors, 1)
+	require.Contains(t, ancestors, client.ObjectKeyFromObject(second))
+
+	// A full status list can omit the accepted parent from the route.
+	route.Status.Parents = nil
+	for i := range controller.RouteParentStatusLimit {
+		route.Status.Parents = append(route.Status.Parents, gatewayv1.RouteParentStatus{
+			ParentRef:      gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("other-%d", i))},
+			ControllerName: "other.example/controller",
+		})
+	}
+	require.NoError(t, kube.Status().Update(t.Context(), route))
+	counts, err := r.attachedRoutes(t.Context(), second, []*gatewayv1.Listener{&second.Spec.Listeners[0]})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, counts.counts[second.Spec.Listeners[0].Name])
+
+	t.Run("full route and policy status preserve the Gateway diagnostic", func(t *testing.T) {
+		policy.Status.Ancestors = nil
+		for i := range backendtls.MaxAncestors {
+			policy.Status.Ancestors = append(policy.Status.Ancestors, gatewayv1.PolicyAncestorStatus{
+				AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("other-%d", i))},
+				ControllerName: "other.example/controller",
+			})
+		}
+		require.NoError(t, kube.Status().Update(t.Context(), policy))
+		listener := &second.Spec.Listeners[0]
+		snapshot := &gatewayMutationSnapshot{gateway: second, listener: listener}
+		observed, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.Len(t, observed, 1)
+		require.Equal(t, gatewayv1.RouteConditionReason(backendtls.AncestorLimitReason), observed[0].resolvedReason)
+		require.Empty(t, observed[0].targets)
+		require.Len(t, observed[0].denied, 1)
+
+		status := func() *metav1.Condition {
+			t.Helper()
+			require.NoError(t, r.setGatewayListenerStatuses(t.Context(), second, listener, metav1.ConditionTrue,
+				gatewayv1.GatewayReasonProgrammed, gatewayv1.ListenerReasonProgrammed, "Ready", "Ready", true, gatewayListenerStatusOptions{}))
+			require.EqualValues(t, 1, second.Status.Listeners[0].AttachedRoutes)
+			return meta.FindStatusCondition(second.Status.Conditions, cfg.Domain()+"/BackendTLSPoliciesReady")
+		}
+		full := status()
+		require.NotNil(t, full)
+		require.Equal(t, metav1.ConditionFalse, full.Status)
+		require.Equal(t, backendtls.AncestorLimitReason, full.Reason)
+		policy.Status.Ancestors[0] = gatewayv1.PolicyAncestorStatus{AncestorRef: secondRef, ControllerName: cfg.ControllerName}
+		require.NoError(t, kube.Status().Update(t.Context(), policy))
+		require.Nil(t, status())
+	})
 }
 
 func TestSNIRouteDeferredReadbackRequiresSameAuthorizedTargets(t *testing.T) {
@@ -1098,6 +1247,43 @@ func TestMixedTLSRouteParentUsesMatchingListenerModeAndServicePort(t *testing.T)
 	count, err := r.attachedRoutes(t.Context(), gateway, listeners)
 	require.NoError(t, err)
 	require.Equal(t, map[gatewayv1.SectionName]int32{"terminate": 1, "passthrough": 1}, count.counts)
+
+	t.Run("missing mixed capability rejects even unreported attachments", func(t *testing.T) {
+		require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(terminate), terminate))
+		terminate.Status.Parents = nil
+		for i := range controller.RouteParentStatusLimit {
+			terminate.Status.Parents = append(terminate.Status.Parents, gatewayv1.RouteParentStatus{
+				ParentRef:      gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("other-%d", i))},
+				ControllerName: "other.example/controller",
+			})
+		}
+		require.NoError(t, kube.Status().Update(t.Context(), terminate))
+		gateway.Status.Listeners = []gatewayv1.ListenerStatus{{
+			Name: "terminate",
+			Conditions: []metav1.Condition{controller.Condition(string(gatewayv1.ListenerConditionAccepted),
+				metav1.ConditionFalse, string(gatewayv1.ListenerReasonInvalid), "Invalid listener", gateway.Generation)},
+		}}
+		count, err := r.attachedRoutes(t.Context(), gateway, listeners)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, count.counts["terminate"])
+
+		providerErr := cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			&octavia.MissingGatewayCapability{Provider: "amphora", Capability: octavia.GatewayCapabilityTCPTLSMixedMode})
+		observed, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.NoError(t, r.reportSNIRoutes(t.Context(), snapshot, observed, cloud.GatewayGraphResult{}, providerErr))
+		require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(passthrough), passthrough))
+		accepted := meta.FindStatusCondition(passthrough.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+		require.NotNil(t, accepted)
+		require.Equal(t, metav1.ConditionFalse, accepted.Status)
+		require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), accepted.Reason)
+		scope := &gatewayScope{gateway: gateway}
+		_, err = r.handleGatewayProviderFailure(t.Context(), scope, listeners[0], providerErr, cloud.GatewayResult{})
+		require.NoError(t, err)
+		for _, listener := range gateway.Status.Listeners {
+			require.Zero(t, listener.AttachedRoutes, listener.Name)
+		}
+	})
 
 	// An applicable policy must keep the terminating backend closed even
 	// when the optional backend authentication implementation is disabled.

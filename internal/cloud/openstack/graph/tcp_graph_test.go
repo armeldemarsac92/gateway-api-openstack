@@ -684,7 +684,7 @@ func TestMultiUDPWithdrawsUnelectedDefaultsBeforeReportingObserved(t *testing.T)
 	}
 	f.settleTransportGraph(provider)
 	route.Disposition = cloud.GraphPreserve
-	route.RetainScopedListenerPorts = []int{}
+	route.RetainListenerPorts = []int{}
 	before := len(f.writes)
 	f.settleTransportGraph(provider)
 	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) || f.inventory[tcpPool] == nil {

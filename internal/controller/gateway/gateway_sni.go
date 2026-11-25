@@ -199,7 +199,7 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 		if entry.acceptedReason != gatewayv1.RouteReasonAccepted {
 			continue
 		}
-		entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != i })
+		entry.retainOwnedHostnames(owners, i)
 		if err := r.resolveSNIBackend(ctx, snapshot, entry, tls, mixed); err != nil {
 			return nil, err
 		}
@@ -301,6 +301,10 @@ type sniHostnameOwner struct {
 	original string
 }
 
+func (entry *sniRouteStatus) retainOwnedHostnames(owners map[string]sniHostnameOwner, index int) {
+	entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != index })
+}
+
 // hostnameOwners selects the winner for each SNI name before resolving any
 // backend. Losing authorization must withdraw the winner's forwarding target.
 func (observation sniRouteObservation) hostnameOwners() map[string]sniHostnameOwner {
@@ -336,10 +340,6 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 	listener, route := snapshot.listener, entry.route
 	if listener == nil {
 		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "The Gateway has no supported TLS SNI listener")
-		return nil
-	}
-	if !r.Config.DefaultGatewaysEnabled() && len(route.Spec.ParentRefs) != 1 {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLSRoute requires one parentRef on the Standard channel")
 		return nil
 	}
 	if !slices.ContainsFunc(entry.parents, func(ref gatewayv1.ParentReference) bool { return sniParentSelectsListener(ref, *listener) }) {
