@@ -295,6 +295,11 @@ func TestTLSRouteBackendTLSRenamePreservesProtectionAcrossRestart(t *testing.T) 
 		require.Equal(t, alias.Hostname, step.sni.target.route.Hostname)
 	}
 	checkRestart(alias)
+	weightedAlias := alias
+	weightedAlias.ServiceUID, weightedAlias.ServicePort = "", 0
+	weightedAlias.BackendServices = []cloud.TLSBackendService{{UID: "another-service", Port: 8443}, {UID: alias.ServiceUID, Port: alias.ServicePort}}
+	weightedAlias.Members = []cloud.Member{{Address: "192.0.2.10", Port: 8443, Weight: 4}, {Address: "192.0.2.11", Port: 8443, Weight: 1}}
+	checkRestart(weightedAlias)
 
 	successor := protected(*target, "new")
 	actual.sni[target.key] = &observedSNIFragment{pool: successor.pool, backendTLS: successor.backendTLS}

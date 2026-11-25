@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package l4route
+package routebackend
 
 import (
 	"errors"
@@ -36,15 +36,15 @@ func TestWeightedMembers(t *testing.T) {
 
 	for _, test := range []struct {
 		name   string
-		groups []weightedServiceMembers
+		groups []WeightedServiceMembers
 		want   []cloud.Member
 	}{
 		{
 			name: "70-30-0",
-			groups: []weightedServiceMembers{
-				{weight: 30, members: []cloud.Member{b}},
-				{weight: 70, members: []cloud.Member{a}},
-				{weight: 0, members: []cloud.Member{c, drainingD}},
+			groups: []WeightedServiceMembers{
+				{Weight: 30, Members: []cloud.Member{b}},
+				{Weight: 70, Members: []cloud.Member{a}},
+				{Weight: 0, Members: []cloud.Member{c, drainingD}},
 			},
 			want: []cloud.Member{
 				{Address: a.Address, Port: a.Port, Weight: 7},
@@ -53,10 +53,10 @@ func TestWeightedMembers(t *testing.T) {
 		},
 		{
 			name: "unequal counts with duplicate, shared and draining members",
-			groups: []weightedServiceMembers{
-				{weight: 30, members: []cloud.Member{c}},
-				{weight: 70, members: []cloud.Member{b, drainingC, a, b, drainingD}},
-				{weight: 5, members: []cloud.Member{a, b}},
+			groups: []WeightedServiceMembers{
+				{Weight: 30, Members: []cloud.Member{c}},
+				{Weight: 70, Members: []cloud.Member{b, drainingC, a, b, drainingD}},
+				{Weight: 5, Members: []cloud.Member{a, b}},
 			},
 			want: []cloud.Member{
 				{Address: a.Address, Port: a.Port, Weight: 5},
@@ -67,9 +67,9 @@ func TestWeightedMembers(t *testing.T) {
 		},
 		{
 			name: "Octavia limit is inclusive",
-			groups: []weightedServiceMembers{
-				{weight: 256_000, members: []cloud.Member{a}},
-				{weight: 1_000, members: []cloud.Member{b}},
+			groups: []WeightedServiceMembers{
+				{Weight: 256_000, Members: []cloud.Member{a}},
+				{Weight: 1_000, Members: []cloud.Member{b}},
 			},
 			want: []cloud.Member{
 				{Address: a.Address, Port: a.Port, Weight: 256},
@@ -78,11 +78,11 @@ func TestWeightedMembers(t *testing.T) {
 		},
 		{
 			name:   "disabled backends have no members",
-			groups: []weightedServiceMembers{{weight: 0, members: []cloud.Member{a, drainingD}}},
+			groups: []WeightedServiceMembers{{Weight: 0, Members: []cloud.Member{a, drainingD}}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			members, err := weightedMembers(cloud.ListenerProtocolUDP, test.groups)
+			members, err := WeightedMembers(cloud.ListenerProtocolUDP, test.groups)
 			if err != nil || !slices.Equal(members, test.want) {
 				t.Fatalf("weighted UDP members = %+v, %v, want %+v", members, err, test.want)
 			}
@@ -93,15 +93,15 @@ func TestWeightedMembers(t *testing.T) {
 func TestWeightedMembersFailClosed(t *testing.T) {
 	ready := cloud.Member{Address: "10.0.0.1", Port: 53}
 	draining := cloud.Member{Address: "10.0.0.2", Port: 53, Draining: true}
-	groups := []weightedServiceMembers{
-		{weight: 257, members: []cloud.Member{ready}},
-		{weight: 1, members: []cloud.Member{draining}},
+	groups := []WeightedServiceMembers{
+		{Weight: 257, Members: []cloud.Member{ready}},
+		{Weight: 1, Members: []cloud.Member{draining}},
 	}
-	if members, err := weightedMembers(cloud.ListenerProtocolUDP, groups); !errors.Is(err, errBackendWithoutReadyEndpoints) || len(members) != 0 {
+	if members, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); !errors.Is(err, ErrBackendWithoutReadyEndpoints) || len(members) != 0 {
 		t.Fatalf("backend without ready endpoints returned %+v, %v", members, err)
 	}
-	groups[1].members[0].Draining = false
-	if members, err := weightedMembers(cloud.ListenerProtocolUDP, groups); err == nil || !strings.Contains(err.Error(), "256") || len(members) != 0 {
+	groups[1].Members[0].Draining = false
+	if members, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); err == nil || !strings.Contains(err.Error(), "256") || len(members) != 0 {
 		t.Fatalf("unrepresentable ratio returned %+v, %v", members, err)
 	}
 }
@@ -112,16 +112,16 @@ func TestWeightedTCPMembersRespectHAProxyActiveServerLimit(t *testing.T) {
 		address := netip.AddrFrom4([4]byte{10, 1, byte(i >> 8), byte(i % 256)})
 		endpoints[i] = cloud.Member{Address: address.String(), Port: 8080}
 	}
-	groups := []weightedServiceMembers{
-		{weight: 4095, members: endpoints},
-		{weight: 1, members: []cloud.Member{{Address: "10.2.0.1", Port: 8080}}},
+	groups := []WeightedServiceMembers{
+		{Weight: 4095, Members: endpoints},
+		{Weight: 1, Members: []cloud.Member{{Address: "10.2.0.1", Port: 8080}}},
 	}
-	if members, err := weightedMembers(cloud.ListenerProtocolTCP, groups); err == nil || len(members) != 0 {
+	if members, err := WeightedMembers(cloud.ListenerProtocolTCP, groups); err == nil || len(members) != 0 {
 		t.Fatalf("4096 active TCP endpoints produced %d members, error %v", len(members), err)
 	}
 	endpoints[0].Draining = true
-	groups[0].weight--
-	if members, err := weightedMembers(cloud.ListenerProtocolTCP, groups); err != nil || len(members) != 4096 || !members[0].Draining {
+	groups[0].Weight--
+	if members, err := WeightedMembers(cloud.ListenerProtocolTCP, groups); err != nil || len(members) != 4096 || !members[0].Draining {
 		t.Fatalf("4095 active TCP endpoints plus one draining produced %d members, error %v", len(members), err)
 	}
 }
@@ -130,19 +130,19 @@ func TestWeightedMembersWithLargeCommonDenominator(t *testing.T) {
 	// These pairwise coprime endpoint counts have an LCM above uint64. Every
 	// endpoint still has the same share because each weight scales with its count.
 	counts := []int{2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53}
-	groups := make([]weightedServiceMembers, 0, len(counts))
+	groups := make([]WeightedServiceMembers, 0, len(counts))
 	var want []cloud.Member
 	for i, count := range counts {
-		group := weightedServiceMembers{weight: int32(count * 10_000)}
+		group := WeightedServiceMembers{Weight: int32(count * 10_000)}
 		for j := 0; j < count; j++ {
 			member := cloud.Member{Address: fmt.Sprintf("10.0.%d.%d", i+10, j+10), Port: 53}
-			group.members = append(group.members, member)
+			group.Members = append(group.Members, member)
 			member.Weight = 1
 			want = append(want, member)
 		}
 		groups = append(groups, group)
 	}
-	members, err := weightedMembers(cloud.ListenerProtocolUDP, groups)
+	members, err := WeightedMembers(cloud.ListenerProtocolUDP, groups)
 	if err != nil || !slices.Equal(members, want) {
 		t.Fatalf("large denominator produced incorrect members (got %d, want %d), error %v", len(members), len(want), err)
 	}

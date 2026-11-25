@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package l4route
+package routebackend
 
 import (
 	"cmp"
@@ -32,16 +32,18 @@ const maxOctaviaMemberWeight = 256
 // HAProxy's dynamic round robin scheduler limits active servers per pool.
 const maxTCPRoundRobinMembers = 4095
 
-var errBackendWithoutReadyEndpoints = errors.New("positive-weight backend has no ready endpoints")
+// ErrBackendWithoutReadyEndpoints reports an empty positive-weight backend.
+var ErrBackendWithoutReadyEndpoints = errors.New("positive-weight backend has no ready endpoints")
 
-type weightedServiceMembers struct {
-	weight  int32
-	members []cloud.Member
+// WeightedServiceMembers pairs a Service backendRef weight with eligible members.
+type WeightedServiceMembers struct {
+	Weight  int32
+	Members []cloud.Member
 }
 
-// weightedMembers divides each backend's weight among its unique eligible
+// WeightedMembers divides each backend's weight among its unique eligible
 // destinations, then adds the shares of destinations reached through multiple backends.
-func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.Member, error) {
+func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.Member, error) {
 	type readyGroup struct {
 		weight    int64
 		endpoints map[netip.AddrPort]struct{}
@@ -55,14 +57,14 @@ func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.
 	denominator := big.NewInt(1)
 	var count, commonFactor big.Int
 	for i, group := range groups {
-		if group.weight < 0 {
+		if group.Weight < 0 {
 			return nil, fmt.Errorf("%s backendRef %d has a negative weight", protocol, i+1)
 		}
-		if group.weight == 0 {
+		if group.Weight == 0 {
 			continue
 		}
-		ready := make(map[netip.AddrPort]struct{}, len(group.members))
-		for _, member := range group.members {
+		ready := make(map[netip.AddrPort]struct{}, len(group.Members))
+		for _, member := range group.Members {
 			address, err := netip.ParseAddr(member.Address)
 			if err != nil || member.Port < 1 || member.Port > 65535 {
 				return nil, fmt.Errorf("%s backendRef %d has an invalid endpoint %q port %d", protocol, i+1, member.Address, member.Port)
@@ -80,9 +82,9 @@ func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.
 			}
 		}
 		if len(ready) == 0 {
-			return nil, fmt.Errorf("%s backendRef %d: %w", protocol, i+1, errBackendWithoutReadyEndpoints)
+			return nil, fmt.Errorf("%s backendRef %d: %w", protocol, i+1, ErrBackendWithoutReadyEndpoints)
 		}
-		readyGroups = append(readyGroups, readyGroup{weight: int64(group.weight), endpoints: ready})
+		readyGroups = append(readyGroups, readyGroup{weight: int64(group.Weight), endpoints: ready})
 
 		// Use the least common multiple of the endpoint counts as the scale.
 		// Counts across up to 16 backendRefs can exceed machine integers when combined.

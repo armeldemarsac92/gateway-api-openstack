@@ -40,7 +40,11 @@ func sameSNIBackendTLS(a, b *cloud.BackendTLSValidation) bool {
 }
 
 func sniBackendServiceTag(route cloud.TLSSNIRoute) string {
-	hash := sha256.Sum256(fmt.Appendf(nil, "%s\x00%d", route.ServiceUID, route.ServicePort))
+	return sniTLSBackendServiceTag(route.ServiceUID, route.ServicePort)
+}
+
+func sniTLSBackendServiceTag(uid string, port int) string {
+	hash := sha256.Sum256(fmt.Appendf(nil, "%s\x00%d", uid, port))
 	return openstackidentity.Tag("sni-backend", fmt.Sprintf("%x", hash))
 }
 
@@ -52,6 +56,11 @@ func (fragment *observedSNIFragment) protectsService(key sniFragmentKey, target 
 	}
 	if target.route.ServicePort != 0 && slices.Contains(fragment.pool.Tags, sniBackendServiceTag(target.route)) {
 		return true
+	}
+	for _, service := range target.route.BackendServices {
+		if slices.Contains(fragment.pool.Tags, sniTLSBackendServiceTag(service.UID, service.Port)) {
+			return true
+		}
 	}
 	return key.sniRouteKey == target.key.sniRouteKey && !slices.ContainsFunc(fragment.pool.Tags, func(tag string) bool {
 		name, _, valid := openstackidentity.ParseTag(tag)

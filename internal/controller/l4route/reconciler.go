@@ -405,7 +405,7 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 	weighted := len(route.backendRefs) > 1
 	udpDrop := r.udpPacketDropEnabled(gateway, topology, listenerPorts)
 	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
-	groups := make([]weightedServiceMembers, 0, len(backends))
+	groups := make([]routebackend.WeightedServiceMembers, 0, len(backends))
 	serving := make([]serviceBackend, 0, len(backends))
 	var noEndpoints *model.Diagnostic
 	for _, backend := range backends {
@@ -422,7 +422,7 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 			return cloud.RouteSpec{}, "", diagnostic, err
 		}
 		serving = append(serving, backend)
-		groups = append(groups, weightedServiceMembers{weight: backend.ref.weight, members: members})
+		groups = append(groups, routebackend.WeightedServiceMembers{Weight: backend.ref.weight, Members: members})
 	}
 	rejection, drop, diagnostic, err := r.backendUnavailableShare(ctx, route, rejectWeight, udpDrop, noEndpoints)
 	if diagnostic != nil || err != nil {
@@ -432,15 +432,15 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 	var members []cloud.Member
 	if weighted {
 		var err error
-		members, err = weightedMembers(string(r.protocol()), groups)
-		if errors.Is(err, errBackendWithoutReadyEndpoints) {
+		members, err = routebackend.WeightedMembers(string(r.protocol()), groups)
+		if errors.Is(err, routebackend.ErrBackendWithoutReadyEndpoints) {
 			return cloud.RouteSpec{}, "", &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("Waiting for eligible endpoints in every positive-weight %s backend", r.protocol())}, nil
 		}
 		if err != nil {
 			return cloud.RouteSpec{}, "", &model.Diagnostic{Condition: "Programmed", Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}, nil
 		}
 	} else if len(groups) != 0 {
-		members = groups[0].members
+		members = groups[0].Members
 	}
 	spec := cloud.RouteSpec{
 		Identity: controller.RouteIdentity(r.Config, gateway, route),
