@@ -437,7 +437,7 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 
 // resolveRouteReferences evaluates object references without applying the
 // Gateway's member mode or requiring ready endpoints.
-func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
+func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, status *routeReconcileStatus) error {
 	backends, err := r.validateRouteStructure(route)
 	if err != nil {
 		var rejection *routeBuildError
@@ -495,7 +495,12 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			if object != nil {
 				spec = &object.Spec
 			}
-			if diagnostic := model.CheckXBackendTarget(key, spec, cloud.MemberModeEndpoint, r.Config.BackendH2C); diagnostic != nil {
+			profile := model.XBackendProfile{
+				MemberMode: cloud.MemberModeEndpoint, H2C: r.Config.BackendH2C,
+				ExternalHostname:  r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
+				ServiceDNSDomains: r.Config.XBackendServiceDNSDomains,
+			}
+			if diagnostic := model.CheckXBackendTarget(key, spec, profile); diagnostic != nil {
 				*status = status.withBackendDiagnostic(*diagnostic)
 			}
 			continue

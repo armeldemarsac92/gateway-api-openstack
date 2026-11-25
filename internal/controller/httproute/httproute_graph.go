@@ -45,6 +45,7 @@ type routeGraphResult struct {
 	selection               routeSelection
 	rejectedSections        []model.ListenerSection
 	backendObserved         bool
+	externalHostname        bool
 	backendDiagnostic       model.Diagnostic
 	corsFallback            bool
 	backendTLSAncestorSlot  backendtls.AncestorSlot
@@ -148,6 +149,7 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		selection:               snapshot.selection,
 		rejectedSections:        snapshot.rejectedSections,
 		backendObserved:         snapshot.backends != nil,
+		externalHostname:        hasRoutedHTTPBackend(snapshot.desired),
 		backendDiagnostic:       snapshot.backendDiagnostic,
 		corsFallback:            snapshot.corsFallback,
 		backendTLSAncestorSlot:  snapshot.backendTLSAncestorSlot,

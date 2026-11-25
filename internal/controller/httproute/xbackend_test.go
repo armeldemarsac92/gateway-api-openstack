@@ -17,12 +17,17 @@ limitations under the License.
 package httproute
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"reflect"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,10 +36,146 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
+	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func TestXBackendExternalHostnameRefreshKeepsServiceAndRouteStatus(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	cfg := &f.reconciler.Config
+	cfg.GatewayAPIChannel = "experimental"
+	cfg.XBackendExternalHostnameClasses = []string{string(f.gateway.Spec.GatewayClassName)}
+	cfg.XBackendExternalHostnameCIDRs = []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
+	for _, name := range cfg.GatewayAPICRDNames() {
+		var definition apiextensionsv1.CustomResourceDefinition
+		if err := f.client.Get(t.Context(), types.NamespacedName{Name: name}, &definition); err != nil {
+			definition = *gatewayAPICRD(name, gatewayconsts.BundleVersion)
+			definition.Annotations[gatewayconsts.ChannelAnnotation] = cfg.GatewayAPIChannel
+			f.create(t, &definition)
+		} else {
+			definition.Annotations[gatewayconsts.ChannelAnnotation] = cfg.GatewayAPIChannel
+			if err := f.client.Update(t.Context(), &definition); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := gatewayx.Install(f.client.Scheme()); err != nil {
+		t.Fatal(err)
+	}
+	backend := &gatewayx.XBackend{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.route.Namespace, Name: f.service.Name, UID: "routed-xbackend", Generation: 1},
+		Spec: gatewayx.BackendSpec{
+			Type:             gatewayx.BackendTypeExternalHostname,
+			Port:             gatewayx.BackendPort{Number: 8089},
+			ExternalHostname: &gatewayx.ExternalHostnameBackend{Hostname: "origin.example.test"},
+		},
+	}
+	f.create(t, backend)
+	external := pathBackendRule("/external", gatewayv1.PathMatchExact, gatewayv1.ObjectName(backend.Name))
+	ref := &external.BackendRefs[0]
+	ref.Group, ref.Kind, ref.Port = ptr.To(gatewayv1.Group(gatewayx.GroupName)), ptr.To(gatewayv1.Kind(model.XBackendKind)), nil
+	f.route.Spec.Rules = append(f.route.Spec.Rules, external)
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &recordingProvider{}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	var serviceBefore cloud.HTTPBackend
+	for _, phase := range []struct {
+		name      string
+		addresses []string
+		dnsErr    error
+		want      []cloud.Member
+	}{
+		{name: "multi-A", addresses: []string{"198.51.100.20", "::ffff:198.51.100.9", "198.51.100.9", "2001:db8::1", "192.0.2.20"},
+			want: []cloud.Member{{Address: "198.51.100.9", Port: 8089}, {Address: "198.51.100.20", Port: 8089}}},
+		{name: "rotation", addresses: []string{"198.51.100.21"}, want: []cloud.Member{{Address: "198.51.100.21", Port: 8089}}},
+		{name: "NXDOMAIN", dnsErr: &net.DNSError{IsNotFound: true}},
+		{name: "timeout", dnsErr: &net.DNSError{IsTimeout: true}},
+		{name: "restoration", addresses: []string{"198.51.100.9"}, want: []cloud.Member{{Address: "198.51.100.9", Port: 8089}}},
+	} {
+		t.Run(phase.name, func(t *testing.T) {
+			lookups := 0
+			f.reconciler.externalHostnameLookup = func(ctx context.Context, family, hostname string) ([]netip.Addr, error) {
+				lookups++
+				if family != "ip4" || hostname != "origin.example.test." {
+					t.Errorf("unexpected resolver arguments %q %q", family, hostname)
+				}
+				if _, ok := ctx.Deadline(); !ok {
+					t.Error("DNS lookup has no deadline")
+				}
+				addresses := make([]netip.Addr, 0, len(phase.addresses))
+				for _, address := range phase.addresses {
+					addresses = append(addresses, netip.MustParseAddr(address))
+				}
+				return addresses, phase.dnsErr
+			}
+			r := newTestReconciler(*f.reconciler, provider)
+			before := len(provider.routeSpecs)
+			result, err := r.Reconcile(t.Context(), request)
+			wantDelay := controller.OpenStackResyncAfter(externalHostnameRefresh, f.route.UID)
+			if err != nil || result.RequeueAfter != wantDelay || len(provider.routeSpecs) != before+1 || lookups != 1 {
+				var current gatewayv1.HTTPRoute
+				_ = f.client.Get(t.Context(), request.NamespacedName, &current)
+				t.Fatalf("reconcile = %+v, %v, %d writes, %d lookups, want bounded refresh %s and one observation; parents %+v", result, err, len(provider.routeSpecs)-before, lookups, wantDelay, current.Status.Parents)
+			}
+			pools := provider.routeSpecs[before].HTTPBackends
+			if len(pools) != 2 || !pools[1].RoutedExternal || pools[1].InvalidReference || pools[1].Unavailable != (len(phase.want) == 0) ||
+				!slices.Equal(pools[1].Members, phase.want) {
+				t.Fatalf("external destination did not converge for %s: %+v", phase.name, pools)
+			}
+			if serviceBefore.Name == "" {
+				serviceBefore = pools[0]
+			}
+			if pools[0].RoutedExternal || !reflect.DeepEqual(pools[0], serviceBefore) ||
+				!slices.Equal(pools[0].Members, []cloud.Member{{Address: "192.0.2.20", Port: 8080}}) {
+				t.Fatalf("DNS refresh changed the sibling Service pool: %+v", pools[0])
+			}
+			var current gatewayv1.HTTPRoute
+			if err := f.client.Get(t.Context(), request.NamespacedName, &current); err != nil {
+				t.Fatal(err)
+			}
+			if len(current.Status.Parents) != 1 || !meta.IsStatusConditionTrue(current.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)) ||
+				!meta.IsStatusConditionTrue(current.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted)) {
+				t.Fatalf("DNS data changed a valid HTTPRoute reference: %+v", current.Status.Parents)
+			}
+		})
+	}
+
+	f.reconciler.externalHostnameLookup = func(context.Context, string, string) ([]netip.Addr, error) { return nil, nil }
+	before := f.observe(t)
+	backend.Spec.ExternalHostname.Hostname = "replacement.example.test"
+	backend.Generation++
+	if err := f.client.Update(t.Context(), backend); err != nil {
+		t.Fatal(err)
+	}
+	if err := before.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("a changed XBackend must invalidate the planned mutation, got %v", err)
+	}
+
+	cfg.XBackendExternalHostnameClasses = []string{"another-class"}
+	f.reconciler.externalHostnameLookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		t.Error("a class without opt-in must never query DNS")
+		return nil, nil
+	}
+	after := f.observe(t)
+	pools := after.Nodes[0].Spec.HTTPBackends
+	if len(pools) != 2 || !pools[1].InvalidReference || pools[1].RoutedExternal || !reflect.DeepEqual(pools[0], serviceBefore) {
+		t.Fatalf("a class without opt-in must reject only the routed backend: %+v", pools)
+	}
+	profile, err := f.reconciler.xBackendProfile(f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if condition := xBackendAcceptedCondition(backend, profile); condition.Status != metav1.ConditionFalse {
+		t.Fatalf("XBackend status must reject the non-opted-in class: %+v", condition)
+	}
+}
 
 func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	f := newRouteModelInputFixture(t)
@@ -178,7 +319,7 @@ func TestXBackendStatusDuringDeletion(t *testing.T) {
 				backend.Finalizers = []string{"example.net/cleanup"}
 				backend.Status.Ancestors = append(backend.Status.Ancestors, gatewayx.BackendAncestorStatus{
 					ControllerName: cfg.ControllerName, AncestorRef: gatewayAncestorRef(client.ObjectKeyFromObject(gateway)),
-					Conditions: []metav1.Condition{xBackendAcceptedCondition(backend, cloud.MemberModeEndpoint, false)},
+					Conditions: []metav1.Condition{xBackendAcceptedCondition(backend, model.XBackendProfile{MemberMode: cloud.MemberModeEndpoint})},
 				})
 			}
 			scheme := testScheme(t)

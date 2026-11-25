@@ -1100,7 +1100,9 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 		}
 		weightTag := desired.nodePortWeightTag()
 		for _, member := range actual.members {
-			if desired.unavailable {
+			// The ordinary Endpoint path can retain disabled members. An
+			// external pool must drop records withdrawn by DNS.
+			if desired.unavailable && !desired.routedExternal {
 				continue
 			}
 			key := memberKey(member.Address, member.ProtocolPort)

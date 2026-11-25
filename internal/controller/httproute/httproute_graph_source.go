@@ -159,6 +159,11 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	if !foundRequested {
 		return graph.RouteInputs{}, errHTTPRouteChanged
 	}
+	if backends != nil {
+		if err := r.resolveExternalHostnameMembers(ctx, input.Nodes, backends.input.XBackends); err != nil {
+			return graph.RouteInputs{}, err
+		}
+	}
 	input.Validate = func(ctx context.Context) error {
 		current, err := r.liveGraphRoutes(ctx, request.Identity)
 		if err != nil {

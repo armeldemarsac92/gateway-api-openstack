@@ -47,7 +47,7 @@ type Input struct {
 	BackendH2C             bool
 	EnableXBackend         bool
 	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`
-	MemberMode             cloud.MemberMode
+	XBackendProfile        XBackendProfile
 	XBackends              []XBackendObservation
 	Gateway                *gatewayv1.Gateway
 	ListenerSetSections    map[types.NamespacedName][]gatewayv1.Listener `json:"-"`

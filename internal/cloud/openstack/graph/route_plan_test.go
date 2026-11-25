@@ -17,6 +17,7 @@ limitations under the License.
 package graph
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -386,6 +387,103 @@ func TestBuildRouteEnsurePlanRecreatesDeletedMember(t *testing.T) {
 	if !reflect.DeepEqual(plan, []routeMutation{want}) {
 		t.Fatalf("route mutations = %#v, want only %#v", plan, want)
 	}
+}
+
+func TestXBackendExternalHostnameOmitsSubnetOnlyForItsPool(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
+	spec.MemberMode = cloud.MemberModeEndpoint
+	spec.Hostname, spec.PathType, spec.PathValue, spec.Members = "", "", "", nil
+	spec.HTTPBackends = []cloud.HTTPBackend{
+		{Namespace: "apps", Name: "backend", Port: 8080, Members: []cloud.Member{{Address: "192.0.2.20", Port: 8080}},
+			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/service"}}},
+		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8089, RoutedExternal: true,
+			Members: []cloud.Member{{Address: "198.51.100.20", Port: 8089}},
+			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/external", Precedence: 1}}},
+	}
+	requests := 0
+	p := &Provider{projectID: "project-a", octavia: octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests++
+		if req.Method != http.MethodPost {
+			t.Errorf("expected member POST, got %s %s", req.Method, req.URL.Path)
+		}
+		var body struct{ Member map[string]any }
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		switch req.URL.Path {
+		case "/lbaas/pools/external/members":
+			if _, present := body.Member["subnet_id"]; present || body.Member["address"] != "198.51.100.20" {
+				t.Errorf("external member should omit subnet_id: %+v", body.Member)
+			}
+		case "/lbaas/pools/service/members":
+			if body.Member["subnet_id"] != spec.MemberSubnetID || body.Member["address"] != "192.0.2.20" {
+				t.Errorf("Service should keep its Neutron member subnet: %+v", body.Member)
+			}
+		default:
+			t.Errorf("unexpected path %s", req.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		if _, err := w.Write([]byte(`{"member":{}}`)); err != nil {
+			t.Error(err)
+		}
+	})))}
+	desired, err := p.buildDesiredRoute(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range desired.httpParts {
+		pool := "service"
+		if part.routedExternal {
+			pool = "external"
+		}
+		step := routeMutation{kind: routeMutationCreateMember, parentID: pool, member: part.members[0]}
+		if err := p.executeRouteMutation(t.Context(), part, step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if requests != 2 {
+		t.Fatalf("got %d member writes, want one per pool", requests)
+	}
+	spec.MemberMode = cloud.MemberModeNodePort
+	spec.BackendSecurityGroupIDs = []string{"worker-group"}
+	if _, err := p.buildDesiredRoute(spec); err == nil {
+		t.Fatal("a routed external pool must never bypass worker security validation")
+	}
+}
+
+func TestXBackendExternalHostnameWithdrawsStaleMembersInPlace(t *testing.T) {
+	desired, actual := convergedRoutePlanFixture()
+	desired.routedExternal, desired.spec.MemberMode, desired.spec.MemberSubnetID = true, cloud.MemberModeEndpoint, ""
+	actual.members[0].SubnetID, actual.members[0].ProvisioningStatus, actual.members[0].Weight = "", "ACTIVE", 1
+	member := actual.members[0]
+	desired.members[0].Address = "198.51.100.21"
+	check := func(want routeMutationKind) {
+		t.Helper()
+		plan, _, err := buildRouteEnsurePlan(desired, actual)
+		if err != nil || len(plan) == 0 || plan[0].kind != want || plan[0].parentID != actual.pool.ID {
+			t.Fatalf("plan = %+v, %v; want mutation %d against the original pool", plan, err, want)
+		}
+		for _, step := range plan {
+			if step.kind != routeMutationDeleteMember && step.kind != routeMutationDisableMember && step.kind != routeMutationCreateMember {
+				t.Fatalf("DNS answer must only change membership, got %+v", plan)
+			}
+		}
+	}
+	check(routeMutationDeleteMember)
+	actual.members = nil
+	check(routeMutationCreateMember)
+	member.Address = desired.members[0].Address
+	actual.members = []pools.Member{member}
+	desired.unavailable, desired.members = true, nil
+	check(routeMutationDisableMember)
+	actual.members[0].AdminStateUp = false
+	check(routeMutationDeleteMember)
+	actual.members = nil
+	if plan, _, err := buildRouteEnsurePlan(desired, actual); err != nil || len(plan) != 0 {
+		t.Fatalf("an empty routed pool must keep its existing match, got %+v, %v", plan, err)
+	}
+	desired.unavailable, desired.members = false, []cloud.Member{{Address: member.Address, Port: member.ProtocolPort}}
+	check(routeMutationCreateMember)
 }
 
 func TestBuildRouteEnsurePlanRecreatesDeletedMonitor(t *testing.T) {
