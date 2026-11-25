@@ -1,0 +1,397 @@
+{
+  "contract": "HTTPRoute method and exact-header forwarding precedence over a fallback RequestRedirect",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "76d28f67c8420eb281ea846670db4b50b2177d7b",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:f3a14ec1d7a5003f9746e3fc94ea7bb3730920d152f1a0fc2f0eaeb57a908f07",
+    "configDigest": "sha256:7bf3d77770d2246d5caf420c5cad55d19c438dd58cea21422856822a7d43f5e4",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "2dd7b48c39d15e2408a44a7c848a0e183052bb96dd7e006d68e092bc1cb852ad",
+    "managerSHA256": "112bfbfd59747e61662e010b84e33ef0fff48e5cd5d9a66eaaee27470000695d",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "kubernetesBoundary": "Local envtest API server and etcd with a fixture-managed EndpointSlice.",
+  "providerBoundary": "Installed Octavia WSGI and database, Amphora renderer, native HAProxy and HTTP origin. Keystone, Neutron, RPC and Amphora agent transport were simulated locally.",
+  "octaviaRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-grpc-request-mirror-31a05857f3b3",
+  "octaviaWheel": "octavia-19.0.1.dev91-py3-none-any.whl",
+  "channels": {
+    "standard": {
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "capabilities": [
+        "fixed_http_responses_v1",
+        "http_header_exact_v1",
+        "http_method_match_v1",
+        "http_request_redirect_v1"
+      ],
+      "haproxySHA256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+      "phases": {
+        "overlap": {
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "attachedRoutes": 2,
+          "routeStatus": {
+            "fallback": {
+              "uid": "04b22b60-d8af-4974-aa42-be32454fd3e6",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "specific": {
+              "uid": "376aea61-6244-4182-9b6d-40fdb93ed13c",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "redirectAction": "REDIRECT_REQUEST",
+          "redirectPosition": 4,
+          "earlierPredicates": [
+            "HTTP_HEADER_EXACT",
+            "HTTP_METHOD"
+          ],
+          "target": {
+            "scheme": "https",
+            "port": 8443,
+            "hostname": "moved.example.test"
+          },
+          "traffic": [
+            {
+              "method": "POST",
+              "path": "/app/item?n=1",
+              "version": null,
+              "status": 200,
+              "location": null,
+              "origin": true
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=2",
+              "version": "one",
+              "status": 200,
+              "location": null,
+              "origin": true
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=3",
+              "version": "one, other",
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=3",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=4",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=4",
+              "origin": false
+            },
+            {
+              "method": "POST",
+              "path": "/app/other?n=5",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/other?n=5",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/health",
+              "version": null,
+              "status": 200,
+              "location": null,
+              "origin": true
+            }
+          ]
+        },
+        "higherPriorityRemoved": {
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "attachedRoutes": 1,
+          "routeStatus": {
+            "fallback": {
+              "uid": "04b22b60-d8af-4974-aa42-be32454fd3e6",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "redirectAction": "REDIRECT_PREFIX",
+          "redirectPosition": 2,
+          "earlierPredicates": [],
+          "target": "https://moved.example.test:8443",
+          "traffic": [
+            {
+              "method": "POST",
+              "path": "/app/item?n=1",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=1",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=2",
+              "version": "one",
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=2",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=3",
+              "version": "one, other",
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=3",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=4",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=4",
+              "origin": false
+            },
+            {
+              "method": "POST",
+              "path": "/app/other?n=5",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/other?n=5",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/health",
+              "version": null,
+              "status": 200,
+              "location": null,
+              "origin": true
+            }
+          ]
+        }
+      },
+      "octavia": {
+        "revision": "31a05857f3b3a29fe43bbf77c2a1ca89c074912d",
+        "version": "19.0.1.dev91",
+        "sha256": "50a75d8f315691fc5e2ec9c99ebf369fc15f78d63a868ae207eae1e8b48c481a",
+        "filesVerified": 669
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "rawReceiptSHA256": "9241dafaa4c112815c90d1b23165f5b74ec9592494ea3562b89eb4e58c5ded7c"
+    },
+    "experimental": {
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "capabilities": [
+        "fixed_http_responses_v1",
+        "http_header_exact_v1",
+        "http_method_match_v1",
+        "http_request_redirect_v1"
+      ],
+      "haproxySHA256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+      "phases": {
+        "overlap": {
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "attachedRoutes": 2,
+          "routeStatus": {
+            "fallback": {
+              "uid": "01f875e4-d22e-4adc-8dde-8f7cdc56465c",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "specific": {
+              "uid": "1cb4eff0-821c-48dd-a2e6-d4c8c72934b7",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "redirectAction": "REDIRECT_REQUEST",
+          "redirectPosition": 4,
+          "earlierPredicates": [
+            "HTTP_HEADER_EXACT",
+            "HTTP_METHOD"
+          ],
+          "target": {
+            "scheme": "https",
+            "port": 8443,
+            "hostname": "moved.example.test"
+          },
+          "traffic": [
+            {
+              "method": "POST",
+              "path": "/app/item?n=1",
+              "version": null,
+              "status": 200,
+              "location": null,
+              "origin": true
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=2",
+              "version": "one",
+              "status": 200,
+              "location": null,
+              "origin": true
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=3",
+              "version": "one, other",
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=3",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=4",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=4",
+              "origin": false
+            },
+            {
+              "method": "POST",
+              "path": "/app/other?n=5",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/other?n=5",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/health",
+              "version": null,
+              "status": 200,
+              "location": null,
+              "origin": true
+            }
+          ]
+        },
+        "higherPriorityRemoved": {
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "attachedRoutes": 1,
+          "routeStatus": {
+            "fallback": {
+              "uid": "01f875e4-d22e-4adc-8dde-8f7cdc56465c",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "redirectAction": "REDIRECT_PREFIX",
+          "redirectPosition": 2,
+          "earlierPredicates": [],
+          "target": "https://moved.example.test:8443",
+          "traffic": [
+            {
+              "method": "POST",
+              "path": "/app/item?n=1",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=1",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=2",
+              "version": "one",
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=2",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=3",
+              "version": "one, other",
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=3",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/app/item?n=4",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/item?n=4",
+              "origin": false
+            },
+            {
+              "method": "POST",
+              "path": "/app/other?n=5",
+              "version": null,
+              "status": 301,
+              "location": "https://moved.example.test:8443/app/other?n=5",
+              "origin": false
+            },
+            {
+              "method": "GET",
+              "path": "/health",
+              "version": null,
+              "status": 200,
+              "location": null,
+              "origin": true
+            }
+          ]
+        }
+      },
+      "octavia": {
+        "revision": "31a05857f3b3a29fe43bbf77c2a1ca89c074912d",
+        "version": "19.0.1.dev91",
+        "sha256": "50a75d8f315691fc5e2ec9c99ebf369fc15f78d63a868ae207eae1e8b48c481a",
+        "filesVerified": 669
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "rawReceiptSHA256": "eed3c86986ef1e2acfb54827c5f3d47cfe03ec826a58a2a8c14970988eda665e"
+    }
+  }
+}
