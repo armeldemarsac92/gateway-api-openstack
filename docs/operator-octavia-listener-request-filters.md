@@ -67,6 +67,8 @@ The HTTPRoute kept `Accepted=True`, `ResolvedRefs=True` and the controller’s `
 
 The qualification used disposable kind clusters, Octavia REST and native listener worker flows, Amphora rendering and live HAProxy. Cloud provisioning and Amphora agent transport were fixture stand-ins. The Standard control run used two ordinary HTTP listeners because the Standard Gateway CRD lacks the filters field. Qualification on a deployed Hibiscus region remains pending. [Traffic receipt](qualification/v1.7.0/provider/gateway-listener-filters-evidence/receipt.json)
 
+If an unrelated backend policy cannot read its ClusterTrustBundle, the controller independently rechecks a listener authorization denial. It closes the affected physical port before updating the denied hostname. Other hostnames on that port retain their configuration and can resume serving when the complete graph can be reconciled. During simultaneous HTTPS trust withdrawal, `Programmed=False/Pending` records that closure is still being confirmed and `ResolvedRefs=False` records the authorization denial. The graph, provider and status regression tests cover this combination.
+
 ## Withdraw the opt-in
 
 Remove traffic from protected HTTPRoutes or move authorization to another layer before removing their listener filters. With the provider capability still available, wait for the controller to reconcile and verify the listener and route statuses, the regional listener readback and the expected traffic. Remove the controller opt-in and retire the regional capability after the affected listener configuration has been reconciled.
