@@ -44,7 +44,7 @@ const (
 )
 
 var (
-	errXBackendCookieUnavailable = errors.New("Octavia provider does not advertise http_cookie_name_v1")
+	errXBackendCookieUnavailable = errors.New("regional Octavia provider does not advertise http_cookie_name_v1")
 	errXBackendCookieUnverified  = errors.New("waiting to verify Octavia XBackend session persistence")
 )
 
