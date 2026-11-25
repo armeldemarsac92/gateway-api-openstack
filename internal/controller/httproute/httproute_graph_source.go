@@ -151,6 +151,10 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteUsesXBackendClientTLS != nil && *request.HTTPRouteUsesXBackendClientTLS != backends.routeUsesXBackendClientTLS(route) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
+			if requested && request.HTTPRouteXBackendCookieRevision != nil &&
+				*request.HTTPRouteXBackendCookieRevision != xBackendCookieRevision(route, backends.input.XBackends) {
+				return graph.RouteInputs{}, errHTTPRouteChanged
+			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
 			ensures = append(ensures, snapshot)
 		}

@@ -74,6 +74,7 @@ type BackendGroup struct {
 
 	XBackendRoutedExternal bool
 	XBackendCookieName     string
+	XBackendCookiePath     *string
 	XBackendCookieDeadline *cloud.HTTPSessionCookieDeadline
 	XBackendTLSRequired    bool
 	XBackendTLS            *backendtls.Validation `json:"-"`

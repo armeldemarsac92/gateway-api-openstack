@@ -140,11 +140,12 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 			group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "XBackend session cookie needs an observed XBackend UID")
 			return group
 		}
+		group.XBackendCookiePath = xBackendCookiePath(*spec.SessionPersistence)
 		if timeout, _ := durationMilliseconds(spec.SessionPersistence.AbsoluteTimeout); timeout != nil {
 			group.XBackendCookieDeadline = &cloud.HTTPSessionCookieDeadline{
 				TimeoutMS: *timeout,
 				Scope:     fmt.Sprintf("%x", sha256.Sum256([]byte(backend.UID))),
-				Permanent: XBackendCookieRequirements(*spec.SessionPersistence) == cloud.HTTPSessionCookiePermanent,
+				Permanent: XBackendCookieRequirements(*spec.SessionPersistence)&cloud.HTTPSessionCookiePermanent != 0,
 			}
 		}
 	}
@@ -288,8 +289,8 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 	}
 	if cookie := persistence.Cookie; cookie != nil {
 		switch {
-		case ptr.Deref(cookie.Path, "/") != "/":
-			return backendDiagnostic(unsupported, "XBackend sessionPersistence requires cookie path /")
+		case cookie.Path != nil && !cloud.ValidHTTPSessionCookiePath(*cookie.Path):
+			return backendDiagnostic(unsupported, "XBackend sessionPersistence cookie path must be at most 1024 printable ASCII bytes without semicolons")
 		case cookie.Name != nil && !cloud.ValidHTTPSessionCookieName(string(*cookie.Name)):
 			return backendDiagnostic(unsupported, "XBackend sessionPersistence cookie name must be a safe Octavia token without a reserved cookie prefix")
 		}
@@ -308,13 +309,21 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 
 // XBackendCookieRequirements selects regional capabilities for a validated cookie configuration.
 func XBackendCookieRequirements(persistence gatewayv1.SessionPersistence) cloud.HTTPSessionCookieRequirements {
+	path := xBackendCookiePath(persistence)
 	if persistence.Cookie != nil && ptr.Deref(persistence.Cookie.LifetimeType, gatewayv1.SessionCookieLifetimeType) == gatewayv1.PermanentCookieLifetimeType {
-		return cloud.HTTPSessionCookiePermanent
+		return cloud.HTTPSessionCookiePermanent.WithPath(path)
 	}
 	if persistence.AbsoluteTimeout != nil {
-		return cloud.HTTPSessionCookieTimed
+		return cloud.HTTPSessionCookieTimed.WithPath(path)
 	}
-	return cloud.HTTPSessionCookieNamed
+	return cloud.HTTPSessionCookieNamed.WithPath(path)
+}
+
+func xBackendCookiePath(persistence gatewayv1.SessionPersistence) *string {
+	if cookie := persistence.Cookie; cookie != nil && cookie.Path != nil && *cookie.Path != "/" {
+		return cookie.Path
+	}
+	return nil
 }
 
 func xBackendSessionCookieName(persistence gatewayv1.SessionPersistence, uid types.UID) (string, bool) {

@@ -86,6 +86,7 @@ type observedRouteRule struct {
 
 type observedRouteGraph struct {
 	cookieDeadline         octavia.PoolCookieDeadline
+	cookiePath             octavia.PoolCookiePath
 	pool                   *pools.Pool
 	backendH2C             bool
 	backendTLS             octavia.PoolBackendTLS
@@ -403,6 +404,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		graph.backendH2C = poolInventory.BackendH2C[pool.ID]
 		graph.backendTLS = poolInventory.BackendTLS[pool.ID]
 		graph.cookieDeadline = poolInventory.CookieDeadline[pool.ID]
+		graph.cookiePath = poolInventory.CookiePath[pool.ID]
 		graph.backendRetryBudget = poolInventory.BackendRetryBudget[pool.ID]
 		graph.tcpRejection = poolInventory.TCPConnectionRejection[pool.ID]
 		graph.udpDrop = poolInventory.UDPPacketDrop[pool.ID]
@@ -919,6 +921,7 @@ type routeMutation struct {
 	clearPoolPersistence     bool
 	poolPersistence          *pools.SessionPersistence
 	poolCookieDeadline       *cloud.HTTPSessionCookieDeadline
+	poolCookiePath           *string
 	clearPoolCookiePermanent bool
 	xBackendCookieFallback   bool
 	xBackendCookieDrain      bool
@@ -1749,10 +1752,14 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Tags = append(opts.Tags, (*step.poolTags)...)
 		}
 		var cookieDeadline *cloud.HTTPSessionCookieDeadline
+		var cookiePath *string
 		if desired.sessionCookieName != "" && !step.xBackendCookieFallback {
 			opts.AdminStateUp = boolPointer(false)
 			opts.Persistence = &pools.SessionPersistence{Type: httpCookiePersistence, CookieName: desired.sessionCookieName}
 			opts.Tags = append(opts.Tags, xBackendCookieTag)
+			if cookiePath = desired.sessionCookiePath; cookiePath != nil {
+				opts.Tags = append(opts.Tags, xBackendCookiePathTag)
+			}
 			if cookieDeadline = desired.sessionCookieDeadline; cookieDeadline != nil {
 				opts.Tags = append(opts.Tags, xBackendCookieDeadlineTag)
 				if cookieDeadline.Permanent {
@@ -1784,6 +1791,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		}
 		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts,
 			CookieDeadline:     cookieDeadline,
+			CookiePath:         cookiePath,
 			BackendRetryBudget: budget,
 			BackendH2C:         desired.spec.BackendH2C && desired.backendTLS.allowsMembers(),
 			BackendTLSHostname: hostname, BackendTLSSubjectAltNames: subjectAltNames, BackendTLSRequireH2: requireH2})
@@ -1805,7 +1813,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationSetXBackendCookie:
 		opts := pools.UpdateOpts{Persistence: step.poolPersistence, Tags: step.poolTags, AdminStateUp: step.poolAdmin}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts,
-			CookieDeadline: step.poolCookieDeadline, ClearCookiePermanent: step.clearPoolCookiePermanent})
+			CookieDeadline: step.poolCookieDeadline, CookiePath: step.poolCookiePath, ClearCookiePermanent: step.clearPoolCookiePermanent})
 	case routeMutationPublishBackendCA:
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:

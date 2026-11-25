@@ -114,6 +114,8 @@ type desiredRoute struct {
 	xBackend                    bool
 	xBackendPlaintext           bool
 	sessionCookieName           string
+	sessionCookiePath           *string
+	cookiePathReadbackPending   bool
 	sessionCookieDeadline       *cloud.HTTPSessionCookieDeadline
 	cookieReadbackPending       bool
 	sessionCookieCapability     xBackendCookieCapability
@@ -429,6 +431,9 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
 			return invalid(errors.New("HTTP session persistence requires a valid cookie name and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
 		}
+		if path := backend.SessionCookiePath; path != nil && (backend.SessionCookieName == "" || !cloud.ValidHTTPSessionCookiePath(*path)) {
+			return invalid(errors.New("HTTP session persistence path requires a cookie name and a valid cookie path"))
+		}
 		if deadline := backend.SessionCookieDeadline; deadline != nil && (backend.SessionCookieName == "" || !deadline.Valid()) {
 			return invalid(errors.New("HTTP session persistence absolute timeout requires a cookie name, valid timeout and XBackend scope"))
 		}
@@ -451,6 +456,9 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
 		part.sessionCookieName = backend.SessionCookieName
+		if path := backend.SessionCookiePath; path != nil && *path != "/" {
+			part.sessionCookiePath = path
+		}
 		part.sessionCookieDeadline = backend.SessionCookieDeadline
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {

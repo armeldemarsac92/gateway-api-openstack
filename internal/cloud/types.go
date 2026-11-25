@@ -310,7 +310,9 @@ type HTTPBackend struct {
 	// XBackendClientCertificateReference is an authorized Barbican identity for this XBackend alone.
 	XBackendClientCertificateReference string `json:"-"`
 	// SessionCookieName enables an HTTP session cookie on an XBackend's pool.
-	SessionCookieName     string                     `json:",omitempty"`
+	SessionCookieName string `json:",omitempty"`
+	// SessionCookiePath holds a custom Path value, including an explicitly empty path.
+	SessionCookiePath     *string                    `json:",omitempty"`
 	SessionCookieDeadline *HTTPSessionCookieDeadline `json:",omitempty"`
 	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.
 	InvalidReference bool                  `json:",omitempty"`
