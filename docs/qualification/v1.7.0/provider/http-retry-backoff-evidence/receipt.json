@@ -1,0 +1,820 @@
+{
+  "gatewayAPI": {
+    "version": "v1.7.0",
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152"
+  },
+  "controller": "8cd580f6914d5919544c6c3a7c6b1233cf46061c",
+  "image": "sha256:62d89ff078df0948b50c8755f9749d23a674855037e988611a5dd6f1e11ed118",
+  "octavia": "bf5ab480c018045ac226954724b59260eac694ca",
+  "octaviaWheelSHA256": "01f704984d011a86de84a6b22f6d731b452a0ec6896146af92c488e07a32265c",
+  "octaviaLib": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+  "haproxySHA256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+  "capability": "http_retry_backoff_v1",
+  "previous": {
+    "controller": "d435da52da94ef7d55f2750567b4c83aa7dfe91b",
+    "channel": "standard",
+    "conditions": [
+      {
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "retry-gateway"
+        },
+        "conditions": [
+          {
+            "type": "Accepted",
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "observedGeneration": 1,
+            "lastTransitionTime": "2026-11-25T11:10:48Z"
+          },
+          {
+            "type": "ResolvedRefs",
+            "status": "Unknown",
+            "reason": "Pending",
+            "observedGeneration": 1,
+            "lastTransitionTime": "2026-11-25T11:10:48Z"
+          },
+          {
+            "type": "gateway-api-openstack.github.io/Programmed",
+            "status": "False",
+            "reason": "Invalid",
+            "observedGeneration": 1,
+            "lastTransitionTime": "2026-11-25T11:10:48Z"
+          }
+        ]
+      }
+    ],
+    "vipStatus": 503,
+    "podAttempts": 0
+  },
+  "environment": "Local Kubernetes with the channel RBAC, the OCI manager, installed Octavia API and L7 worker, Amphora renderer, HAProxy and one HTTP server in a Pod. The fixture supplied identity, network inventory, provisioning, RPC and Amphora transport.",
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "managerServiceAccount": "system:serviceaccount:openstack-gateway-system:openstack-gateway-controller",
+      "fixtureSHA256": {
+        "scenario.py": "8b9b3307d656f4add7c140a9de5a2a66111334ac54506c62c55e914a0dcc5aea",
+        "gateway_fixture.py": "f0f13901abbb52628cda90429ca2da829f1dbdbe9e6775346afcc33f7cf84f7c",
+        "template/native_cloud.py": "a752e4dd4d8d2ead134d3df873597a5bfbc9cbbf4df85b13176e040a9e04ba9c"
+      },
+      "phases": [
+        {
+          "phase": "backoff",
+          "route": {
+            "generation": 1,
+            "object": "4b79960dfd466a9525afe2fc2cb12488b8974bec1a508821c0768dfa541cedaa",
+            "specSHA256": "0e7e02705eeca3fe4cdfd0070bda219440aa8df467fd7be2fbe3c6d70758e306"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:43:38Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:43:35Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:43:38Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1800,
+            "backend_request_timeout_ms": 450,
+            "retry": {
+              "attempts": 2,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 220
+            }
+          },
+          "haproxyArguments": [
+            "1800",
+            "450",
+            "2",
+            "503",
+            "220"
+          ],
+          "renderSHA256": "422ca98b8e9a4422cdae6d696def910ceb28d19dad0f28aaa6f123a2790d1ca4",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 452.612,
+            "podAttempts": 3,
+            "podIntervalsMs": [
+              223.671,
+              223.361
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.585,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "total-deadline",
+          "route": {
+            "generation": 2,
+            "object": "4b79960dfd466a9525afe2fc2cb12488b8974bec1a508821c0768dfa541cedaa",
+            "specSHA256": "72199c919a1b177d3d006a58cfd1ba1f570ee52ae9eb4c219828d3a58f27ee85"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:43:38Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:43:35Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:43:38Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 180,
+            "backend_request_timeout_ms": 100,
+            "retry": {
+              "attempts": 2,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 650
+            }
+          },
+          "haproxyArguments": [
+            "180",
+            "100",
+            "2",
+            "503",
+            "650"
+          ],
+          "renderSHA256": "a9712099c95f806e3851acd1bdf24ee5da8c4a7169edb6b13f4deb53ed9459ca",
+          "traffic": {
+            "status": 504,
+            "echo": false,
+            "clientMs": 186.271,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.24,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "attempt-deadline",
+          "route": {
+            "generation": 3,
+            "object": "4b79960dfd466a9525afe2fc2cb12488b8974bec1a508821c0768dfa541cedaa",
+            "specSHA256": "84bc247b3c167d4de374f26705f193bb0b3bd6618dc553d6b7905cc2cb7b0340"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:43:44Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:43:35Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:43:44Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1800,
+            "backend_request_timeout_ms": 125,
+            "retry": {
+              "attempts": 1,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 220
+            }
+          },
+          "haproxyArguments": [
+            "1800",
+            "125",
+            "1",
+            "503",
+            "220"
+          ],
+          "renderSHA256": "f8f8239a8db4aeccc0b077030aaf6b8df846b953c394f37db95971ee403d54f5",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 351.521,
+            "podAttempts": 2,
+            "podIntervalsMs": [
+              348.958
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.073,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "explicit-zero",
+          "route": {
+            "generation": 4,
+            "object": "4b79960dfd466a9525afe2fc2cb12488b8974bec1a508821c0768dfa541cedaa",
+            "specSHA256": "81de3fe83c4b6c49f276bff27cc1aaa57627f3c8c7a08098bae7744ac9540aca"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:43:48Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:43:35Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:43:48Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1500,
+            "backend_request_timeout_ms": 450,
+            "retry": {
+              "attempts": 1,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 0
+            }
+          },
+          "haproxyArguments": [
+            "1500",
+            "450",
+            "1",
+            "503",
+            "0"
+          ],
+          "renderSHA256": "d012afddfd377ac4c3de8364d0bd46f731efce49698c5ed83a64cb8fc6e09bb3",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 2.484,
+            "podAttempts": 2,
+            "podIntervalsMs": [
+              0.775
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.269,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "removed",
+          "route": {
+            "generation": 5,
+            "object": "4b79960dfd466a9525afe2fc2cb12488b8974bec1a508821c0768dfa541cedaa",
+            "specSHA256": "b00bced39a28ff529f9dff9a437e9934b50d29bc9ddca2488cf87ad7b03dfd13"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:43:48Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:43:35Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:43:48Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1500,
+            "backend_request_timeout_ms": 450,
+            "retry": {
+              "attempts": 1,
+              "codes": [
+                503
+              ]
+            }
+          },
+          "haproxyArguments": [
+            "1500",
+            "450",
+            "1",
+            "503"
+          ],
+          "renderSHA256": "de97327c27643cfbc6d43363dbf38989b4e27728191a6bc008a70975c8ef6fe9",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 3.011,
+            "podAttempts": 2,
+            "podIntervalsMs": [
+              0.931
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.104,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        }
+      ]
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "managerServiceAccount": "system:serviceaccount:openstack-gateway-system:openstack-gateway-controller",
+      "fixtureSHA256": {
+        "scenario.py": "8b9b3307d656f4add7c140a9de5a2a66111334ac54506c62c55e914a0dcc5aea",
+        "gateway_fixture.py": "f0f13901abbb52628cda90429ca2da829f1dbdbe9e6775346afcc33f7cf84f7c",
+        "template/native_cloud.py": "a752e4dd4d8d2ead134d3df873597a5bfbc9cbbf4df85b13176e040a9e04ba9c"
+      },
+      "phases": [
+        {
+          "phase": "backoff",
+          "route": {
+            "generation": 1,
+            "object": "ae5de7dfecc8fd9b5e2ae28a09b18b3a8ec373202738cd2877aab7a27ca5f158",
+            "specSHA256": "0e7e02705eeca3fe4cdfd0070bda219440aa8df467fd7be2fbe3c6d70758e306"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:45:01Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:45:00Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:45:01Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1800,
+            "backend_request_timeout_ms": 450,
+            "retry": {
+              "attempts": 2,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 220
+            }
+          },
+          "haproxyArguments": [
+            "1800",
+            "450",
+            "2",
+            "503",
+            "220"
+          ],
+          "renderSHA256": "330f3baacbffaf69607569ff8658964da04ad5df1d1da21e7fe9cfc69a7e0f91",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 448.967,
+            "podAttempts": 3,
+            "podIntervalsMs": [
+              223.27,
+              223.196
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.195,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "total-deadline",
+          "route": {
+            "generation": 2,
+            "object": "ae5de7dfecc8fd9b5e2ae28a09b18b3a8ec373202738cd2877aab7a27ca5f158",
+            "specSHA256": "72199c919a1b177d3d006a58cfd1ba1f570ee52ae9eb4c219828d3a58f27ee85"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:45:05Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:45:00Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:45:05Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 180,
+            "backend_request_timeout_ms": 100,
+            "retry": {
+              "attempts": 2,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 650
+            }
+          },
+          "haproxyArguments": [
+            "180",
+            "100",
+            "2",
+            "503",
+            "650"
+          ],
+          "renderSHA256": "7e5be5e551c922ed894f6f61990eb03557cbedb0e15f4ad5e962305eb1412c57",
+          "traffic": {
+            "status": 504,
+            "echo": false,
+            "clientMs": 181.509,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.185,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "attempt-deadline",
+          "route": {
+            "generation": 3,
+            "object": "ae5de7dfecc8fd9b5e2ae28a09b18b3a8ec373202738cd2877aab7a27ca5f158",
+            "specSHA256": "84bc247b3c167d4de374f26705f193bb0b3bd6618dc553d6b7905cc2cb7b0340"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:45:09Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:45:00Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:45:09Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1800,
+            "backend_request_timeout_ms": 125,
+            "retry": {
+              "attempts": 1,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 220
+            }
+          },
+          "haproxyArguments": [
+            "1800",
+            "125",
+            "1",
+            "503",
+            "220"
+          ],
+          "renderSHA256": "7a8718807552ae6407748eaa9bd34a515fbb3f8375f09c45bae1036203c5d2f7",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 351.184,
+            "podAttempts": 2,
+            "podIntervalsMs": [
+              348.724
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.411,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "explicit-zero",
+          "route": {
+            "generation": 4,
+            "object": "ae5de7dfecc8fd9b5e2ae28a09b18b3a8ec373202738cd2877aab7a27ca5f158",
+            "specSHA256": "81de3fe83c4b6c49f276bff27cc1aaa57627f3c8c7a08098bae7744ac9540aca"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:45:13Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:45:00Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:45:13Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1500,
+            "backend_request_timeout_ms": 450,
+            "retry": {
+              "attempts": 1,
+              "codes": [
+                503
+              ],
+              "backoff_ms": 0
+            }
+          },
+          "haproxyArguments": [
+            "1500",
+            "450",
+            "1",
+            "503",
+            "0"
+          ],
+          "renderSHA256": "88843bf2de77428ec5aae9d23a9f32bec0fa719b30f41de4441c56c06259f2c2",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 3.145,
+            "podAttempts": 2,
+            "podIntervalsMs": [
+              0.974
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.085,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        },
+        {
+          "phase": "removed",
+          "route": {
+            "generation": 5,
+            "object": "ae5de7dfecc8fd9b5e2ae28a09b18b3a8ec373202738cd2877aab7a27ca5f158",
+            "specSHA256": "b00bced39a28ff529f9dff9a437e9934b50d29bc9ddca2488cf87ad7b03dfd13"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "retry-gateway"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:45:13Z"
+                },
+                {
+                  "type": "ResolvedRefs",
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:45:00Z"
+                },
+                {
+                  "type": "gateway-api-openstack.github.io/Programmed",
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:45:13Z"
+                }
+              ]
+            }
+          ],
+          "policy": {
+            "request_timeout_ms": 1500,
+            "backend_request_timeout_ms": 450,
+            "retry": {
+              "attempts": 1,
+              "codes": [
+                503
+              ]
+            }
+          },
+          "haproxyArguments": [
+            "1500",
+            "450",
+            "1",
+            "503"
+          ],
+          "renderSHA256": "53a9087b6a4a29d6dda2794f0918b62d03c148f90d9b87160272cbc6469b6e61",
+          "traffic": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 2.791,
+            "podAttempts": 2,
+            "podIntervalsMs": [
+              0.831
+            ]
+          },
+          "ordinaryService": {
+            "status": 200,
+            "echo": true,
+            "clientMs": 1.046,
+            "podAttempts": 1,
+            "podIntervalsMs": []
+          }
+        }
+      ]
+    }
+  }
+}
