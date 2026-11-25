@@ -17,24 +17,320 @@ limitations under the License.
 package httproute
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"reflect"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
+	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func newExternalHostnameFixture(t *testing.T) *routeModelInputFixture {
+	t.Helper()
+	f := newRouteModelInputFixture(t)
+	cfg := &f.reconciler.Config
+	cfg.GatewayAPIChannel = "experimental"
+	cfg.XBackendExternalHostnameClasses = []string{string(f.gateway.Spec.GatewayClassName)}
+	cfg.XBackendExternalHostnameCIDRs = []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
+	for _, name := range cfg.GatewayAPICRDNames() {
+		var definition apiextensionsv1.CustomResourceDefinition
+		if err := f.client.Get(t.Context(), types.NamespacedName{Name: name}, &definition); err != nil {
+			definition = *gatewayAPICRD(name, gatewayconsts.BundleVersion)
+			definition.Annotations[gatewayconsts.ChannelAnnotation] = cfg.GatewayAPIChannel
+			f.create(t, &definition)
+		} else {
+			definition.Annotations[gatewayconsts.ChannelAnnotation] = cfg.GatewayAPIChannel
+			if err := f.client.Update(t.Context(), &definition); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := gatewayx.Install(f.client.Scheme()); err != nil {
+		t.Fatal(err)
+	}
+	f.reconciler.ExternalHostnames = &ExternalHostnameCache{}
+	return f
+}
+
+func addExternalHostnameRule(t *testing.T, f *routeModelInputFixture, route *gatewayv1.HTTPRoute, name string) *gatewayx.XBackend {
+	t.Helper()
+	backend := &gatewayx.XBackend{
+		ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: name, UID: types.UID("routed-" + name), Generation: 1},
+		Spec: gatewayx.BackendSpec{
+			Type:             gatewayx.BackendTypeExternalHostname,
+			Port:             gatewayx.BackendPort{Number: 8089},
+			ExternalHostname: &gatewayx.ExternalHostnameBackend{Hostname: gatewayv1.PreciseHostname(name + ".example.test")},
+		},
+	}
+	f.create(t, backend)
+	external := pathBackendRule("/external-"+name, gatewayv1.PathMatchExact, gatewayv1.ObjectName(backend.Name))
+	ref := &external.BackendRefs[0]
+	ref.Group, ref.Kind, ref.Port = ptr.To(gatewayv1.Group(gatewayx.GroupName)), ptr.To(gatewayv1.Kind(model.XBackendKind)), nil
+	route.Spec.Rules = append(route.Spec.Rules, external)
+	return backend
+}
+
+func TestXBackendExternalHostnameRefreshKeepsServiceAndRouteStatus(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	cfg := &f.reconciler.Config
+	cache := f.reconciler.ExternalHostnames
+	now := time.Now()
+	cache.now = func() time.Time { return now }
+	backend := addExternalHostnameRule(t, f, f.route, f.service.Name)
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &recordingProvider{}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	var serviceBefore cloud.HTTPBackend
+	for _, phase := range []struct {
+		name      string
+		addresses []string
+		dnsErr    error
+		want      []cloud.Member
+	}{
+		{name: "multi-A", addresses: []string{"198.51.100.20", "::ffff:198.51.100.9", "198.51.100.9", "2001:db8::1", "192.0.2.20"},
+			want: []cloud.Member{{Address: "198.51.100.9", Port: 8089}, {Address: "198.51.100.20", Port: 8089}}},
+		{name: "rotation", addresses: []string{"198.51.100.21"}, want: []cloud.Member{{Address: "198.51.100.21", Port: 8089}}},
+		{name: "NXDOMAIN", dnsErr: &net.DNSError{IsNotFound: true}},
+		{name: "timeout", dnsErr: &net.DNSError{IsTimeout: true}},
+		{name: "restoration", addresses: []string{"198.51.100.9"}, want: []cloud.Member{{Address: "198.51.100.9", Port: 8089}}},
+	} {
+		t.Run(phase.name, func(t *testing.T) {
+			now = now.Add(time.Minute)
+			lookups := 0
+			cache.lookup = func(ctx context.Context, family, hostname string) ([]netip.Addr, error) {
+				lookups++
+				if family != "ip4" || hostname != f.service.Name+".example.test." {
+					t.Errorf("unexpected resolver arguments %q %q", family, hostname)
+				}
+				if _, ok := ctx.Deadline(); !ok {
+					t.Error("DNS lookup has no deadline")
+				}
+				addresses := make([]netip.Addr, 0, len(phase.addresses))
+				for _, address := range phase.addresses {
+					addresses = append(addresses, netip.MustParseAddr(address))
+				}
+				return addresses, phase.dnsErr
+			}
+			r := newTestReconciler(*f.reconciler, provider)
+			before := len(provider.routeSpecs)
+			result, err := r.Reconcile(t.Context(), request)
+			wantDelay := controller.OpenStackResyncAfter(cfg.OpenStackResyncInterval, f.route.UID)
+			if err != nil || result.RequeueAfter != wantDelay || len(provider.routeSpecs) != before+1 || lookups != 1 {
+				var current gatewayv1.HTTPRoute
+				_ = f.client.Get(t.Context(), request.NamespacedName, &current)
+				t.Fatalf("reconcile = %+v, %v, %d writes, %d lookups, want normal route resync %s and one observation; parents %+v", result, err, len(provider.routeSpecs)-before, lookups, wantDelay, current.Status.Parents)
+			}
+			pools := provider.routeSpecs[before].HTTPBackends
+			if len(pools) != 2 || !pools[1].RoutedExternal || pools[1].InvalidReference || pools[1].Unavailable != (len(phase.want) == 0) ||
+				!slices.Equal(pools[1].Members, phase.want) {
+				t.Fatalf("external destination did not converge for %s: %+v", phase.name, pools)
+			}
+			if serviceBefore.Name == "" {
+				serviceBefore = pools[0]
+			}
+			if pools[0].RoutedExternal || !reflect.DeepEqual(pools[0], serviceBefore) ||
+				!slices.Equal(pools[0].Members, []cloud.Member{{Address: "192.0.2.20", Port: 8080}}) {
+				t.Fatalf("DNS refresh changed the sibling Service pool: %+v", pools[0])
+			}
+			var current gatewayv1.HTTPRoute
+			if err := f.client.Get(t.Context(), request.NamespacedName, &current); err != nil {
+				t.Fatal(err)
+			}
+			if len(current.Status.Parents) != 1 || !meta.IsStatusConditionTrue(current.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)) ||
+				!meta.IsStatusConditionTrue(current.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted)) {
+				t.Fatalf("DNS data changed a valid HTTPRoute reference: %+v", current.Status.Parents)
+			}
+		})
+	}
+
+	cache.lookup = func(context.Context, string, string) ([]netip.Addr, error) { return nil, nil }
+	before := f.observe(t)
+	backend.Spec.ExternalHostname.Hostname = "replacement.example.test"
+	backend.Generation++
+	if err := f.client.Update(t.Context(), backend); err != nil {
+		t.Fatal(err)
+	}
+	if err := before.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("a changed XBackend must invalidate the planned mutation, got %v", err)
+	}
+	cache.lookup = func(_ context.Context, _, hostname string) ([]netip.Addr, error) {
+		if hostname != "replacement.example.test." {
+			t.Errorf("renamed backend queried %q", hostname)
+		}
+		return []netip.Addr{netip.MustParseAddr("198.51.100.42")}, nil
+	}
+	changed := f.observe(t).Nodes[0].Spec.HTTPBackends[1]
+	if !slices.Equal(changed.Members, []cloud.Member{{Address: "198.51.100.42", Port: 8089}}) {
+		t.Fatalf("new hostname must replace the previous answer inside the window: %+v", changed)
+	}
+
+	cfg.XBackendExternalHostnameClasses = nil
+	cache.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		t.Error("a class without opt-in must never query DNS")
+		return nil, nil
+	}
+	after := f.observe(t)
+	pools := after.Nodes[0].Spec.HTTPBackends
+	if len(pools) != 2 || !pools[1].InvalidReference || pools[1].RoutedExternal || !reflect.DeepEqual(pools[0], serviceBefore) {
+		t.Fatalf("a class without opt-in must reject only the routed backend: %+v", pools)
+	}
+	profile, err := f.reconciler.xBackendProfile(f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if condition := xBackendAcceptedCondition(backend, profile); condition.Status != metav1.ConditionFalse {
+		t.Fatalf("XBackend status must reject the non-opted-in class: %+v", condition)
+	}
+}
+
+type gatewayRefreshRequests struct {
+	workqueue.TypedRateLimitingInterface[reconcile.Request]
+	pending map[reconcile.Request]time.Duration
+}
+
+func (q *gatewayRefreshRequests) AddAfter(request reconcile.Request, after time.Duration) {
+	q.pending[request] = after
+}
+
+func TestXBackendExternalHostnameSharesGatewayRefreshAcrossMutations(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	routes := []*gatewayv1.HTTPRoute{f.route}
+	for _, name := range []string{"inventory", "payments"} {
+		peer := f.candidate(name)
+		peer.Spec.Rules = nil
+		addExternalHostnameRule(t, f, peer, name)
+		if err := f.reconciler.applyRouteBinding(peer, f.gateway); err != nil {
+			t.Fatal(err)
+		}
+		f.create(t, peer)
+		routes = append(routes, peer)
+	}
+	addExternalHostnameRule(t, f, f.route, "accounts")
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	writer := r.Writer.(*graph.Writer)
+	writer.GatewayRefresh = &graph.GatewayRefreshQueue{}
+	queue := &gatewayRefreshRequests{pending: make(map[reconcile.Request]time.Duration)}
+	if err := writer.GatewayRefresh.Start(t.Context(), queue); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	r.ExternalHostnames.now = func() time.Time { return now }
+	var mu sync.Mutex
+	lookups := map[string]int{}
+	r.ExternalHostnames.lookup = func(_ context.Context, _, hostname string) ([]netip.Addr, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		lookups[hostname]++
+		// A resolver may alternate singleton answers rather than just shuffle them.
+		if lookups[hostname]%2 == 1 {
+			return []netip.Addr{netip.MustParseAddr("198.51.100.10")}, nil
+		}
+		return []netip.Addr{netip.MustParseAddr("198.51.100.20")}, nil
+	}
+	assertGraphs := func(address string) {
+		t.Helper()
+		if len(provider.routeSpecs) != len(routes) {
+			t.Fatalf("graph ensured %d routes, want %d", len(provider.routeSpecs), len(routes))
+		}
+		var count int
+		for _, spec := range provider.routeSpecs {
+			for _, backend := range spec.HTTPBackends {
+				if backend.RoutedExternal {
+					count++
+					if !slices.Equal(backend.Members, []cloud.Member{{Address: address, Port: 8089}}) {
+						t.Fatalf("route %s changed members mid-plan: %+v", spec.Identity.RouteName, backend.Members)
+					}
+				}
+			}
+		}
+		if count != len(routes) {
+			t.Fatalf("observed %d routed pools, want %d", count, len(routes))
+		}
+		provider.routeSpecs = nil
+	}
+	for i, route := range routes {
+		// The provider writer rebuilds the graph before each asynchronous mutation.
+		if i < 2 {
+			provider.routeResult = new(cloud.RouteResult{Outcome: cloud.ProgressingOutcome("Programming routed members", time.Second)})
+		} else {
+			provider.routeResult = nil
+		}
+		result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if provider.routeResult == nil && result.RequeueAfter != controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, route.UID) {
+			t.Fatalf("ready route must keep its ordinary resync, got %s", result.RequeueAfter)
+		}
+		assertGraphs("198.51.100.10")
+	}
+	wantDelay := controller.OpenStackResyncAfter(externalHostnameRefresh, f.gateway.UID)
+	gatewayRequest := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(f.gateway)}
+	if len(queue.pending) != 1 || queue.pending[gatewayRequest] <= 0 || queue.pending[gatewayRequest] > wantDelay ||
+		!reflect.DeepEqual(lookups, map[string]int{"accounts.example.test.": 1, "inventory.example.test.": 1, "payments.example.test.": 1}) {
+		t.Fatalf("three route passes must share a single Gateway refresh and one query per name, got %+v and %+v", queue.pending, lookups)
+	}
+	now = now.Add(wantDelay)
+	if _, err := writer.ReconcileGraph(t.Context(), graph.Request{
+		Identity: controller.GatewayIdentity(r.Config, f.gateway), Action: graph.Ensure, Gateway: f.gateway,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertGraphs("198.51.100.20")
+	if !reflect.DeepEqual(lookups, map[string]int{"accounts.example.test.": 2, "inventory.example.test.": 2, "payments.example.test.": 2}) {
+		t.Fatalf("Gateway expiry should refresh each name once, got %+v", lookups)
+	}
+}
+
+func TestXBackendExternalHostnameReferencesUseActualGatewayMode(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	addExternalHostnameRule(t, f, f.route, "origin")
+	gateway := f.gateway.DeepCopy()
+	controller.ClearGatewayTopology(f.reconciler.Config, gateway)
+	var status routeReconcileStatus
+	if err := f.reconciler.resolveRouteReferences(t.Context(), f.route, gateway, &status); err != nil || status.resolved != metav1.ConditionUnknown {
+		t.Fatalf("without a Gateway topology the reference should be pending, got %+v and %v", status, err)
+	}
+	if err := controller.BindGatewayTopology(f.reconciler.Config, gateway, testBoundTopology()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reconciler.resolveRouteReferences(t.Context(), f.route, gateway, &status); err != nil ||
+		status.resolved != metav1.ConditionFalse || status.resolvedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Fatalf("NodePort topology must reject the reference before its listener is ready, got %+v and %v", status, err)
+	}
+}
 
 func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	f := newRouteModelInputFixture(t)
@@ -178,7 +474,7 @@ func TestXBackendStatusDuringDeletion(t *testing.T) {
 				backend.Finalizers = []string{"example.net/cleanup"}
 				backend.Status.Ancestors = append(backend.Status.Ancestors, gatewayx.BackendAncestorStatus{
 					ControllerName: cfg.ControllerName, AncestorRef: gatewayAncestorRef(client.ObjectKeyFromObject(gateway)),
-					Conditions: []metav1.Condition{xBackendAcceptedCondition(backend, cloud.MemberModeEndpoint, false)},
+					Conditions: []metav1.Condition{xBackendAcceptedCondition(backend, model.XBackendProfile{MemberMode: cloud.MemberModeEndpoint})},
 				})
 			}
 			scheme := testScheme(t)

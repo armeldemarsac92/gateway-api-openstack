@@ -106,11 +106,11 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		if !attached {
 			continue
 		}
-		mode, err := r.routes.xBackendMemberMode(gateway)
+		profile, err := r.routes.xBackendProfile(gateway)
 		if err != nil {
 			return nil, err
 		}
-		ancestors[gatewayKey] = xBackendAcceptedCondition(backend, mode, r.routes.Config.BackendH2C)
+		ancestors[gatewayKey] = xBackendAcceptedCondition(backend, profile)
 	}
 	return ancestors, nil
 }
@@ -134,16 +134,16 @@ func (r *xBackendStatusReconciler) hasAttachedConsumer(ctx context.Context, gate
 	return false, nil
 }
 
-func xBackendAcceptedCondition(backend *gatewayx.XBackend, mode cloud.MemberMode, backendH2C bool) metav1.Condition {
+func xBackendAcceptedCondition(backend *gatewayx.XBackend, profile model.XBackendProfile) metav1.Condition {
 	condition := metav1.Condition{
 		Type: string(gatewayx.BackendConditionAccepted), Status: metav1.ConditionTrue, Reason: string(gatewayx.BackendReasonAccepted),
 		Message: "XBackend is accepted by the Gateway", ObservedGeneration: backend.Generation,
 	}
-	pending := mode == ""
+	pending := profile.MemberMode == ""
 	if pending {
-		mode = cloud.MemberModeEndpoint
+		profile.MemberMode = cloud.MemberModeEndpoint
 	}
-	if diagnostic := model.ValidateXBackend(backend.Spec, mode, backendH2C); diagnostic != nil {
+	if diagnostic := model.ValidateXBackend(backend.Spec, profile); diagnostic != nil {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
 	} else if pending {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"

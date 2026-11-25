@@ -318,6 +318,9 @@ type HTTPBackend struct {
 	Members          []Member
 	Unavailable      bool
 	Matches          []HTTPPathMatch
+	// RoutedExternal uses IPv4 destinations reached by Amphora's existing routes.
+	// Octavia receives these members without a Neutron subnet binding.
+	RoutedExternal bool `json:",omitempty"`
 }
 
 // HTTPRedirect groups the alternatives of one redirect rule.

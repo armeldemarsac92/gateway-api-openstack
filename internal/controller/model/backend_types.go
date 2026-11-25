@@ -72,6 +72,8 @@ type BackendGroup struct {
 	Diagnostic      *Diagnostic
 	BackendTLS      backendtls.Selection
 
+	XBackendRoutedExternal bool
+
 	FilterDiagnostic        *Diagnostic
 	RequestHeaderOperations []cloud.HTTPHeaderOperation
 	URLRewrite              *cloud.HTTPURLRewrite

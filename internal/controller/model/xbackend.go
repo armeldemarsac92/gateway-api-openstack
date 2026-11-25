@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
@@ -33,6 +35,14 @@ import (
 )
 
 const XBackendKind = "XBackend"
+
+// XBackendProfile describes the transport and topology permitted for this Gateway.
+type XBackendProfile struct {
+	MemberMode        cloud.MemberMode
+	H2C               bool
+	ExternalHostname  bool
+	ServiceDNSDomains []string
+}
 
 // XBackendObservation contains the backend configuration and eligible endpoints
 // used for cloud lowering. Status and unrelated Pod updates do not change it.
@@ -90,35 +100,32 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 	if backend != nil {
 		spec = &backend.Spec
 	}
-	if diagnostic := CheckXBackendTarget(key, spec, input.MemberMode, input.BackendH2C); diagnostic != nil {
+	if diagnostic := CheckXBackendTarget(key, spec, input.XBackendProfile); diagnostic != nil {
 		group.Diagnostic = diagnostic
 		return group
 	}
 	group.State = BackendResolved
 	group.XBackendPort = int(backend.Spec.Port.Number)
 	group.XBackendUsesH2C = ptr.Deref(backend.Spec.Protocol, "") == gatewayx.BackendProtocolH2C
+	group.XBackendRoutedExternal = backend.Spec.Type == gatewayx.BackendTypeExternalHostname
 	group.Endpoints = backend.Endpoints
 	return group
 }
 
 // CheckXBackendTarget resolves an already authorized XBackend object reference.
-func CheckXBackendTarget(key types.NamespacedName, spec *gatewayx.BackendSpec, mode cloud.MemberMode, backendH2C bool) *Diagnostic {
+func CheckXBackendTarget(key types.NamespacedName, spec *gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
 	if spec == nil {
 		return backendDiagnostic(gatewayv1.RouteReasonBackendNotFound, fmt.Sprintf("XBackend %s was not found", key))
 	}
-	return ValidateXBackend(*spec, mode, backendH2C)
+	return ValidateXBackend(*spec, profile)
 }
 
 // ValidateXBackend defines the XBackend configuration supported by the HTTPRoute profile.
-func ValidateXBackend(spec gatewayx.BackendSpec, mode cloud.MemberMode, backendH2C bool) *Diagnostic {
+func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
 	const unsupported = gatewayv1.RouteReasonUnsupportedValue
 	switch {
-	case mode != cloud.MemberModeEndpoint:
-		return backendDiagnostic(unsupported, "XBackend requires the Endpoint member mode")
-	case spec.Type != gatewayx.BackendTypeEndpointSelector || spec.ExternalHostname != nil:
-		return backendDiagnostic(unsupported, "only XBackend EndpointSelector is supported")
-	case spec.EndpointSelector == nil || len(spec.EndpointSelector.MatchLabels) == 0:
-		return backendDiagnostic(unsupported, "XBackend requires a nonempty endpointSelector.matchLabels")
+	case profile.MemberMode != cloud.MemberModeEndpoint:
+		return backendDiagnostic(unsupported, "XBackend requires Endpoint member mode with Unmanaged backend security")
 	case spec.Port.Number < 1 || spec.Port.Number > 65535:
 		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
 	case spec.SessionPersistence != nil:
@@ -126,21 +133,57 @@ func ValidateXBackend(spec gatewayx.BackendSpec, mode cloud.MemberMode, backendH
 	case spec.TLS != nil && (spec.TLS.Mode != gatewayx.BackendTLSModeNone || spec.TLS.ClientCertificateRef != nil || spec.TLS.Validation != nil):
 		return backendDiagnostic(unsupported, "XBackend TLS is supported only with mode None")
 	}
-	for key, value := range spec.EndpointSelector.MatchLabels {
-		if len(validation.IsQualifiedName(string(key))) != 0 || len(validation.IsValidLabelValue(string(value))) != 0 {
-			return backendDiagnostic(unsupported, "XBackend endpointSelector contains an invalid label")
+	switch spec.Type {
+	case gatewayx.BackendTypeEndpointSelector:
+		if spec.ExternalHostname != nil || spec.EndpointSelector == nil || len(spec.EndpointSelector.MatchLabels) == 0 {
+			return backendDiagnostic(unsupported, "XBackend EndpointSelector requires a nonempty endpointSelector.matchLabels")
 		}
+		for key, value := range spec.EndpointSelector.MatchLabels {
+			if len(validation.IsQualifiedName(string(key))) != 0 || len(validation.IsValidLabelValue(string(value))) != 0 {
+				return backendDiagnostic(unsupported, "XBackend endpointSelector contains an invalid label")
+			}
+		}
+	case gatewayx.BackendTypeExternalHostname:
+		if !profile.ExternalHostname {
+			return backendDiagnostic(unsupported, "XBackend ExternalHostname requires operator opt-in for this GatewayClass")
+		}
+		if spec.EndpointSelector != nil || spec.ExternalHostname == nil {
+			return backendDiagnostic(unsupported, "XBackend ExternalHostname requires externalHostname")
+		}
+		if !validExternalHostname(string(spec.ExternalHostname.Hostname), profile.ServiceDNSDomains) {
+			return backendDiagnostic(unsupported, "XBackend ExternalHostname must be a DNS hostname outside the Kubernetes Service domains")
+		}
+	default:
+		return backendDiagnostic(unsupported, "XBackend type is unsupported")
 	}
 	protocol := ptr.Deref(spec.Protocol, "")
 	switch protocol {
 	case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11:
 		return nil
 	case gatewayx.BackendProtocolH2C:
-		if backendH2C {
+		if spec.Type == gatewayx.BackendTypeEndpointSelector && profile.H2C {
 			return nil
 		}
 	}
 	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported by the configured HTTP backend profile", protocol))
+}
+
+func validExternalHostname(hostname string, serviceDomains []string) bool {
+	if strings.HasSuffix(hostname, ".") ||
+		len(validation.IsFullyQualifiedDomainName(field.NewPath("hostname"), hostname)) != 0 {
+		return false
+	}
+	// Reject numeric address forms, including abbreviated or zero-padded IPv4.
+	if lastLabel := hostname[strings.LastIndexByte(hostname, '.')+1:]; strings.Trim(lastLabel, "0123456789") == "" {
+		return false
+	}
+	return !slices.ContainsFunc(serviceDomains, func(domain string) bool {
+		return hostnameInDNSDomain(hostname, domain)
+	}) && !hostnameInDNSDomain(hostname, "cluster.local")
+}
+
+func hostnameInDNSDomain(hostname, domain string) bool {
+	return hostname == domain || strings.HasSuffix(hostname, "."+domain)
 }
 
 // XBackendSelectsLabels applies the nonempty AND of matchLabels.

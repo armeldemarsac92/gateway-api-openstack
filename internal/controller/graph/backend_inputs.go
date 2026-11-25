@@ -148,7 +148,7 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 			continue
 		}
 		observation := model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
-		if model.ValidateXBackend(backend.Spec, input.MemberMode, input.BackendH2C) == nil {
+		if backend.Spec.Type == gatewayx.BackendTypeEndpointSelector && model.ValidateXBackend(backend.Spec, input.XBackendProfile) == nil {
 			selector := make(client.MatchingLabels, len(backend.Spec.EndpointSelector.MatchLabels))
 			for label, value := range backend.Spec.EndpointSelector.MatchLabels {
 				selector[string(label)] = string(value)

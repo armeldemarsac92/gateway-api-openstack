@@ -75,7 +75,9 @@ type Reconciler struct {
 	// APIReader performs safety-sensitive live reads.
 	APIReader client.Reader
 	// ListenerSetObserver reads live delegated attachment and certificate decisions.
-	ListenerSetObserver     func(context.Context, client.Reader, *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error)
+	ListenerSetObserver func(context.Context, client.Reader, *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error)
+	// ExternalHostnames shares DNS observations across this Gateway's reconciles.
+	ExternalHostnames       *ExternalHostnameCache
 	retryBudgetPolicyServed bool
 	// BackendRetryBudgetAvailable checks regional Amphora support for Service budgets.
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
@@ -242,7 +244,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 				status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners)
 			// An established route must detach even if a backend read fails.
 			if !decision.bindingPresent && resolveBackend {
-				if err := r.resolveRouteReferences(ctx, route, &status); err != nil {
+				if err := r.resolveRouteReferences(ctx, route, attachment.parent.gateway, &status); err != nil {
 					return cachedRouteDecision{}, err
 				}
 			}
@@ -385,7 +387,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	case routeBindingGatewayPending:
 		status := pendingRouteStatus("Controller-owned Octavia load balancer or listener is not ready").withBackendDiagnostic(graphResult.backendDiagnostic)
 		if r.usesHTTPBackendGroups(httpRoute) && !graphResult.backendObserved {
-			if err := r.resolveRouteReferences(ctx, httpRoute, &status); err != nil {
+			if err := r.resolveRouteReferences(ctx, httpRoute, parent.gateway, &status); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -396,6 +398,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	default:
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
+	resyncAfter := controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)
 	if graphResult.UnsupportedMatch != "" {
 		status := programmedRouteStatus()
 		status.accepted, status.acceptedReason, status.acceptedMessage = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), graphResult.UnsupportedMatch
@@ -404,7 +407,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		if graphResult.Outcome.State == cloud.OutcomeProgressing {
 			return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 		}
-		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil
+		return ctrl.Result{RequeueAfter: resyncAfter}, nil
 	}
 	if graphResult.Outcome.State == cloud.OutcomeProgressing {
 		if graphResult.backendDiagnostic.Reason == "" && graphResult.UnsupportedBackendProtocol != "" {
@@ -433,5 +436,5 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
-	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil
+	return ctrl.Result{RequeueAfter: resyncAfter}, nil
 }

@@ -22,10 +22,13 @@ package controller
 import (
 	"crypto/sha256"
 	"fmt"
+	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/validation"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/pkg/features"
 
@@ -101,6 +104,12 @@ type Config struct {
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
 	GatewayAPIChannel string
+	// XBackendExternalHostnameClasses opt in to routed ExternalHostname HTTP backends.
+	XBackendExternalHostnameClasses []string
+	// XBackendExternalHostnameCIDRs bounds the destinations that Amphora may use.
+	XBackendExternalHostnameCIDRs []netip.Prefix
+	// XBackendServiceDNSDomains names additional Kubernetes Service DNS suffixes.
+	XBackendServiceDNSDomains []string
 	// ControllerVersion is recorded as trace metadata on cloud resources.
 	ControllerVersion string
 	// OpenStackProjectID is the authenticated project used in ownership checks.
@@ -128,6 +137,39 @@ func (c Config) GatewayListenerFiltersEnabled() bool {
 // XBackendEnabled reports whether this installation uses the Experimental bundle.
 func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
+}
+
+func (c Config) RoutedXBackendEnabled(class gatewayv1.ObjectName) bool {
+	return c.XBackendEnabled() && len(c.XBackendExternalHostnameCIDRs) != 0 &&
+		slices.Contains(c.XBackendExternalHostnameClasses, string(class))
+}
+
+func (c Config) validateXBackendExternalHostname() error {
+	classes, cidrs := c.XBackendExternalHostnameClasses, c.XBackendExternalHostnameCIDRs
+	if len(classes) == 0 && len(cidrs) == 0 && len(c.XBackendServiceDNSDomains) == 0 {
+		return nil
+	}
+	if !c.XBackendEnabled() || len(classes) != 0 && len(cidrs) == 0 {
+		return fmt.Errorf("routed XBackend ExternalHostname requires the Experimental channel, GatewayClasses and allowed IPv4 CIDRs")
+	}
+	for _, class := range classes {
+		if len(validation.IsDNS1123Subdomain(class)) != 0 {
+			return fmt.Errorf("invalid XBackend ExternalHostname GatewayClass %q", class)
+		}
+	}
+	for _, prefix := range cidrs {
+		if !prefix.Addr().Is4() || prefix != prefix.Masked() {
+			return fmt.Errorf("XBackend ExternalHostname CIDR %s must be a canonical IPv4 prefix", prefix)
+		}
+	}
+	for _, domain := range c.XBackendServiceDNSDomains {
+		if len(validation.IsDNS1123Subdomain(domain)) != 0 || slices.ContainsFunc(strings.Split(domain, "."), func(label string) bool {
+			return len(validation.IsDNS1123Label(label)) != 0
+		}) {
+			return fmt.Errorf("invalid XBackend Service DNS domain %q", domain)
+		}
+	}
+	return nil
 }
 
 // BackendRetryBudgetEnabled reports whether Service retry policies can be applied.
@@ -187,7 +229,7 @@ func (c Config) Validate() error {
 	if c.OpenStackResyncInterval <= 0 {
 		return fmt.Errorf("OpenStack resync interval must be greater than zero")
 	}
-	return nil
+	return c.validateXBackendExternalHostname()
 }
 
 // IsValidControllerName reports whether a Gateway controller name can be used
