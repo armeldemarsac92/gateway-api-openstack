@@ -255,6 +255,41 @@ spec:
 
 The backend supplies the port, so omit `backendRefs[].port`. The controller selects ready, nonterminating Pods with routable IPv4 addresses. Pods using the host network are ineligible for this endpoint profile. Changes to the selector, Pod labels, readiness and Pod addresses update pool membership. The Route and XBackend must share a namespace. Use the HTTPRoute parent conditions and the XBackend's `status.ancestors` to check the current generation for your Gateway. [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go) · [Namespace contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-4894/index.md#route-attachment-and-consumer-overrides)
 
+### Route HTTP to an Experimental XBackend hostname
+
+Install the v1.7.0 Experimental bundle and controller overlay. Select an Amphora GatewayClass with `memberMode: Endpoint` and `backendSecurity.mode: Unmanaged`. Add these manager arguments for each permitted GatewayClass and destination prefix. The example uses a documentation-only IPv4 range.
+
+```text
+--gateway-api-channel=experimental
+--xbackend-external-hostname-class=edge
+--xbackend-external-hostname-cidr=198.51.100.0/24
+--xbackend-service-dns-domain=cluster.example
+```
+
+The CIDR allow-list applies to all enabled classes in the manager. To turn off routed hostnames, remove the `--xbackend-external-hostname-class` arguments and restart the manager. The manager can keep the IPv4 and Service DNS options while the feature is off. List every additional Service DNS suffix with `--xbackend-service-dns-domain`, which is repeatable. The controller already rejects `cluster.local`. Use lowercase DNS labels in a fully qualified name without a trailing dot, and omit the HTTPRoute's `backendRefs[].port`. Put the port on the same-namespace XBackend.
+
+```yaml
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XBackend
+metadata:
+  name: origin
+  namespace: apps
+spec:
+  type: ExternalHostname
+  port:
+    number: 8080
+  externalHostname:
+    hostname: origin.example.test
+```
+
+Use the same `group`, `kind` and `name` fields as for an EndpointSelector reference. IP literals and names equal to or below a configured Service DNS suffix are rejected. The controller queries its system resolver using an absolute name and takes the distinct, sorted IPv4 unicast results within the allowed CIDRs. AAAA answers, loopback and link-local destinations are ineligible. Each eligible address receives an ordinary pool member and an equal initial weight. Health checks use the class's HTTP monitor settings.
+
+The manager's resolver view must return addresses reachable from the Amphora network, including where split DNS is in use. Verify the routes, egress and origin ingress for that path. Octavia receives the IP and port with `subnet_id` omitted. The operator supplies routing and security before enabling a class. This mode cannot satisfy the `Referenced` contract for exact Neutron compute ports and security groups. Reserve the CIDRs for the intended destinations and exclude internal ranges that Amphora should never reach, including addresses a DNS alias could return. Plain HTTP sends traffic in cleartext. Restrict XBackend creation to the namespaces and principals allowed to use this egress path. [Gateway API DNS trust model](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-4894/index.md#dns-trust-model-decision)
+
+The controller shares one DNS observation across the mutations of a Gateway graph for a 24–36 second refresh window. At expiry it queues the Gateway once, using the ordinary HTTPRoute resync interval for individual routes. This also works when there is no Kubernetes event. A change to the backend or loss of attachment invalidates the affected observation. A change to the Gateway's class or topology invalidates the Gateway's observations. A manager restart starts with an empty cache. Each DNS lookup has a two-second timeout. The resolver's cache and Octavia provisioning affect when a new answer reaches traffic. With NXDOMAIN, no permitted IPv4 answer, or a transient resolver failure, the controller withdraws the members from the same pool. A pool without members returns HTTP 503. DNS recovery repopulates it. DNS data changes leave the XBackend ancestor `Accepted` and HTTPRoute parent `ResolvedRefs` conditions based on the configured reference. An unsupported spec or class sets `Accepted=False` on the XBackend ancestor and `ResolvedRefs=False` on the HTTPRoute parent. The controller reports `ResolvedRefs=Unknown` for an otherwise valid external reference while the Gateway member mode is pending. Namespace and missing-backend errors use their usual reference reasons.
+
+The ExternalHostname profile supports ordinary HTTP or explicit HTTP/1.1 with TLS mode `None`. In a local kind trial, an unchanged HTTPRoute followed A to B, returned HTTP 503 when DNS returned NXDOMAIN, and served A again after recovery. The sibling Service continued to return HTTP 200. [Observed traffic and member changes](../qualification/v1.7.0/provider/xbackend-external-hostname-evidence/receipt.json) Server-authenticated TLS, mTLS, persistence and attachments to other Route kinds remain unsupported for this profile. Standard installations omit XBackend and make no hostname lookups. [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go)
+
 ## Worker NodePort members
 
 A Node is eligible only when it is ready, schedulable, not being deleted, and has a valid IP address of the configured `nodeAddressType`.

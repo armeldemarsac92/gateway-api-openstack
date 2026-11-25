@@ -768,7 +768,8 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
-			Members: members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
+			RoutedExternal: backend.XBackendRoutedExternal,
+			Members:        members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendTLS: tls,
 		})
 	}

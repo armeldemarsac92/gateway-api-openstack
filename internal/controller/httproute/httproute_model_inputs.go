@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
@@ -309,11 +308,11 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.BackendH2C = r.Config.BackendH2C
 	input.EnableXBackend = r.Config.XBackendEnabled()
 	if input.EnableXBackend {
-		mode, err := r.xBackendMemberMode(gateway)
+		profile, err := r.xBackendProfile(gateway)
 		if err != nil {
 			return nil, err
 		}
-		input.MemberMode = mode
+		input.XBackendProfile = profile
 		if err := graph.CollectXBackendInputs(ctx, reader, &input); err != nil {
 			return nil, err
 		}
@@ -357,12 +356,18 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	}, nil
 }
 
-func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
+func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackendProfile, error) {
+	profile := model.XBackendProfile{
+		H2C:               r.Config.BackendH2C,
+		ExternalHostname:  r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
+		ServiceDNSDomains: r.Config.XBackendServiceDNSDomains,
+	}
 	if !controller.HasGatewayTopologyBinding(r.Config, gateway) {
-		return "", nil
+		return profile, nil
 	}
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
-	return topology.Topology.MemberMode, err
+	profile.MemberMode = topology.Topology.MemberMode
+	return profile, err
 }
 
 func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader client.Reader) error {
@@ -371,8 +376,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		return err
 	}
 	current.EnableXBackend = inputs.input.EnableXBackend
-	current.MemberMode = inputs.input.MemberMode
-	current.BackendH2C = inputs.input.BackendH2C
+	current.XBackendProfile = inputs.input.XBackendProfile
 	if err := graph.CollectXBackendInputs(ctx, reader, &current); err != nil {
 		return err
 	}

@@ -77,7 +77,7 @@ func TestXBackendSelectsReadyPodIPsOnItsOwnPort(t *testing.T) {
 		Group: ptr.To(gatewayv1.Group(gatewayx.GroupName)), Kind: ptr.To(gatewayv1.Kind(XBackendKind)), Name: "web",
 	}}}
 	input := Input{
-		EnableXBackend: true, MemberMode: cloud.MemberModeEndpoint,
+		EnableXBackend: true, XBackendProfile: XBackendProfile{MemberMode: cloud.MemberModeEndpoint},
 		XBackends: []XBackendObservation{{Key: types.NamespacedName{Namespace: "apps", Name: "web"}, Spec: backend.Spec, Endpoints: endpoints}},
 	}
 	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "apps"}}
@@ -85,7 +85,7 @@ func TestXBackendSelectsReadyPodIPsOnItsOwnPort(t *testing.T) {
 	if group.State != BackendResolved || group.XBackend.Name != "web" || group.Service.Name != "" || len(group.Endpoints) != 1 {
 		t.Fatalf("group = %+v, want resolved XBackend", group)
 	}
-	input.MemberMode = cloud.MemberModeNodePort
+	input.XBackendProfile.MemberMode = cloud.MemberModeNodePort
 	group = resolveBackend(route, ref, input)
 	if group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedValue) || len(group.Endpoints) != 0 {
 		t.Fatalf("group in NodePort mode = %+v", group)
@@ -94,5 +94,62 @@ func TestXBackendSelectsReadyPodIPsOnItsOwnPort(t *testing.T) {
 	group = resolveBackend(route, ref, input)
 	if group.Authorization != BackendAuthorizationDenied || group.Diagnostic.Reason != string(gatewayv1.RouteReasonRefNotPermitted) {
 		t.Fatalf("foreign reference = %+v, want RefNotPermitted", group)
+	}
+}
+
+func TestXBackendExternalHostnameProfile(t *testing.T) {
+	ref := gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+		Group: ptr.To(gatewayv1.Group(gatewayx.GroupName)), Kind: ptr.To(gatewayv1.Kind(XBackendKind)), Name: "origin",
+	}}}
+	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "apps"}}
+	spec := gatewayx.BackendSpec{
+		Type:             gatewayx.BackendTypeExternalHostname,
+		Port:             gatewayx.BackendPort{Number: 8089},
+		ExternalHostname: &gatewayx.ExternalHostnameBackend{Hostname: "origin.example.test"},
+	}
+	input := Input{
+		EnableXBackend: true, XBackendProfile: XBackendProfile{MemberMode: cloud.MemberModeEndpoint, ExternalHostname: true, ServiceDNSDomains: []string{"svc.home.test"}},
+		XBackends: []XBackendObservation{{Key: types.NamespacedName{Namespace: "apps", Name: "origin"}, Spec: spec}},
+	}
+	if group := resolveBackend(route, ref, input); group.State != BackendResolved || !group.XBackendRoutedExternal || group.XBackendPort != 8089 {
+		t.Fatalf("valid hostname on opted-in Gateway did not resolve: %+v", group)
+	}
+	for _, hostname := range []gatewayv1.PreciseHostname{
+		"192.0.2.5", "2001:db8::5", "127.1", "*.example.test", "service", "origin.example.test.",
+		"cluster.local", "svc.apps.svc.cluster.local", "svc.home.test", "svc.apps.svc.home.test",
+	} {
+		spec.ExternalHostname.Hostname = hostname
+		if got := ValidateXBackend(spec, input.XBackendProfile); got == nil || got.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+			t.Errorf("%q must fail hostname validation: %+v", hostname, got)
+		}
+	}
+	spec.ExternalHostname.Hostname = "external-svc.home.test"
+	if got := ValidateXBackend(spec, input.XBackendProfile); got != nil {
+		t.Fatalf("service suffix comparison must match entire labels: %+v", got)
+	}
+	for _, mode := range []gatewayx.BackendTLSMode{gatewayx.BackendTLSModeServerOnly, gatewayx.BackendTLSModeClientAndServer} {
+		spec.TLS = &gatewayx.BackendTLS{Mode: mode}
+		if got := ValidateXBackend(spec, input.XBackendProfile); got == nil {
+			t.Errorf("TLS mode %s must fail closed", mode)
+		}
+	}
+	spec.TLS = nil
+	ref.Port = ptr.To(gatewayv1.PortNumber(8089))
+	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Fatalf("duplicating the XBackend port must be rejected: %+v", group)
+	}
+	ref.Port = nil
+	input.XBackendProfile.MemberMode = cloud.MemberModeNodePort
+	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Fatalf("external backend must not use the worker member role: %+v", group)
+	}
+	input.XBackendProfile.MemberMode = cloud.MemberModeEndpoint
+	input.XBackendProfile.ExternalHostname = false
+	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Fatalf("Experimental needs a separate external backend opt-in: %+v", group)
+	}
+	input.EnableXBackend = false
+	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonInvalidKind) {
+		t.Fatalf("Standard must reject Experimental XBackend references: %+v", group)
 	}
 }

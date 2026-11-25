@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -123,6 +124,8 @@ func run(ctx context.Context) error {
 	var httpCORS, listenerFilters bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
 	var httpBackendRequestFilters bool
+	var xBackendExternalHostnameClasses, xBackendServiceDNSDomains []string
+	var xBackendExternalHostnameCIDRs []netip.Prefix
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination, tcpTLSMixedMode bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
@@ -151,6 +154,22 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
+	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
+		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
+		return nil
+	})
+	flag.Func("xbackend-external-hostname-cidr", "allowed routed IPv4 destination prefix for ExternalHostname (repeatable)", func(value string) error {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return err
+		}
+		xBackendExternalHostnameCIDRs = append(xBackendExternalHostnameCIDRs, prefix)
+		return nil
+	})
+	flag.Func("xbackend-service-dns-domain", "additional Kubernetes Service DNS suffix forbidden in ExternalHostname (repeatable)", func(domain string) error {
+		xBackendServiceDNSDomains = append(xBackendServiceDNSDomains, domain)
+		return nil
+	})
 	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
 	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia L7 HTTP request mirroring capability")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
@@ -240,6 +259,10 @@ func run(ctx context.Context) error {
 		TCPTLSMixedMode:               tcpTLSMixedMode,
 		ClusterID:                     clusterID,
 		OpenStackResyncInterval:       resyncInterval,
+
+		XBackendExternalHostnameClasses: xBackendExternalHostnameClasses,
+		XBackendExternalHostnameCIDRs:   xBackendExternalHostnameCIDRs,
+		XBackendServiceDNSDomains:       xBackendServiceDNSDomains,
 
 		BackendClientCertificate: backendClientMap != "",
 		FrontendClientValidation: frontendClientValidation,
@@ -381,6 +404,12 @@ func run(ctx context.Context) error {
 	writer := &graph.Writer{
 		Observer: writerMetrics, Coordinator: graphCoordinator, Gateway: gatewayReconciler,
 		Routes: graph.RouteSources{routeReconciler, tcpReconciler, udpReconciler}, Provider: openStackProvider,
+	}
+	if len(controllerConfig.XBackendExternalHostnameClasses) != 0 {
+		routeReconciler.ExternalHostnames = &httproute.ExternalHostnameCache{}
+		gatewayReconciler.GraphRefresh = &graph.GatewayRefreshQueue{}
+		writer.GatewayRefresh = gatewayReconciler.GraphRefresh
+		writer.InvalidateExternalHostnames = routeReconciler.ExternalHostnames.Invalidate
 	}
 	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	if err := gatewayReconciler.SetupWithManager(manager); err != nil {
