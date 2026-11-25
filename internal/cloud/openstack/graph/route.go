@@ -253,6 +253,13 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		spec.BackendH2C = false
 	}
 	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
+	if (spec.ServiceSessionPersistence != nil || spec.ServiceSessionPersistencePending) &&
+		(protocol != cloud.ListenerProtocolHTTP || spec.MemberMode != cloud.MemberModeEndpoint || routedExternal) {
+		return invalid(errors.New("service session persistence requires an HTTP Endpoint pool"))
+	}
+	if persistence := spec.ServiceSessionPersistence; persistence != nil && !validServiceSessionPersistence(*persistence, spec.GRPC) {
+		return invalid(errors.New("invalid Service session persistence"))
+	}
 	fraction := spec.TCPConnectionRejection
 	if fraction != nil {
 		canForward := slices.ContainsFunc(spec.Members, func(member cloud.Member) bool { return !member.Draining })
@@ -373,7 +380,7 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			monitor.MaxRetries < 1 || monitor.MaxRetries > 10 || monitor.MaxRetriesDown < 1 || monitor.MaxRetriesDown > 10) {
 		return invalid(errors.New("health monitor requires positive intervals, timeout below delay, and retry counts within 1-10"))
 	}
-	return desiredRoute{
+	desired := desiredRoute{
 		identity:          identity,
 		spec:              spec,
 		members:           members,
@@ -383,7 +390,15 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		backendKey:        backendKey,
 		unavailable:       unavailable,
 		routedExternal:    routedExternal,
-	}, nil
+	}
+	if persistence := spec.ServiceSessionPersistence; persistence != nil {
+		desired.sessionCookieName, desired.sessionCookieDeadline, desired.sessionHeader =
+			persistence.CookieName, persistence.CookieDeadline, persistence.Header
+		if path := persistence.CookiePath; path != nil && *path != "/" {
+			desired.sessionCookiePath = path
+		}
+	}
+	return desired, nil
 }
 
 func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute, error) {
@@ -461,6 +476,12 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		partSpec.BackendH2C, partSpec.BackendTLS = backend.BackendH2C, backend.BackendTLS
 		partSpec.BackendRetryBudget = backend.BackendRetryBudget
 		partSpec.BackendRetryBudgetPending = backend.BackendRetryBudgetPending
+		partSpec.ServiceSessionPersistence = backend.ServiceSessionPersistence
+		partSpec.ServiceSessionPersistencePending = backend.ServiceSessionPersistencePending
+		if (partSpec.ServiceSessionPersistence != nil || partSpec.ServiceSessionPersistencePending) &&
+			(xBackend || backend.InvalidReference || deniedTLS || len(backend.Matches) == 0 && !targetsUsed[index]) {
+			return invalid(errors.New("service session persistence requires an eligible primary Service destination"))
+		}
 		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable, backend.RoutedExternal)
 		if err != nil {
 			return desiredRoute{}, err
@@ -472,14 +493,16 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
 		// Invalid backends keep their match for the rejection response. Leaving
 		// the header unset withdraws any persistence from the former pool.
-		if !backend.InvalidReference {
-			part.sessionHeader = backend.SessionHeader
+		if xBackend {
+			if !backend.InvalidReference {
+				part.sessionHeader = backend.SessionHeader
+			}
+			part.sessionCookieName = backend.SessionCookieName
+			if path := backend.SessionCookiePath; path != nil && *path != "/" {
+				part.sessionCookiePath = path
+			}
+			part.sessionCookieDeadline = backend.SessionCookieDeadline
 		}
-		part.sessionCookieName = backend.SessionCookieName
-		if path := backend.SessionCookiePath; path != nil && *path != "/" {
-			part.sessionCookiePath = path
-		}
-		part.sessionCookieDeadline = backend.SessionCookieDeadline
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {
 				return invalid(err)

@@ -114,7 +114,7 @@ type Config struct {
 	XBackendExternalHostnameCIDRs []netip.Prefix
 	// XBackendServiceDNSDomains names additional Kubernetes Service DNS suffixes.
 	XBackendServiceDNSDomains []string
-	// XBackendSessionPersistence enables per-XBackend HTTP session persistence.
+	// XBackendSessionPersistence enables HTTP pool session persistence for XBackend and Service policies.
 	XBackendSessionPersistence bool
 	// XBackendClientCertificate enables the operator's separate XBackend client identity map.
 	XBackendClientCertificate bool

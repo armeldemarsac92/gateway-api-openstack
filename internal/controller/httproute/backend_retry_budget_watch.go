@@ -117,6 +117,10 @@ func (r *Reconciler) setupBackendRetryBudgetStatus(manager ctrl.Manager) error {
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), spec).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), route).
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), route)
+	if r.Config.XBackendSessionPersistenceEnabled() {
+		setup.Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency),
+			builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config)))
+	}
 	if r.Config.BackendTLSPolicy {
 		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), spec)
 	}
@@ -132,7 +136,28 @@ func (r *Reconciler) enqueueRetryPoliciesForDependency(ctx context.Context, obje
 		}
 		services[namespace][name] = true
 	}
+	addRoute := func(route *gatewayv1.HTTPRoute) {
+		for key := range routeBackendTLSServices(route) {
+			add(key.Namespace, key.Name)
+		}
+	}
 	switch item := object.(type) {
+	case *gatewayv1.Gateway:
+		for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
+			routes := r.forRouteKind(kind)
+			keys := make(map[types.NamespacedName]struct{})
+			routes.addHTTPRoutesForGateway(ctx, item, keys)
+			for key := range keys {
+				var route gatewayv1.HTTPRoute
+				if err := routes.readRoute(ctx, routes.Client, key, &route); err != nil {
+					if client.IgnoreNotFound(err) != nil {
+						log.FromContext(ctx).Error(err, "Could not read Route for Gateway", "route", key)
+					}
+					continue
+				}
+				addRoute(&route)
+			}
+		}
 	case *gatewayx.XBackendTrafficPolicy:
 		for _, ref := range item.Spec.TargetRefs {
 			if ref.Group == "" && ref.Kind == "Service" {
@@ -156,20 +181,16 @@ func (r *Reconciler) enqueueRetryPoliciesForDependency(ctx context.Context, obje
 			}
 		}
 	case *gatewayv1.HTTPRoute:
-		for key := range routeBackendTLSServices(item) {
-			add(key.Namespace, key.Name)
-		}
+		addRoute(item)
 	case *gatewayv1.GRPCRoute:
-		for key := range routeBackendTLSServices(model.ProjectGRPCRoute(item)) {
-			add(key.Namespace, key.Name)
-		}
+		addRoute(model.ProjectGRPCRoute(item))
 	}
 
 	keys := make(map[types.NamespacedName]struct{})
 	for namespace, names := range services {
 		var list gatewayx.XBackendTrafficPolicyList
 		if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-			log.FromContext(ctx).Error(err, "Could not list Service retry policies for dependency")
+			log.FromContext(ctx).Error(err, "Could not list Service backend traffic policies for dependency")
 			continue
 		}
 		for i := range list.Items {

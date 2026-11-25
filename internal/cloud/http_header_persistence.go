@@ -23,7 +23,7 @@ import (
 
 const HTTPHeaderPersistenceType = "HTTP_HEADER"
 
-// HTTPSessionHeaderPersistence is the policy enrolled on an HTTP XBackend pool.
+// HTTPSessionHeaderPersistence is the policy enrolled on an HTTP pool.
 type HTTPSessionHeaderPersistence struct {
 	Name      string
 	TimeoutMS *int64
@@ -33,6 +33,15 @@ func (p HTTPSessionHeaderPersistence) Valid() bool {
 	return ValidHTTPSessionHeaderName(p.Name) &&
 		(p.TimeoutMS == nil || *p.TimeoutMS >= 0 && *p.TimeoutMS <= 1439985600000)
 }
+
+// ValidForGRPC requires a custom ASCII metadata key that can carry Octavia's
+// text token. Binary metadata keys expect a base64 payload.
+func (p HTTPSessionHeaderPersistence) ValidForGRPC() bool {
+	name := strings.ToLower(p.Name)
+	return p.Valid() && name != "user-agent" && !strings.HasSuffix(name, "-bin") && grpcSessionHeaderToken.MatchString(name)
+}
+
+var grpcSessionHeaderToken = regexp.MustCompile(`^[a-z0-9_.-]+$`)
 
 var sessionHeaderToken = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$")
 

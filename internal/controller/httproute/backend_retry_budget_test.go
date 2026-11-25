@@ -118,6 +118,8 @@ func TestServiceRetryBudgetUsesLivePolicyWinner(t *testing.T) {
 func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	enableRetryBudgetTest(t, f)
+	f.reconciler.Config.XBackendSessionPersistence = true
+	f.reconciler.XBackendCookieAvailable = func(context.Context, cloud.HTTPSessionCookieRequirements) (bool, error) { return true, nil }
 	f.reconciler.BackendRetryBudgetAvailable = func(context.Context) (bool, error) { return true, nil }
 
 	remote, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
@@ -131,8 +133,9 @@ func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 	policy := &gatewayx.XBackendTrafficPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "budget", UID: "policy-shared"},
 		Spec: gatewayx.BackendTrafficPolicySpec{
-			TargetRefs:      []gatewayx.LocalPolicyTargetReference{{Kind: "Service", Name: gatewayv1.ObjectName(remote.Name)}},
-			RetryConstraint: &gatewayx.RetryConstraint{},
+			TargetRefs:         []gatewayx.LocalPolicyTargetReference{{Kind: "Service", Name: gatewayv1.ObjectName(remote.Name)}},
+			RetryConstraint:    &gatewayx.RetryConstraint{},
+			SessionPersistence: &gatewayv1.SessionPersistence{}, //nolint:staticcheck // Exercise the v1.7 Experimental field.
 		},
 	}
 	retryPolicyStatusForGateway(f, policy)
@@ -140,6 +143,7 @@ func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 	before := f.observe(t)
 	for _, backend := range before.Nodes[0].Spec.HTTPBackends {
 		require.Nil(t, backend.BackendRetryBudget)
+		require.Nil(t, backend.ServiceSessionPersistence)
 	}
 	grant := &gatewayv1.ReferenceGrant{
 		ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "allow"},
@@ -156,8 +160,11 @@ func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 		if backend.Namespace == remote.Namespace {
 			require.NotNil(t, backend.BackendRetryBudget)
 			require.Equal(t, string(remote.UID), backend.BackendRetryBudget.ServiceUID)
+			require.NotNil(t, backend.ServiceSessionPersistence)
+			require.NotEmpty(t, backend.ServiceSessionPersistence.CookieName)
 		} else {
 			require.Nil(t, backend.BackendRetryBudget)
+			require.Nil(t, backend.ServiceSessionPersistence)
 		}
 	}
 	require.NoError(t, f.client.Delete(t.Context(), grant))
@@ -165,6 +172,7 @@ func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(f.route), f.route))
 	for _, backend := range f.observe(t).Nodes[0].Spec.HTTPBackends {
 		require.Nil(t, backend.BackendRetryBudget)
+		require.Nil(t, backend.ServiceSessionPersistence)
 	}
 	status := &backendRetryBudgetStatusReconciler{routes: f.reconciler}
 	desired, err := status.observeRetryPolicy(t.Context(), policy)

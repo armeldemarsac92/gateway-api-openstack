@@ -143,7 +143,7 @@ type RouteResult struct {
 	ObservationDeferred bool
 	// UnsupportedBackendProtocol is populated when the provider explicitly lacks a requested transport.
 	UnsupportedBackendProtocol string
-	// BackendSessionPersistenceIssue reports availability and readback for XBackend session persistence.
+	// BackendSessionPersistenceIssue reports availability and readback for backend session persistence.
 	BackendSessionPersistenceIssue SessionPersistenceIssue
 	// UnsupportedMatch reports an incompatible match without discarding other programmed rules.
 	UnsupportedMatch string

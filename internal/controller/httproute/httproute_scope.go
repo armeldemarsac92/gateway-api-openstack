@@ -49,20 +49,21 @@ const (
 )
 
 type routeStatusPlan struct {
-	kind                      routeStatusPlanKind
-	updates                   []parentStatusUpdate
-	droppedRules              string
-	corsFallback              bool
-	policy                    controller.ProviderFailurePolicy
-	referencesEvaluated       bool
-	validateOwnership         bool
-	selection                 routeSelection
-	profileObserved           bool
-	rejectedSections          []model.ListenerSection
-	gateway                   *gatewayv1.Gateway
-	cleanupIdentity           cloud.Identity
-	persistenceRevision       *string
-	xBackendTransportRevision *string
+	kind                       routeStatusPlanKind
+	updates                    []parentStatusUpdate
+	droppedRules               string
+	corsFallback               bool
+	policy                     controller.ProviderFailurePolicy
+	referencesEvaluated        bool
+	validateOwnership          bool
+	selection                  routeSelection
+	profileObserved            bool
+	rejectedSections           []model.ListenerSection
+	gateway                    *gatewayv1.Gateway
+	cleanupIdentity            cloud.Identity
+	persistenceRevision        *string
+	servicePersistenceRevision *string
+	xBackendTransportRevision  *string
 }
 
 type routeProviderWarning struct {
@@ -509,6 +510,7 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionResolvedRefs), update.status.resolved, update.status.resolvedReason, update.status.resolvedMessage, resolvedGeneration))
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(config.Domain()+"/Programmed", update.status.programmed, update.status.programmedReason, update.status.programmedMessage, programmedGeneration))
+		setXBackendRevision(&parentStatus, config.Domain()+servicePersistenceRevisionCondition, p.servicePersistenceRevision, update.status.programmed, route.Generation)
 		setXBackendRevision(&parentStatus, config.Domain()+xBackendPersistenceRevisionCondition, p.persistenceRevision, update.status.programmed, route.Generation)
 		setXBackendRevision(&parentStatus, config.Domain()+xBackendTransportRevisionCondition, p.xBackendTransportRevision, update.status.programmed, route.Generation)
 		if existing >= 0 {

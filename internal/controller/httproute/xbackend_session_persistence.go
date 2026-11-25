@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -63,47 +64,87 @@ func (r *Reconciler) xBackendPersistenceCapability(ctx context.Context) func(gat
 }
 
 func xBackendPersistenceCondition(status metav1.ConditionStatus, reason, message string, issue cloud.SessionPersistenceIssue) (metav1.ConditionStatus, string, string) {
+	return sessionPersistenceCondition("XBackend", status, reason, message, issue)
+}
+
+func sessionPersistenceCondition(subject string, status metav1.ConditionStatus, reason, message string, issue cloud.SessionPersistenceIssue) (metav1.ConditionStatus, string, string) {
 	switch issue {
 	case cloud.SessionPersistenceHeaderUnverified:
-		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP header persistence could not be verified"
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for " + subject + " HTTP header persistence could not be verified"
 	case cloud.SessionPersistenceHeaderReadbackUnverified:
-		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested XBackend HTTP header persistence"
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested " + subject + " HTTP header persistence"
 	case cloud.SessionPersistenceRevisionUnverified:
-		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the current XBackend session persistence configuration"
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the current " + subject + " session persistence configuration"
 	case cloud.SessionPersistenceHeaderUnsupported:
 		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "The regional Octavia provider does not advertise http_header_persistence_v1"
 	case cloud.SessionPersistenceUnverified:
-		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP session cookies could not be verified"
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for " + subject + " HTTP session cookies could not be verified"
 	case cloud.SessionPersistenceDeadlineUnverified:
-		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP session cookie absoluteTimeout could not be verified"
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for " + subject + " HTTP session cookie absoluteTimeout could not be verified"
 	case cloud.SessionPersistenceDeadlineReadbackUnverified:
-		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed an ACTIVE pool with the requested XBackend HTTP session cookie absoluteTimeout and scope"
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed an ACTIVE pool with the requested " + subject + " HTTP session cookie absoluteTimeout and scope"
 	case cloud.SessionPersistencePermanentUnverified:
-		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend Permanent cookies could not be verified"
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for " + subject + " Permanent cookies could not be verified"
 	case cloud.SessionPersistencePermanentReadbackUnverified:
-		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested Permanent cookie settings on all pools for this XBackend"
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested Permanent cookie settings on all pools for this " + subject
 	case cloud.SessionPersistencePathUnverified:
-		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for the XBackend HTTP session cookie path could not be verified"
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for the " + subject + " HTTP session cookie path could not be verified"
 	case cloud.SessionPersistencePathReadbackUnverified:
-		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested XBackend HTTP session cookie path"
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested " + subject + " HTTP session cookie path"
 	case cloud.SessionPersistencePathUnsupported:
-		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend custom cookie paths require http_cookie_path_v1 in addition to the regional Octavia capabilities for the requested cookie lifetime"
+		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), subject + " custom cookie paths require http_cookie_path_v1 in addition to the regional Octavia capabilities for the requested cookie lifetime"
 	case cloud.SessionPersistenceUnsupported:
 		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "The regional Octavia provider does not advertise http_cookie_name_v1"
 	case cloud.SessionPersistenceDeadlineUnsupported:
-		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend session cookie absoluteTimeout requires both http_cookie_name_v1 and http_cookie_absolute_timeout_v1 from the regional Octavia provider"
+		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), subject + " session cookie absoluteTimeout requires both http_cookie_name_v1 and http_cookie_absolute_timeout_v1 from the regional Octavia provider"
 	case cloud.SessionPersistencePermanentUnsupported:
-		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend Permanent cookies require http_cookie_name_v1, http_cookie_absolute_timeout_v1 and http_cookie_permanent_v1 from the regional Octavia provider"
+		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), subject + " Permanent cookies require http_cookie_name_v1, http_cookie_absolute_timeout_v1 and http_cookie_permanent_v1 from the regional Octavia provider"
 	default:
 		return status, reason, message
 	}
 }
 
-func (s routeReconcileStatus) withXBackendPersistenceIssue(issue cloud.SessionPersistenceIssue) routeReconcileStatus {
+func (s routeReconcileStatus) withBackendPersistenceIssue(issue cloud.SessionPersistenceIssue, service bool) routeReconcileStatus {
+	subject := "XBackend"
+	if service {
+		subject = "Service backend"
+	}
 	if s.resolved != metav1.ConditionFalse {
-		s.resolved, s.resolvedReason, s.resolvedMessage = xBackendPersistenceCondition(s.resolved, s.resolvedReason, s.resolvedMessage, issue)
+		s.resolved, s.resolvedReason, s.resolvedMessage = sessionPersistenceCondition(subject, s.resolved, s.resolvedReason, s.resolvedMessage, issue)
 	}
 	return s
+}
+
+const servicePersistenceRevisionCondition = "/ServiceSessionConfiguration"
+
+// A policy can change while the owning Route keeps the same generation. This
+// digest ties optional reuse of a previous provider observation to the same
+// projected Service affinity configuration, including its removal.
+func servicePersistenceRevision(spec cloud.RouteSpec) string {
+	digest := sha256.New()
+	observed := false
+	record := func(port, backendPort int, namespace, name string, settings *cloud.ServiceSessionPersistence, pending bool) {
+		if settings == nil && !pending {
+			return
+		}
+		observed = true
+		config, _ := json.Marshal(settings)
+		_, _ = fmt.Fprintf(digest, "%d %q %q %d %t %s\n", port, namespace, name, backendPort, pending, config)
+	}
+	for _, part := range append([]cloud.RouteSpec{spec}, spec.AdditionalHTTPPorts...) {
+		port := part.GatewayRequirements.ListenerPort
+		if len(part.ScopedListenerPorts) != 0 {
+			port = part.ScopedListenerPorts[0]
+		}
+		record(port, 0, "", "", part.ServiceSessionPersistence, part.ServiceSessionPersistencePending)
+		for _, backend := range part.HTTPBackends {
+			record(port, backend.Port, backend.Namespace, backend.Name, backend.ServiceSessionPersistence, backend.ServiceSessionPersistencePending)
+		}
+	}
+	if !observed {
+		return ""
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
 // Preserve the condition key used to store cookie revisions on existing routes.
