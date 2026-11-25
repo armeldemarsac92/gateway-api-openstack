@@ -36,21 +36,26 @@ import (
 
 func TestRequireGatewayAPIs(t *testing.T) {
 	for _, tc := range []struct {
-		name, missing string
-		experimental  bool
-		backendTLS    bool
+		name, missing  string
+		experimental   bool
+		tlsPassthrough bool
+		tlsTerminate   bool
+		backendTLS     bool
 	}{
 		{name: "standard"},
 		{name: "missing referencegrants", missing: "referencegrants"},
 		{name: "missing udproutes", missing: "udproutes"},
 		{name: "backend TLS policy enabled", backendTLS: true},
 		{name: "backend TLS policy CRD missing", backendTLS: true, missing: "backendtlspolicies"},
+		{name: "passthrough watches backend TLS policies", tlsPassthrough: true},
+		{name: "passthrough needs backend TLS policy inventory", tlsPassthrough: true, missing: "backendtlspolicies"},
+		{name: "termination needs backend TLS policy inventory", tlsTerminate: true, missing: "backendtlspolicies"},
 		{name: "experimental", experimental: true},
 		{name: "missing xbackends", missing: "xbackends", experimental: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resources := metav1.APIResourceList{GroupVersion: gatewayv1.GroupVersion.String()}
-			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants", "backendtlspolicies"} {
+			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants", "backendtlspolicies", "tlsroutes"} {
 				if resource != tc.missing {
 					resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: resource})
 				}
@@ -77,7 +82,7 @@ func TestRequireGatewayAPIs(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			configuration := controller.Config{BackendTLSPolicy: tc.backendTLS}
+			configuration := controller.Config{BackendTLSPolicy: tc.backendTLS, TLSSNIPassthrough: tc.tlsPassthrough, TCPTLSTermination: tc.tlsTerminate}
 			if tc.experimental {
 				configuration.GatewayAPIChannel = "experimental"
 			}

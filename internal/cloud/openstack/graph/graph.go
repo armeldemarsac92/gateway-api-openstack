@@ -45,6 +45,7 @@ type desiredGatewayGraph struct {
 	protocol            string
 	sni                 []desiredSNIFragment
 	sniHeldClosed       map[sniFragmentKey]bool
+	sniPaused           map[sniFragmentKey]bool
 	sniBlockedRoutes    map[string]bool
 }
 
@@ -52,9 +53,13 @@ type observedGatewayGraph struct {
 	defaultHTTPResponseCodes map[string]int
 	httpsVirtualHosts        map[string][]string
 	frontendCA               map[int]frontendCAObservation
+	clientAuthFallback       map[string]octavia.ClientAuthFallback
 	httpsIsolationAvailable  bool
 	httpsIsolationPolicies   map[string]httpsPolicyInventory
 	httpsIsolationUnverified map[string]bool
+	httpsHostTransition      map[string]bool
+	httpsServingPorts        []int
+	httpsCleanupDeferred     bool
 	httpsIsolationMutation   *graphMutation
 	loadBalancer             *octavia.LoadBalancer
 	listener                 *listeners.Listener
@@ -88,6 +93,7 @@ const (
 	graphCreateListener
 	graphDisableListener
 	graphUpdateListenerCertificate
+	graphDisableFrontendClientAuthFallback
 	graphPublishFrontendCA
 	graphUpdateListenerVirtualHosts
 	graphSetListenerNotFound
@@ -132,6 +138,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		p.reportUnavailableHTTPRequestPolicies(unavailableRequestPolicies, &result)
 		if retErr == nil {
 			result.Gateway.ScopedTLSClosedPorts = actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
+		} else {
+			result.Gateway.ScopedListenerServingPorts = nil
+		}
+		for _, listener := range spec.Gateway.Spec.ScopedListeners {
+			if actual.frontendCA[listener.Port].fallbackUnavailable {
+				result.Gateway.FrontendFallbackUnavailablePorts = append(result.Gateway.FrontendFallbackUnavailablePorts, listener.Port)
+			}
 		}
 		result.Gateway.AddressAbsent = actual.addressAbsent
 		result.Gateway.AddressActive = hasActiveGatewayAddress(spec.Gateway.Spec, actual)
@@ -160,6 +173,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	actual, err = p.observeGatewayGraph(ctx, desired)
+	if err == nil && spec.Gateway.AddressWithdrawalOnly() {
+		addressIssue = "No Gateway address request could be assigned"
+		result, addressBlocked, err = p.withdrawUnassignedGatewayAddress(ctx, spec, actual, addressIssue)
+		return result, err
+	}
 	if actual.withdrawTLS != nil {
 		// Listener ownership is already proven. Close the unauthorized
 		// frontend before unrelated dependency reads can delay the write.
@@ -241,7 +259,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if err != nil {
 		pending := p.progressingOutcome("Waiting for the Gateway infrastructure")
-		if desired.protocol == cloud.ListenerProtocolTLSTerminate && actual.outcome.State == cloud.OutcomeProgressing {
+		if cloud.IsTCPTLSListenerProtocol(desired.protocol) && actual.outcome.State == cloud.OutcomeProgressing {
 			pending = actual.outcome
 		}
 		result.Gateway = observedGatewayResult(desired, actual, pending)
@@ -280,6 +298,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err := p.prepareSNIRouteBackendTLS(ctx, &desired, actual); err != nil {
 		return result, err
 	}
+	p.isolateUnavailableSNISuffix(ctx, &desired, actual)
 	if actual.addressReadError != nil {
 		if isSNIProtocol(desired.protocol) {
 			if actual.outcome.State == cloud.OutcomeProgressing {
@@ -290,13 +309,17 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return p.reconcileHTTPWithdrawalWithoutAddress(ctx, desired, actual)
 	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
-		return cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{State: actual.state, Outcome: actual.outcome}, Outcome: actual.outcome}, nil
+		return p.pendingGraphResult(ctx, desired, actual), nil
 	}
 	addressSpec := &desired.spec.Gateway.Spec
 	replacing := spec.Gateway.Disposition == cloud.GraphDelete && actual.loadBalancer != nil
 	if hasAddressRequest(*addressSpec) && (spec.Gateway.Disposition == cloud.GraphEnsure || replacing) {
 		addressIssue, err = p.selectRequestedVIP(ctx, addressSpec, actual)
 		if err != nil {
+			return result, err
+		}
+		if addressIssue != "" && spec.Gateway.Disposition == cloud.GraphEnsure && addressSpec.ClusterAddressLoss != nil && !retainsGatewayAddress(*addressSpec, actual) {
+			result, addressBlocked, err = p.withdrawUnassignedGatewayAddress(ctx, spec, actual, addressIssue)
 			return result, err
 		}
 		floatingIPUnassigned := addressSpec.ExternalNetworkID != "" && actual.addressAbsent
@@ -307,6 +330,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
+		if len(actual.httpsServingPorts) != 0 && spec.ValidateMutation != nil {
+			// Busy Octavia can prove a serving subset without a write. Apply
+			// the same Kubernetes snapshot fence before publishing that proof.
+			if err := spec.ValidateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
 		return p.pendingGraphResult(ctx, desired, actual), nil
 	}
 	if actual.protocol == cloud.ListenerProtocolUDP && actual.loadBalancer != nil {
@@ -444,15 +474,62 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	return result, nil
 }
 
+func retainsGatewayAddress(spec cloud.GatewaySpec, actual observedGatewayGraph) bool {
+	if !hasActiveGatewayAddress(spec, actual) {
+		return false
+	}
+	address := actual.state.VIPAddress
+	if spec.ExternalNetworkID != "" {
+		address = actual.state.FloatingIPAddress
+	}
+	loss := spec.ClusterAddressLoss
+	return slices.Contains(loss.RetainedClusterVIPs, actual.state.VIPAddress) ||
+		slices.Contains(loss.RetainedProviderAddresses, address)
+}
+
+func (p *Provider) withdrawUnassignedGatewayAddress(ctx context.Context, spec cloud.GatewayGraphSpec,
+	actual observedGatewayGraph, issue string,
+) (cloud.GatewayGraphResult, bool, error) {
+	outcome := p.progressingOutcome(issue)
+	result := cloud.GatewayGraphResult{Outcome: outcome, Gateway: cloud.GatewayResult{Outcome: outcome, State: actual.state}}
+	if actual.loadBalancer == nil {
+		return result, true, nil
+	}
+	// A pending write must reach ACTIVE before its admin state is conclusive.
+	if actual.outcome.State == cloud.OutcomeProgressing {
+		result.Outcome = actual.outcome
+		return result, false, nil
+	}
+	if !actual.loadBalancer.AdminStateUp {
+		return result, true, nil
+	}
+	if validate := spec.ValidateMutation; validate != nil {
+		if err := validate(ctx); err != nil {
+			return result, false, err
+		}
+	}
+	err := p.setLoadBalancerAdminState(ctx, actual.loadBalancer.ID, false)
+	result.Outcome.MutationSubmitted = err == nil
+	return result, false, err
+}
+
 func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, step graphMutation) {
 	result.Outcome = p.progressingOutcome(step.message)
+	if step.kind == graphDisableLoadBalancer {
+		result.Gateway.ScopedListenerServingPorts = nil
+	}
+	if step.kind == graphDisableListener {
+		result.Gateway.ScopedListenerServingPorts = slices.DeleteFunc(result.Gateway.ScopedListenerServingPorts, func(port int) bool {
+			return port == step.scopedListener.Port
+		})
+	}
 	if step.kind == graphDisableListener && step.withdrawHTTPPolicy {
 		result.Gateway.Outcome = result.Outcome
 		result.Gateway.ScopedListenerReadyPorts = slices.DeleteFunc(result.Gateway.ScopedListenerReadyPorts, func(port int) bool {
 			return port == step.scopedListener.Port
 		})
 	}
-	if step.kind == graphSNIMutation || step.kind == graphPublishFrontendCA {
+	if step.kind == graphSNIMutation || step.kind == graphPublishFrontendCA || step.kind == graphDisableFrontendClientAuthFallback {
 		result.Outcome.MutationSubmitted = true
 	}
 	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationClaimBackendCA || step.route.kind == routeMutationPublishBackendCA ||
@@ -703,7 +780,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	if !validGraphDisposition(spec.Gateway.Disposition) && !withdrawTLS {
 		return invalid("Gateway graph disposition is invalid")
 	}
-	rawTLS := spec.Gateway.Spec.ListenerProtocol == cloud.ListenerProtocolTLSTerminate
+	rawTLS := cloud.IsTCPTLSListenerProtocol(spec.Gateway.Spec.ListenerProtocol)
 	if withdrawTLS && (!rawTLS && (spec.Gateway.Spec.ListenerProtocol != cloud.ListenerProtocolHTTP || spec.Gateway.Spec.ScopedListeners == nil) ||
 		len(spec.Routes) != 0 || !sameGatewayIdentity(spec.Identity, spec.Gateway.Spec.Identity)) {
 		return invalid("TLS withdrawal requires the Gateway's TLS binding and no route models")
@@ -712,6 +789,15 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		return port < 1 || port > 65535
 	})) {
 		return invalid("targeted TLS withdrawal requires valid scoped HTTPS ports")
+	}
+	mixed := spec.Gateway.Spec.ListenerProtocol == cloud.ListenerProtocolTLSMixed
+	if spec.Gateway.RetainSNIAddress && (!isSNIProtocol(spec.Gateway.Spec.ListenerProtocol) || spec.Gateway.Disposition != cloud.GraphDelete) {
+		return invalid("retaining SNI addresses requires cleanup of a TLS SNI listener")
+	}
+	for port, hosts := range spec.Gateway.TLSWithdrawalPreviousHosts {
+		if len(hosts) == 0 || !slices.Contains(spec.Gateway.TLSWithdrawalPorts, port) {
+			return invalid("selective TLS withdrawal requires previously authorized hosts on a targeted HTTPS port")
+		}
 	}
 	if !rawTLS && spec.Gateway.TCPTLSCertificateRef != "" {
 		return invalid("TCP certificates require the TCP TLS termination profile")
@@ -736,7 +822,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 	}
 	if isSNIProtocol(protocol) {
-		ensure := spec.Gateway.Disposition == cloud.GraphEnsure && (rawTLS && p.tcpTLSTermination || !rawTLS && p.tlsSNIPassthrough)
+		ensure := spec.Gateway.Disposition == cloud.GraphEnsure && (rawTLS && p.tcpTLSTermination && (!mixed || p.tcpTLSMixedMode) || !rawTLS && p.tlsSNIPassthrough)
 		cleanup := (spec.Gateway.Disposition == cloud.GraphDelete || rawTLS && withdrawTLS) && len(spec.Gateway.TLSSNIRoutes) == 0
 		if !ensure && !cleanup || spec.Gateway.Spec.ScopedListeners != nil || len(spec.Routes) != 0 ||
 			spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
@@ -749,6 +835,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool { return route.BackendTLS != nil }) {
 			return invalid("Backend TLS requires a TCP TLS termination profile")
+		}
+		if slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool {
+			return route.Passthrough && (!mixed || route.BackendTLS != nil)
+		}) {
+			return invalid("An explicit passthrough target requires mixed TLS and cannot originate backend TLS")
 		}
 		targets, err := buildSNITargets(spec.Identity, spec.Gateway.TLSSNIRoutes)
 		if err != nil {
@@ -1093,7 +1184,7 @@ func (actual observedGatewayGraph) httpFallbackReady(listener listeners.Listener
 }
 
 func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
-	result := cloud.GatewayResult{State: actual.state, Outcome: pending}
+	result := cloud.GatewayResult{State: actual.state, Outcome: pending, ScopedListenerServingPorts: actual.verifiedHTTPSServingPorts()}
 	if actual.scoped {
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
 			if actual.protocol == cloud.ListenerProtocolHTTP {
@@ -1179,15 +1270,20 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 
 func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatewayGraph) (observedGatewayGraph, error) {
 	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol, scoped: desired.spec.Gateway.Spec.ScopedListeners != nil}
+	withdrawAddress := desired.spec.Gateway.AddressWithdrawalOnly()
 	lb, err := p.findGatewayLoadBalancer(ctx, desired.identity)
 	if err != nil {
 		return actual, err
 	}
 	if lb == nil {
+		if withdrawAddress {
+			actual.addressAbsent = true
+			return actual, nil
+		}
 		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 			return actual, nil
 		}
-		if desired.protocol == cloud.ListenerProtocolTLSTerminate && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
+		if cloud.IsTCPTLSListenerProtocol(desired.protocol) && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
 			desired.spec.Gateway.TCPTLSCertificateRef == "" {
 			actual.outcome = p.progressingOutcome("Waiting for an authorized TCP TLS certificate")
 			return actual, nil
@@ -1211,6 +1307,10 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 	}
 	if observation.phase == loadBalancerPhaseAbsent {
+		if withdrawAddress {
+			actual.addressAbsent = true
+			return actual, nil
+		}
 		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 			return actual, nil
 		}
@@ -1220,13 +1320,16 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	actual.loadBalancer = observation.loadBalancer
 	lb = actual.loadBalancer
 	actual.state = cloud.GatewayState{LoadBalancerID: lb.ID, VIPPortID: lb.VipPortID, VIPAddress: lb.VipAddress}
+	if withdrawAddress {
+		return actual, nil
+	}
 	if observation.phase == loadBalancerPhasePending && desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return actual, nil
 	}
 	// TLS authorization is decided using only public LB/frontend readbacks.
 	// In particular, an unrelated pool or Neutron failure cannot hold it.
 	var inventory octavia.ListenerInventory
-	rawTLS := desired.protocol == cloud.ListenerProtocolTLSTerminate
+	rawTLS := cloud.IsTCPTLSListenerProtocol(desired.protocol)
 	listed := actual.protocol == cloud.ListenerProtocolHTTP || rawTLS || desired.spec.Gateway.Disposition == cloud.GraphDelete
 	if listed {
 		inventory, err = p.observeGatewayListenerInventory(ctx, desired, &actual)
@@ -1240,12 +1343,12 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			}
 		}
 		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
-			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
 			p.observeFrontendCAs(ctx, desired, &actual)
+			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
 			if observation.phase == loadBalancerPhaseActive {
 				p.planScopedHTTPSWithdrawal(desired, &actual)
 			}
-			if actual.withdrawTLS != nil || desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
+			if actual.withdrawTLS != nil || actual.httpsCleanupDeferred || desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 				return actual, nil
 			}
 		}
@@ -1302,15 +1405,20 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			if observation.phase == loadBalancerPhaseActive {
 				p.planScopedHTTPSWithdrawal(desired, &actual)
 			}
-			if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil {
+			if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil || actual.httpsCleanupDeferred {
 				return actual, nil
 			}
 		}
 	}
 	if isSNIProtocol(desired.protocol) {
-		return p.observeSNIGraph(ctx, desired, actual, inventory)
+		observed, err := p.observeSNIGraph(ctx, desired, actual, inventory)
+		if err != nil && desired.protocol == cloud.ListenerProtocolTLSMixed && actual.listener != nil &&
+			actual.rawTLSVerified && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+			p.closeUnverifiedMixedSNI(&observed)
+		}
+		return observed, err
 	}
-	if slices.Contains(lb.Tags, sniProfileTag) || slices.Contains(lb.Tags, tcpTLSProfileTag) {
+	if hasSNIProfile(lb.Tags) {
 		return actual, fmt.Errorf("%w: a TLS SNI load balancer cannot be adopted by another profile", cloud.ErrOwnershipConflict)
 	}
 	if err := validateRawTLSDefault(inventory); err != nil {
@@ -1427,6 +1535,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
 	})
 	actual.httpsVirtualHosts = inventory.HTTPSVirtualHosts
+	actual.clientAuthFallback = inventory.ClientAuthFallback
 	var bindingErr error
 	if markedProtocol != "" {
 		switch {

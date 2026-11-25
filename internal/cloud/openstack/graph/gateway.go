@@ -80,19 +80,29 @@ func (p *Provider) GetGateway(
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}
-	if slices.Contains(loadBalancer.Tags, tcpTLSProfileTag) {
-		if markedProtocol != "" {
-			return cloud.GatewayResult{}, false, fmt.Errorf("%w: TCP TLS termination requires a dedicated listener", cloud.ErrOwnershipConflict)
+	if hasSNIProfile(loadBalancer.Tags) {
+		origin := taggedSNIProfile(loadBalancer.Tags)
+		if markedProtocol != "" || origin == "" {
+			return cloud.GatewayResult{}, false, fmt.Errorf("%w: TLS SNI requires a dedicated frontend profile", cloud.ErrOwnershipConflict)
 		}
-		listener, err := p.managedRawTLSListener(identity, loadBalancer, inventory, 0)
-		if err != nil {
-			return cloud.GatewayResult{}, false, err
+		protocol := origin
+		if len(inventory.Items) == 1 {
+			protocol = taggedSNIProfile(inventory.Items[0].Tags)
+			if protocol == "" || protocol == cloud.ListenerProtocolTLSSNI && !isPassthroughSNIListener(inventory.Items[0], inventory) {
+				return cloud.GatewayResult{}, false, fmt.Errorf("%w: invalid TLS SNI listener profile", cloud.ErrOwnershipConflict)
+			}
 		}
-		state := cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress}
-		if listener != nil {
-			state.ListenerID = listener.ID
+		if cloud.IsTCPTLSListenerProtocol(protocol) || protocol != origin {
+			listener, err := p.managedSNIListener(identity, loadBalancer, inventory, 0, protocol)
+			if err != nil {
+				return cloud.GatewayResult{}, false, err
+			}
+			state := cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress}
+			if listener != nil {
+				state.ListenerID = listener.ID
+			}
+			return cloud.GatewayResult{State: state, Outcome: p.progressingOutcome("TLS SNI readiness requires the authorized Gateway graph")}, true, nil
 		}
-		return cloud.GatewayResult{State: state, Outcome: p.progressingOutcome("TCP TLS readiness requires the authorized Gateway graph")}, true, nil
 	}
 	if err := validateRawTLSDefault(inventory); err != nil {
 		return cloud.GatewayResult{}, false, err

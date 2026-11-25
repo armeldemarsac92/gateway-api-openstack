@@ -1,6 +1,10 @@
 # Reproduce the Hibiscus development image
 
-The ordinary and independent no-cache linux/amd64 builds of the grouped L7 activation revision produced identical OCI manifests and executables. The extracted executable passed the 36 upstream ListenerSet HTTP assertions on both channels. The initial Experimental attempt reached 34 of 36. [Build record](image.json) · [Qualification](provider/listenerset-positive.md#grouped-policy-activation) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-0cde3dcd7e494e3d9986ff3c5650353e5f6a3def)
+The linux/amd64 frontend validation image reproduced byte for byte. With that executable, the surviving application and its EndpointSlice remained available in the sampled shared-port grant transitions on both channels. [Build record](image.json) · [Traffic samples](provider/frontend-client-validation-evidence/shared-443.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-6aaf2c448232d92f0e746674d60dd542e238e611)
+
+The linux/amd64 Gateway infrastructure image reproduced byte for byte. Its executable passed the registered metadata case and the DNS, HTTP and VIP withdrawal checks on both release channels. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-ae93701ffbdde389ba4fac3172fd5f4e1202629f/image.json) · [Qualification](provider/gateway-infrastructure.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-ae93701ffbdde389ba4fac3172fd5f4e1202629f)
+
+The ordinary and independent no-cache linux/amd64 builds of the grouped L7 activation revision produced identical OCI manifests and executables. The extracted executable passed the 36 upstream ListenerSet HTTP assertions on both channels. The initial Experimental attempt reached 34 of 36. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0cde3dcd7e494e3d9986ff3c5650353e5f6a3def/image.json) · [Qualification](provider/listenerset-positive.md#grouped-policy-activation) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-0cde3dcd7e494e3d9986ff3c5650353e5f6a3def)
 
 The ordinary and independent no-cache linux/amd64 builds of the Gateway backend client certificate revision produced the same manifest and executable. The published echo returned the expected client identity on both Gateway API channels. The local builder mounted an empty compiler cache separately for each build. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04/image.json) · [Backend authentication cases](provider/backend-tls-policy.md#gateway-client-certificate) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04)
 
@@ -11,7 +15,7 @@ The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=0cde3dcd7e494e3d9986ff3c5650353e5f6a3def
+revision=6aaf2c448232d92f0e746674d60dd542e238e611
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"

@@ -156,7 +156,7 @@ func (r *Reconciler) sniParentListenerRejection(listeners []gatewayv1.Listener, 
 			continue
 		}
 		selected = true
-		if listener.Protocol == gatewayv1.TLSProtocolType && len(listenerSupportedRouteKinds(r.Config, listener)) > 0 && !mixedTLSModes(listeners, listener) {
+		if listener.Protocol == gatewayv1.TLSProtocolType && len(listenerSupportedRouteKinds(r.Config, listener)) > 0 && (r.Config.TCPTLSMixedMode || !mixedTLSModes(listeners, listener)) {
 			return "", ""
 		}
 	}

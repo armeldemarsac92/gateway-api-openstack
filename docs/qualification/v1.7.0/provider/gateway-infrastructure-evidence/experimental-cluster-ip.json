@@ -1,0 +1,122 @@
+{
+  "feature": "GatewayAddressRoutabilityCluster",
+  "channel": "experimental",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerRevision": "06833071e53f5f25b5e8bbb5e63df25a870e5203",
+  "controllerImage": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:9c33b46eb0daafedddc1e3e5178abb4af6fcaf0cef1e1517d600f3e4227efaec",
+  "managerSHA256": "85b48b36d81133c9fa99a6d74877af3564c8d93c6be540ae4b1656240a0f699f",
+  "infrastructureManifestSHA256": "e3637142700e38f421bd1ab4295de547b85b540614422589b7b7f2f45cef987b",
+  "kindNodeManifestSHA256": "597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "clientProbeSHA256": "e784ffdfaf153b68f9bb3a393df44f0276fa35ed7e84b7d8e7e6bfd6928d53b2",
+  "echoOCIArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "upstreamBaseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "mockedBoundaries": [
+    "Keystone",
+    "Neutron",
+    "worker transport",
+    "Amphora transport",
+    "VIP and member transport relays"
+  ],
+  "octavia": {
+    "revision": "0b360f0f3bdea3d86a5acdba1009e50428f77c6f",
+    "version": "19.0.1.dev44",
+    "sha256": "cf594e4c2fc0fc2d747e8791ac7bf2243851acc1817d4764967b1f78be2fce26",
+    "filesVerified": 649
+  },
+  "octaviaLib": {
+    "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+    "version": "3.12.1.dev13",
+    "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+    "filesVerified": 24
+  },
+  "kubeProxyReadyNodes": 1,
+  "provider": {
+    "privateVIP": "192.0.2.30",
+    "mockNeutronFloatingIP": "203.0.113.30",
+    "mockNeutronFloatingIPMutations": [
+      "POST"
+    ],
+    "haproxyConfigSHA256": "6b2ee3a0104e07d90654bf1eb211e8e662a52acab7d47b7d521f1e92128a62c8",
+    "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "06833071e53f5f25b5e8bbb5e63df25a870e5203",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:9c33b46eb0daafedddc1e3e5178abb4af6fcaf0cef1e1517d600f3e4227efaec",
+    "configDigest": "sha256:e5d045e1842bc34de645b2ffd7277405c205002aac149ed1eca4dd55ddc2c881",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "bb157daf28bf1f90db431221b12021bf1658c615c82ae91de3311f3b315f0451",
+    "managerSHA256": "85b48b36d81133c9fa99a6d74877af3564c8d93c6be540ae4b1656240a0f699f",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "clusterIP": {
+    "status": {
+      "routability": "Cluster",
+      "type": "IPAddress",
+      "value": "10.96.2.74"
+    },
+    "ports": [
+      {
+        "name": "tcp-8080",
+        "port": 8080,
+        "protocol": "TCP"
+      }
+    ],
+    "observation": {
+      "addresses": [
+        "10.96.2.74"
+      ],
+      "echo": {
+        "namespace": "gateway-conformance-infra",
+        "path": "/infrastructure-dns-qualification",
+        "pod": "infra-backend-v1-667754889f-c9vh5"
+      },
+      "fqdn": "10.96.2.74",
+      "remote": "10.96.2.74:8080",
+      "status": 200
+    },
+    "service": "gw-cluster-4112c18062b49b1c2e32-auto-0",
+    "endpoints": [
+      {
+        "addresses": [
+          "192.0.2.30"
+        ],
+        "conditions": {
+          "ready": true
+        }
+      }
+    ],
+    "frontendRequests": [
+      1,
+      2
+    ]
+  },
+  "withdrawal": {
+    "clusterServiceAbsent": true,
+    "endpointSlices": 0,
+    "failedNewConnections": 3,
+    "frontendRequests": [
+      2,
+      2
+    ],
+    "statusRestoredToConfiguredFloatingIP": true,
+    "headless": {
+      "addresses": [
+        "192.0.2.30"
+      ],
+      "echo": {
+        "namespace": "gateway-conformance-infra",
+        "path": "/infrastructure-dns-qualification",
+        "pod": "infra-backend-v1-667754889f-wmlv2"
+      },
+      "fqdn": "gateway-gateway-with-infrastructure-metadata.gateway-conformance-infra.svc.cluster.local",
+      "remote": "192.0.2.30:8080",
+      "status": 200
+    }
+  }
+}

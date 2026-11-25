@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -281,7 +282,7 @@ func (r *Reconciler) gatewayNeedsBinding(gateway *gatewayv1.Gateway) bool {
 
 func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
 	storedPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listenerBindingProtocol(listener))
+	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listenerBindingProtocol(r.Config, gateway, listener))
 }
 
 func (r *Reconciler) desiredListenerPort(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) string {
@@ -328,6 +329,7 @@ type gatewayCleanupSnapshot struct {
 	boundListenerProtocol gatewayv1.ProtocolType
 	boundListenerPort     string
 	scopedListeners       bool
+	retainSNIAddress      bool
 	listenerPort          string
 	listenerProtocol      gatewayv1.ProtocolType
 }
@@ -396,6 +398,14 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	listeners, validationErr := SupportedListenersForConfig(r.Config, &gateway)
 	if validationErr != nil {
 		snapshot.disposition = gatewayCleanupRebuild
+		// Flags and listeners may change in either order. While a mixed
+		// spec has an enabled section on the bound port, close the old
+		// listener and retain the IPs until the spec can be programmed.
+		snapshot.retainSNIAddress = isSNIListenerBinding(snapshot.boundListenerProtocol) &&
+			!r.Config.TCPTLSMixedMode && slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+			return strconv.Itoa(int(listener.Port)) == snapshot.boundListenerPort &&
+				mixedTLSModes(gateway.Spec.Listeners, listener) && tlsListenerModeEnabled(r.Config, &listener)
+		})
 		return snapshot, nil
 	}
 	listener := listeners[0]
@@ -406,10 +416,16 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	if r.gatewayListenerNeedsReplacement(&gateway, listener) {
 		snapshot.disposition = gatewayCleanupRebuild
 		snapshot.listenerPort = strconv.Itoa(int(listener.Port))
-		snapshot.listenerProtocol = listenerBindingProtocol(listener)
+		snapshot.listenerProtocol = listenerBindingProtocol(r.Config, &gateway, listener)
+		snapshot.retainSNIAddress = snapshot.listenerPort == snapshot.boundListenerPort &&
+			isSNIListenerBinding(snapshot.boundListenerProtocol) && isSNIListenerBinding(snapshot.listenerProtocol)
 		return snapshot, nil
 	}
 
 	snapshot.disposition = gatewayCleanupHold
 	return snapshot, nil
+}
+
+func isSNIListenerBinding(protocol gatewayv1.ProtocolType) bool {
+	return protocol == gatewayv1.TLSProtocolType || cloud.IsTCPTLSListenerProtocol(string(protocol))
 }

@@ -70,6 +70,15 @@ type GatewaySpec struct {
 	// AddressRejection records an invalid address request on a bound Gateway.
 	// Existing listeners and routes remain eligible for reconciliation.
 	AddressRejection string
+	// ClusterAddressLoss is set when Cluster requests cannot reserve an
+	// address. Only a valid provider address or a retained active address
+	// can then justify keeping the frontend enabled.
+	ClusterAddressLoss *ClusterAddressLoss
+}
+
+type ClusterAddressLoss struct {
+	RetainedClusterVIPs       []string
+	RetainedProviderAddresses []string
 }
 
 // ScopedListener is one named Octavia listener on a shared Gateway load balancer.
@@ -89,12 +98,13 @@ type ListenerTLS struct {
 	VirtualHosts []string `json:",omitempty"`
 }
 
-// FrontendClientValidation identifies the normalized trust anchor on a strict
-// HTTPS port. The PEM is passed to Barbican and excluded from graph serialization.
+// FrontendClientValidation identifies the trust anchor and validation mode on
+// an HTTPS port. The PEM is excluded from graph serialization.
 type FrontendClientValidation struct {
-	ConfigMapUID string
-	Digest       string
-	PEM          []byte `json:"-"`
+	ConfigMapUID     string
+	Digest           string
+	PEM              []byte `json:"-"`
+	InsecureFallback bool   `json:",omitempty"`
 }
 
 // Equal compares the immutable identity and digest of the trust anchor.
@@ -102,7 +112,8 @@ func (v *FrontendClientValidation) Equal(other *FrontendClientValidation) bool {
 	if v == nil || other == nil {
 		return v == other
 	}
-	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest
+	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest &&
+		v.InsecureFallback == other.InsecureFallback
 }
 
 // Equal compares frontend authorization across independent observations.
@@ -155,7 +166,14 @@ const (
 	ListenerProtocolTLSSNI = "TLS"
 	// ListenerProtocolTLSTerminate identifies the immutable TCP termination profile.
 	ListenerProtocolTLSTerminate = "TLS_TERMINATE"
+	// ListenerProtocolTLSMixed binds a shared TCP frontend with a mode per SNI policy.
+	ListenerProtocolTLSMixed = "TLS_MIXED"
 )
+
+// IsTCPTLSListenerProtocol identifies TCP frontend profiles with authorized certificates.
+func IsTCPTLSListenerProtocol(protocol string) bool {
+	return protocol == ListenerProtocolTLSTerminate || protocol == ListenerProtocolTLSMixed
+}
 
 // NormalizeListenerProtocol interprets bindings written before listener
 // protocols were recorded as HTTP.

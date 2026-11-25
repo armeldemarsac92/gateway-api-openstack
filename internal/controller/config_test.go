@@ -21,6 +21,7 @@ import (
 	"time"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 )
 
 func TestConfigFinalizersUseControllerDomain(t *testing.T) {
@@ -58,6 +59,13 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 		name   string
 		mutate func(*Config)
 	}{
+		{name: "Cluster Gateway addresses without Experimental CRDs", mutate: func(cfg *Config) {
+			cfg.GatewayInfrastructureMetadata, cfg.ClusterGatewayAddresses = true, true
+		}},
+		{name: "Cluster Gateway addresses without discovery permissions", mutate: func(cfg *Config) {
+			cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+			cfg.ClusterGatewayAddresses = true
+		}},
 		{name: "HTTP query parameters without fixed responses", mutate: func(cfg *Config) { cfg.HTTPQueryParamExact = true }},
 		{name: "HTTP method without fixed responses", mutate: func(cfg *Config) { cfg.HTTPMethodMatch = true }},
 		{name: "SNI suffix without passthrough", mutate: func(cfg *Config) { cfg.TLSSNISuffix = true }},

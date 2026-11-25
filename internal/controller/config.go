@@ -38,6 +38,10 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 
 // Config is the cluster-wide controller configuration.
 type Config struct {
+	// GatewayInfrastructureMetadata enables headless Service discovery of Octavia VIPs.
+	GatewayInfrastructureMetadata bool
+	// ClusterGatewayAddresses enables Service ClusterIPs for explicit Cluster requests.
+	ClusterGatewayAddresses bool
 	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
 	HTTPHeaderExact bool
 	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.
@@ -80,6 +84,8 @@ type Config struct {
 	TLSSNISuffix bool
 	// TCPTLSTermination enables operator-enrolled certificates on TLSRoute listeners.
 	TCPTLSTermination bool
+	// TCPTLSMixedMode enables same-port TCP TLS termination and passthrough.
+	TCPTLSMixedMode bool
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
@@ -100,6 +106,10 @@ func (c Config) GatewayAddressRoutabilityEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
+func (c Config) GatewayAddressRoutabilityClusterEnabled() bool {
+	return c.ClusterGatewayAddresses && c.GatewayAddressRoutabilityEnabled() && c.GatewayInfrastructureMetadata
+}
+
 // XBackendEnabled reports whether this installation uses the Experimental bundle.
 func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
@@ -112,6 +122,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.ClusterGatewayAddresses && !c.GatewayAddressRoutabilityClusterEnabled() {
+		return fmt.Errorf("--gateway-address-routability-cluster requires --gateway-api-channel=experimental and --gateway-infrastructure-metadata")
+	}
 	if c.BackendClientCertificate && !c.BackendTLSPolicy {
 		return fmt.Errorf("--backend-client-certificate-map requires --octavia-backend-tls-policy")
 	}
@@ -120,6 +133,9 @@ func (c Config) Validate() error {
 	}
 	if c.TCPTLSTermination && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-tcp-tls-termination requires --tls-certificate-map")
+	}
+	if c.TCPTLSMixedMode && (!c.TCPTLSTermination || !c.TLSSNIPassthrough) {
+		return fmt.Errorf("--octavia-tcp-tls-mixed-mode requires --octavia-tcp-tls-termination and --octavia-tls-sni-passthrough")
 	}
 	if c.HTTPSListenerIsolation && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-https-listener-isolation requires --tls-certificate-map")
@@ -211,6 +227,11 @@ func (c Config) RouteGatewayNameAnnotation() string {
 // on an HTTPRoute.
 func (c Config) RouteGatewayUIDAnnotation() string {
 	return c.Domain() + "/route-gateway-uid-" + c.controllerKey()
+}
+
+// GatewaySNISelectorsAnnotation identifies the retired selector archive for metadata cleanup.
+func (c Config) GatewaySNISelectorsAnnotation() string {
+	return c.Domain() + "/sni-selectors-" + c.controllerKey()
 }
 
 // GatewayListenerPortAnnotation returns the key that records the listener port

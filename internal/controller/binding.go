@@ -41,7 +41,7 @@ func ValidateGatewayBinding(config Config, gateway *gatewayv1.Gateway) error {
 			return err
 		}
 		switch gateway.Annotations[config.GatewayListenerProtocolAnnotation()] {
-		case "", string(gatewayv1.HTTPProtocolType), string(gatewayv1.TCPProtocolType), string(gatewayv1.UDPProtocolType), string(gatewayv1.TLSProtocolType), cloud.ListenerProtocolTLSTerminate:
+		case "", string(gatewayv1.HTTPProtocolType), string(gatewayv1.TCPProtocolType), string(gatewayv1.UDPProtocolType), string(gatewayv1.TLSProtocolType), cloud.ListenerProtocolTLSTerminate, cloud.ListenerProtocolTLSMixed:
 		default:
 			return fmt.Errorf("%w: invalid bound Gateway listener protocol", cloud.ErrOwnershipConflict)
 		}
@@ -127,6 +127,7 @@ func GatewayBindingMetadataEqual(config Config, left, right *gatewayv1.Gateway) 
 		config.GatewayListenerProtocolAnnotation(),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
+		config.GatewaySNISelectorsAnnotation(),
 	} {
 		if left.Annotations[key] != right.Annotations[key] {
 			return false

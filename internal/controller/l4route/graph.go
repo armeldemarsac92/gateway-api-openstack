@@ -135,7 +135,7 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			}
 			anchor, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
 		}
-		supported, err := gatewaycontroller.SupportedListeners(gateway)
+		supported, err := gatewaycontroller.SupportedListenersForConfig(r.Config, gateway)
 		if err == nil && supported[0].Protocol == r.protocol() && gateway.DeletionTimestamp.IsZero() {
 			listeners = supported
 			namespaces := make(routeNamespaceCache)

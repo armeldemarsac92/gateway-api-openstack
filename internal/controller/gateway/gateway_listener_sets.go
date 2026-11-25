@@ -281,6 +281,10 @@ func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.
 			acceptedReason, programmedReason = gatewayv1.ListenerSetReasonListenersNotValid, gatewayv1.ListenerSetReasonListenersNotValid
 			ready := true
 			for _, entry := range set.entries {
+				if entry.rejection == "" && entry.listener.Protocol == gatewayv1.HTTPSProtocolType &&
+					slices.Contains(result.Gateway.FrontendFallbackUnavailablePorts, int(entry.listener.Port)) {
+					entry.rejection = gatewayv1.ListenerReasonUnsupportedValue
+				}
 				status, err := r.listenerSetEntryStatus(ctx, set.object, entry, result)
 				if err != nil {
 					return err

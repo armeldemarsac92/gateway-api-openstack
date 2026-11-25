@@ -70,7 +70,7 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 		controller.UnsupportedGatewayAPIVersionMessage,
 		gateway.Generation,
 	))
-	scope.rawTLSVersionUnsupported = r.boundListenerProtocol(gateway) == cloud.ListenerProtocolTLSTerminate
+	scope.rawTLSVersionUnsupported = cloud.IsTCPTLSListenerProtocol(string(r.boundListenerProtocol(gateway)))
 	if scope.rawTLSVersionUnsupported {
 		r.markRawTLSVersionUnsupported(gateway)
 	}
@@ -102,13 +102,14 @@ func (r *Reconciler) markRawTLSVersionUnsupported(gateway *gatewayv1.Gateway) {
 	message := controller.UnsupportedGatewayAPIVersionMessage
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
 		metav1.ConditionFalse, string(gatewayv1.GatewayReasonPending), message, gateway.Generation))
-	// The bound termination profile has only one listener. Limit the
-	// condition to that TLS section if the desired spec now has siblings.
+	// Only update the logical sections on the bound physical TLS port.
+	mixed := r.boundListenerProtocol(gateway) == cloud.ListenerProtocolTLSMixed
 	port, _ := strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
 	for i := range gateway.Status.Listeners {
 		status := &gateway.Status.Listeners[i]
 		if len(gateway.Status.Listeners) == 1 || slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
-			return listener.Name == status.Name && int(listener.Port) == port && terminatesTLS(&listener)
+			return listener.Name == status.Name && int(listener.Port) == port &&
+				(terminatesTLS(&listener) || mixed && listener.Protocol == gatewayv1.TLSProtocolType)
 		}) {
 			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed),
 				metav1.ConditionFalse, string(gatewayv1.ListenerReasonPending), message, gateway.Generation))

@@ -25,6 +25,7 @@ import (
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/external"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
@@ -68,6 +69,17 @@ func (r *Resolver) resolveSubnet(ctx context.Context, reference cloud.ResourceRe
 		return nil, invalid("subnet CIDR does not match its IP version")
 	}
 	return subnet, nil
+}
+
+// VIPSubnetIPVersion returns the address family of the bound, project-owned subnet.
+func (r *Resolver) VIPSubnetIPVersion(ctx context.Context, subnetID string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.operationTimeout)
+	defer cancel()
+	subnet, err := r.resolveSubnet(ctx, cloud.ResourceReference{ID: subnetID})
+	if err != nil {
+		return 0, apierrors.Classify(err)
+	}
+	return subnet.IPVersion, nil
 }
 
 // VIPSubnetSupports applies stock Neutron's IPv4 fixed-address subnet rules.
