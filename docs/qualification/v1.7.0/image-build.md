@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-With both Gateway API bundles on Kubernetes envtest, the signed linux/amd64 controller kept exact method and header matches ahead of a fallback redirect and restored the stock redirect after the specific route was removed. The local Octavia and Amphora setup used native HAProxy. [Build record](image.json) · [HTTP requests and policy readback](provider/http-redirect-precedence-evidence/receipt.json)
+On both Gateway API channels, the controller applied the selected backend’s HTTP headers and binary gRPC metadata before the rule’s response modifier. [Build record](image.json) · [Controller, provider and traffic observations](provider/backend-response-header-evidence/receipt.json)
+
+With both Gateway API bundles on Kubernetes envtest, the signed linux/amd64 controller kept exact method and header matches ahead of a fallback redirect and restored the stock redirect after the specific route was removed. The local Octavia and Amphora setup used native HAProxy. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-76d28f67c8420eb281ea846670db4b50b2177d7b/image.json) · [HTTP requests and policy readback](provider/http-redirect-precedence-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-76d28f67c8420eb281ea846670db4b50b2177d7b)
 
 On Standard and Experimental kind, the signed linux/amd64 controller mirrored gRPC calls from matching rules and selected weighted backends. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-73f2d0c594925ac6826bafb6a2e9c86e1d7c05fa/image.json) · [Primary replies, mirror copies and grant transitions](provider/grpc-request-mirror-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-73f2d0c594925ac6826bafb6a2e9c86e1d7c05fa)
 

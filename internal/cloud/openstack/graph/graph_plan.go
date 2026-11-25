@@ -805,7 +805,8 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
 		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact || blocked.capability == octavia.GatewayCapabilityHTTPRequestRedirect ||
 		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityRequestCORS ||
-		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityHTTPRequestMirror ||
+		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityTargetResponseHeaders ||
+		blocked.capability == octavia.GatewayCapabilityHTTPRequestMirror ||
 		blocked.capability == octavia.GatewayCapabilityGRPCRequestMirror ||
 		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType ||
@@ -906,6 +907,12 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if backendRequestFilterWriteRequiresCapability(part, step.route) {
 			required = append(required, octavia.GatewayCapabilityTargetRequestFilters)
 		}
+		if backendResponseHeaderWriteRequiresCapability(part, step.route) {
+			required = append(required, octavia.GatewayCapabilityTargetResponseHeaders)
+			// Octavia exposes target response headers only with the regional
+			// rule-level response header and weighted target capabilities.
+			required = append(required, octavia.GatewayCapabilityResponseHeaderOperations)
+		}
 		if corsPolicyWriteRequiresCapability(part, step.route) {
 			required = append(required, octavia.GatewayCapabilityRequestCORS)
 		}
@@ -923,7 +930,8 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if len(step.route.responseHeaderOperations) != 0 || requiresRewrite && len(step.route.policy.responseHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityResponseHeaderOperations)
 		}
-		if step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType && hasGRPCBinaryMetadataList(step.route.responseHeaderOperations) {
+		binaryResponseMetadata := step.route.requiresGRPCBinaryResponseMetadata()
+		if binaryResponseMetadata {
 			required = append(required, octavia.GatewayCapabilityGRPCBinaryMetadata)
 		}
 		binaryRequestMetadata := step.route.requiresGRPCBinaryRequestMetadata()
@@ -942,7 +950,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpMethodRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPMethodMatch)
 		}
-		if binaryRequestMetadata || step.route.probeBeforeGRPCMigration || step.route.rule.ruleType == grpcContentTypeRuleType ||
+		if binaryRequestMetadata || binaryResponseMetadata || step.route.probeBeforeGRPCMigration || step.route.rule.ruleType == grpcContentTypeRuleType ||
 			step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType &&
 				(step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
 			required = append(required, octavia.GatewayCapabilityGRPCContentType)
@@ -962,7 +970,8 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
 	verify := p.verifyGatewayHTTPCapabilities
 	if slices.Contains(required, octavia.GatewayCapabilityHTTPRequestRedirect) || slices.Contains(required, octavia.GatewayCapabilityRequestURLRewrite) ||
-		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityRequestCORS) ||
+		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityTargetResponseHeaders) ||
+		slices.Contains(required, octavia.GatewayCapabilityRequestCORS) ||
 		len(mirrorCapabilities) != 0 {
 		verify = p.verifyGatewayHTTPURLCapabilities
 	}
@@ -979,6 +988,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	}
 	var missingResponseHeaders *octavia.MissingGatewayCapability
 	if withdrawTarget && len(step.route.responseHeaderOperations) != 0 &&
+		!backendResponseHeaderWriteRequiresCapability(graphRoutePart(desired, step), step.route) &&
 		errors.As(err, &missingResponseHeaders) && isResponseHeaderCapability(missingResponseHeaders.Capability) {
 		// Retain the installed operations if the region no longer accepts
 		// new ones. The restrictive action still needs its own capability.
@@ -1014,6 +1024,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityRequestHeaderOperations) && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestHeaderOperations}
+			} else if slices.Contains(required, octavia.GatewayCapabilityTargetResponseHeaders) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityTargetResponseHeaders) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityTargetResponseHeaders}
 			} else if slices.Contains(required, octavia.GatewayCapabilityResponseHeaderOperations) && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityResponseHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityResponseHeaderOperations}
@@ -1063,9 +1076,22 @@ func (step routeMutation) requiresGRPCBinaryRequestMetadata() bool {
 		return true
 	}
 	if step.weightedTargets != nil {
-		return hasGRPCBinaryTargetMetadata(*step.weightedTargets)
+		return hasGRPCBinaryTargetRequestMetadata(*step.weightedTargets)
 	}
-	return step.kind == routeMutationEnablePolicy && hasGRPCBinaryTargetMetadata(step.policy.targetRequestFilters)
+	return step.kind == routeMutationEnablePolicy && hasGRPCBinaryTargetRequestMetadata(step.policy.weightedFilterTargets())
+}
+
+func (step routeMutation) requiresGRPCBinaryResponseMetadata() bool {
+	if step.policy.grpcContentTypeRule != grpcContentTypeRuleType {
+		return false
+	}
+	if hasGRPCBinaryMetadataList(step.responseHeaderOperations) {
+		return true
+	}
+	if step.weightedTargets != nil {
+		return hasGRPCBinaryTargetResponseMetadata(*step.weightedTargets)
+	}
+	return step.kind == routeMutationEnablePolicy && hasGRPCBinaryTargetResponseMetadata(step.policy.weightedFilterTargets())
 }
 
 func isResponseHeaderCapability(capability string) bool {

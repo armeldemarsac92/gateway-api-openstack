@@ -213,7 +213,7 @@ func canBatchPolicyActivation(route desiredRoute, observed observedRouteGraph, p
 		for _, wanted := range route.policies {
 			if wanted.role != policy.role || wanted.position != policy.policy.Position || wanted.redirect != nil ||
 				wanted.weightedPlan != nil || wanted.weighted || wanted.httpsListenerHostname != "" || wanted.requestURLRewrite != nil ||
-				wanted.requestCORS != nil || len(wanted.targetRequestFilters) != 0 ||
+				wanted.requestCORS != nil || len(wanted.targetFilters) != 0 ||
 				len(wanted.requestHeaderOperations) != 0 || len(wanted.responseHeaderOperations) != 0 {
 				continue
 			}

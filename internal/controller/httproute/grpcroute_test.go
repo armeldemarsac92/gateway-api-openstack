@@ -401,6 +401,25 @@ func TestGRPCRouteBackendRequestHeaderModifierStaysOnSelectedTarget(t *testing.T
 	}
 }
 
+func TestGRPCBackendResponseMetadataValidation(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets, cfg.ResponseHeaderModifier = true, true, true, true
+	r := &Reconciler{Config: cfg}
+	route := &gatewayv1.GRPCRoute{}
+	rule := grpcRule("v1")
+	filter := &gatewayv1.HTTPHeaderFilter{Add: []gatewayv1.HTTPHeader{{Name: "trace-bin", Value: "YQ==, Yg"}}}
+	rule.BackendRefs[0].Filters = []gatewayv1.GRPCRouteFilter{{Type: gatewayv1.GRPCRouteFilterResponseHeaderModifier, ResponseHeaderModifier: filter}}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{rule}
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err != nil {
+		t.Fatalf("want permitted repeated binary response metadata on the backend: %v", err)
+	}
+	filter.Add = nil
+	filter.Remove = []string{"grpc-status"}
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil || !strings.Contains(err.Error(), "grpc-status") {
+		t.Fatalf("want reserved response metadata rejected, got %v", err)
+	}
+}
+
 func TestGRPCRequestMetadataValidatesRuleAndBackendScopes(t *testing.T) {
 	cfg := testConfig()
 	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets = true, true, true

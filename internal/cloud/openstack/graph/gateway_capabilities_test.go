@@ -1147,11 +1147,11 @@ func TestGRPCRequestMetadataScopesAndCapabilities(t *testing.T) {
 			}
 			policy := part.policies[0]
 			if scenario.target {
-				if len(policy.requestHeaderOperations) != 0 || len(policy.targetRequestFilters) != 1 ||
-					!slices.Equal(policy.targetRequestFilters[0].RequestHeaderOperations, ops) {
+				if len(policy.requestHeaderOperations) != 0 || len(policy.targetFilters) != 1 ||
+					!slices.Equal(policy.targetFilters[0].RequestHeaderOperations, ops) {
 					t.Fatalf("target operations were moved to another scope: %#v", policy)
 				}
-			} else if !slices.Equal(policy.requestHeaderOperations, ops) || len(policy.targetRequestFilters) != 0 {
+			} else if !slices.Equal(policy.requestHeaderOperations, ops) || len(policy.targetFilters) != 0 {
 				t.Fatalf("rule operations were moved to another scope: %#v", policy)
 			}
 
@@ -1166,7 +1166,7 @@ func TestGRPCRequestMetadataScopesAndCapabilities(t *testing.T) {
 			for _, kind := range []routeMutationKind{routeMutationCreatePolicy, updateKind, routeMutationEnablePolicy} {
 				mutation.kind = kind
 				if kind != routeMutationEnablePolicy && scenario.target {
-					mutation.weightedTargets = &policy.targetRequestFilters
+					mutation.weightedTargets = &policy.targetFilters
 				} else {
 					mutation.weightedTargets = nil
 				}
@@ -1248,7 +1248,7 @@ func TestGRPCBinaryRequestMigrationKeepsFallbackOffTheWire(t *testing.T) {
 				weighted := &desired.routes[0].httpParts[0]
 				weighted.weightedTargets = []desiredHTTPWeightedTarget{{backendKey: "target", weight: 1, requestHeaderOperations: ops}}
 				wanted.weighted = true
-				wanted.targetRequestFilters = []octavia.WeightedHTTPTarget{{RequestHeaderOperations: ops}}
+				wanted.targetFilters = []octavia.WeightedHTTPTarget{{RequestHeaderOperations: ops}}
 				legacy.policy.Action, legacy.policy.RedirectPoolID = string(octavia.ActionWeightedTargets), ""
 				legacy.weightedTargets = []octavia.WeightedHTTPTarget{{Weight: 1, PoolID: targetPool.pool.ID}}
 				observation.pool, observation.members = nil, nil
@@ -1330,7 +1330,7 @@ func TestGRPCBinaryRequestMigrationKeepsFallbackOffTheWire(t *testing.T) {
 			// again after the new policy activated.
 			advertised = advertised[:len(advertised)-1]
 			wanted = &desired.routes[0].httpParts[0].policies[0]
-			wanted.requestHeaderOperations, wanted.targetRequestFilters = nil, nil
+			wanted.requestHeaderOperations, wanted.targetFilters = nil, nil
 			cleanup := graphMutation{kind: graphRouteMutation, listenerID: "rpc", withdrawHTTPPolicy: true, backendKey: "backend",
 				route: routeMutation{kind: routeMutationDisablePolicy, id: legacy.policy.ID, withdrawHTTPPolicy: true}}
 			if plan := guard([]graphMutation{cleanup}); len(plan) != 1 || plan[0].route.kind != routeMutationDisablePolicy {
@@ -1354,7 +1354,7 @@ func TestGRPCTargetBinaryRequestWithdrawalUsesObservedMatcher(t *testing.T) {
 		{PoolID: "local", Weight: 75, RequestHeaderOperations: ops},
 		{PoolID: "remote", Weight: 25, RequestHeaderOperations: ops},
 	}
-	part.policies[0].targetRequestFilters = []octavia.WeightedHTTPTarget{{RequestHeaderOperations: ops}, {}}
+	part.policies[0].targetFilters = []octavia.WeightedHTTPTarget{{RequestHeaderOperations: ops}, {}}
 	part.policies[0].grpcContentTypeRule = grpcContentTypeRuleType
 	part.weightedAuthorizations = map[string]map[string]int{policy.policy.ID: {"local": 75}}
 	steps := weightedTargetWithdrawals(part, observation)
@@ -1389,7 +1389,7 @@ func TestGRPCTargetBinaryRequestWithdrawalUsesObservedMatcher(t *testing.T) {
 		t.Fatalf("the restarted controller did not withdraw only the affected listener: %#v, %#v", plan, result)
 	}
 
-	part.policies[0].targetRequestFilters = nil
+	part.policies[0].targetFilters = nil
 	steps = weightedTargetWithdrawals(part, observation)
 	if len(steps) != 1 || steps[0].kind != routeMutationDisablePolicy || !steps[0].withdrawHTTPPolicy {
 		t.Fatalf("removing the last target filter must retire the tagged policy: %#v", steps)

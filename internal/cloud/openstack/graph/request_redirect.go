@@ -112,7 +112,7 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		}
 		retryClosure := listener.ProvisioningStatus == "ERROR" &&
 			(predicate.capability == octavia.GatewayCapabilityRequestURLRewrite || predicate.capability == octavia.GatewayCapabilityTargetRequestFilters ||
-				predicate.capability == octavia.GatewayCapabilityRequestCORS)
+				predicate.capability == octavia.GatewayCapabilityRequestCORS || predicate.capability == octavia.GatewayCapabilityTargetResponseHeaders)
 		if available && !state.unsettled && !retryClosure {
 			continue
 		}

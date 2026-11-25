@@ -523,6 +523,98 @@ func TestObserveWeightedHTTPPolicyRequiresOwnedPoolEdges(t *testing.T) {
 	}
 }
 
+func TestWeightedTargetGuardsOnlyRequireEffectiveFilters(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	route := desired.routes[0]
+	part := route.httpParts[2]
+	route.httpParts[1].backendTLS.phase = backendTLSDenied
+	part.weightedTargets[0].requestHeaderOperations = []cloud.HTTPHeaderOperation{
+		{Name: "x-request", Operation: cloud.HTTPHeaderSet, Value: "primary"},
+	}
+	part.weightedTargets[1].responseHeaderOperations = []cloud.HTTPHeaderOperation{
+		{Name: "x-response", Operation: cloud.HTTPHeaderSet, Value: "unavailable"},
+	}
+	filters, err := compileWeightedTargetFilters(cloud.HTTPPathMatch{}, part.weightedTargets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.policies[0].targetFilters = filters
+	resolved := resolveWeightedHTTPPart(part, route, actual.routes[0], actual.listener.ID)
+	policy := resolved.policies[0]
+	if policy.targetsPending() || !backendRequestFiltersPolicy.required(policy) ||
+		!weightedTargetsEqual(policy.weightedPlan.targets[1], fixedWeightedHTTPTarget(1)) {
+		t.Fatalf("want a ready request filter and local failure share, got %+v", policy.weightedPlan)
+	}
+	if backendResponseHeadersPolicy.required(policy) {
+		t.Fatal("the response filter on a denied backend must not keep the listener closed")
+	}
+	policy.weightedPlan.pending = true
+	if !backendResponseHeadersPolicy.required(policy) {
+		t.Fatal("an unsettled target plan must still retain declared guards")
+	}
+}
+
+func TestWeightedTargetResponseHeadersRequireExactReadback(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	desired.protocol, actual.protocol = cloud.ListenerProtocolHTTP, cloud.ListenerProtocolHTTP
+	actual.listener.ProtocolPort, actual.listener.ProvisioningStatus = 80, "ACTIVE"
+	actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora-regional", "ACTIVE"
+	actual.adminObserved = map[string]bool{actual.listener.ID: true}
+	desired.spec.Gateway.Spec.ListenerPort = 80
+
+	part := &desired.routes[0].httpParts[2]
+	headers := []cloud.HTTPHeaderOperation{{Name: "x-backend", Operation: cloud.HTTPHeaderSet, Value: "selected"}}
+	part.weightedTargets[0].responseHeaderOperations = headers
+	part.weightedTargets[1].backendKey = part.weightedTargets[0].backendKey
+	filters, err := compileWeightedTargetFilters(cloud.HTTPPathMatch{}, part.weightedTargets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.policies[0].targetFilters = filters
+	policy := &actual.routes[0].httpParts[part.backendKey].policies[0]
+	policy.policy.Position = part.policies[0].position
+	policy.adminObserved = true
+	policy.rules[0].flagsObserved = true
+	resolved := resolveWeightedHTTPPart(*part, desired.routes[0], actual.routes[0], actual.listener.ID)
+	targets := resolved.policies[0].weightedPlan.targets
+	if len(targets) != 2 || targets[0].PoolID == "" || targets[0].PoolID != targets[1].PoolID ||
+		!slices.Equal(targets[0].ResponseHeaderOperations, headers) || len(targets[1].ResponseHeaderOperations) != 0 {
+		t.Fatalf("response headers must belong to one occurrence of the shared pool: %+v", targets)
+	}
+	plain := []string{octavia.GatewayCapabilityFixedHTTPResponses, octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityResponseHeaderOperations}
+	capabilities := append(slices.Clone(plain), octavia.GatewayCapabilityTargetResponseHeaders)
+	provider := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora-regional/gateway_capabilities" {
+			t.Errorf("unexpected discovery request: %s %s", r.Method, r.URL)
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+	}), &gatewayTransitionRequests{})
+	provider.responseHeaderModifier, provider.weightedHTTPTargets = true, true
+	open := graphMutation{kind: graphEnableListener, listenerID: actual.listener.ID}
+	guard := func(result *cloud.GatewayGraphResult) []graphMutation {
+		return provider.protectBackendResponseHeaderTraffic(t.Context(), desired, actual, []graphMutation{open}, result)
+	}
+
+	actual.listener.AdminStateUp = false
+	policy.backendResponseHeadersTagged = true
+	leaked := slices.Clone(targets)
+	leaked[0].ResponseHeaderOperations, leaked[1].ResponseHeaderOperations = nil, headers
+	policy.weightedTargets = leaked
+	if got := guard(&cloud.GatewayGraphResult{}); len(got) != 0 {
+		t.Fatalf("response operations on the wrong occurrence reopened the listener: %+v", got)
+	}
+	policy.weightedTargets = targets
+	if got := guard(&cloud.GatewayGraphResult{}); len(got) != 1 || got[0].kind != graphEnableListener {
+		t.Fatalf("verified target response operations should permit reopening: %+v", got)
+	}
+	actual.listener.AdminStateUp = true
+	capabilities = plain
+	result := cloud.GatewayGraphResult{Routes: make([]cloud.RouteGraphResult, 1)}
+	if got := guard(&result); len(got) != 1 || got[0].kind != graphDisableListener || !result.Gateway.HTTPPolicyTransition {
+		t.Fatalf("withdrawing the regional response capability must close the listener and mark the route pending: %+v, %+v", got, result)
+	}
+}
+
 func TestWeightedTargetRequestFiltersRequireRegionalCapabilityAndReadback(t *testing.T) {
 	desired, actual := weightedPlanFixture()
 	desired.protocol = cloud.ListenerProtocolHTTP
@@ -534,11 +626,11 @@ func TestWeightedTargetRequestFiltersRequireRegionalCapabilityAndReadback(t *tes
 	headers := []cloud.HTTPHeaderOperation{{Name: "backend", Operation: cloud.HTTPHeaderSet, Value: "local"}}
 	part.weightedTargets[0].requestHeaderOperations = headers
 	part.weightedTargets[0].requestURLRewrite = &cloud.HTTPURLRewrite{ReplacePrefixMatch: ptr.To("/new")}
-	filters, err := compileWeightedTargetRequestFilters(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/old"}, part.weightedTargets)
+	filters, err := compileWeightedTargetFilters(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/old"}, part.weightedTargets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	part.policies[0].targetRequestFilters = filters
+	part.policies[0].targetFilters = filters
 	policy := &actual.routes[0].httpParts[part.backendKey].policies[0]
 	policy.policy.Position = part.policies[0].position
 	policy.adminObserved = true
@@ -668,6 +760,24 @@ func TestWeightedTargetFilterRemovalPrecedesUnpreparedReplacement(t *testing.T) 
 }
 
 func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing.T) {
+	t.Run("backend request filters", func(t *testing.T) {
+		testWeightedTargetIncompleteInventory(t, openstackidentity.BackendRequestFiltersPolicyTag, func(policy map[string]any) { delete(policy, "admin_state_up") })
+	})
+	t.Run("backend response headers", func(t *testing.T) {
+		testWeightedTargetIncompleteInventory(t, openstackidentity.BackendResponseHeadersPolicyTag, func(policy map[string]any) { delete(policy, "admin_state_up") })
+	})
+	t.Run("missing weighted action", func(t *testing.T) {
+		testWeightedTargetIncompleteInventory(t, openstackidentity.BackendResponseHeadersPolicyTag, func(policy map[string]any) { delete(policy, "action") })
+	})
+	t.Run("malformed rule response operations", func(t *testing.T) {
+		testWeightedTargetIncompleteInventory(t, openstackidentity.BackendResponseHeadersPolicyTag, func(policy map[string]any) {
+			policy["response_header_operations"] = "unreadable"
+		})
+	})
+}
+
+func testWeightedTargetIncompleteInventory(t *testing.T, marker string, corrupt func(map[string]any)) {
+	t.Helper()
 	id := safetyTestIdentity(t)
 	spec := completeGraphSpec(id)
 	port := spec.Gateway.Spec.ListenerPort
@@ -697,11 +807,14 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 	role := openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, openstackidentity.HTTPWeightedRuleKey(0),
 		openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/private", ""))
 	policy := map[string]any{"id": "tagged", "project_id": "project-a", "listener_id": "affected", "action": "WEIGHTED_TARGETS",
-		"position": 1, "provisioning_status": "ACTIVE", "redirect_pool_id": nil, "targets": []octavia.WeightedHTTPTarget{fixedWeightedHTTPTarget(1)},
-		"tags": append(safetyRouteTags(t, id, role), openstackidentity.BackendRequestFiltersPolicyTag)}
+		"position": 1, "provisioning_status": "ACTIVE", "admin_state_up": true, "redirect_pool_id": nil,
+		"targets": []octavia.WeightedHTTPTarget{fixedWeightedHTTPTarget(1)}, "rules": []any{},
+		"tags": append(safetyRouteTags(t, id, role), marker)}
+	corrupt(policy)
 	reads := map[string]map[string]any{
 		"/lbaas/loadbalancers": {"loadbalancers": []any{lb}}, "/lbaas/loadbalancers/lb": {"loadbalancer": lb},
 		"/lbaas/listeners": {"listeners": []any{affected, neighbor}}, "/lbaas/pools": {"pools": []any{}},
+		"/lbaas/l7policies/tagged/rules": {"rules": []any{}},
 	}
 	var writes []string
 	p := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -744,5 +857,34 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 	}
 	if !slices.Equal(writes, []string{"PUT /lbaas/listeners/affected"}) {
 		t.Fatalf("expected a single restrictive write and no sibling interruption, got %v", writes)
+	}
+}
+
+func TestMalformedWeightedResponseHeaderInventoryDoesNotMaskForeignPool(t *testing.T) {
+	id := safetyTestIdentity(t)
+	role := openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, openstackidentity.HTTPWeightedRuleKey(0),
+		openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/private", ""))
+	policy := map[string]any{"id": "tagged", "project_id": "project-a", "listener_id": "affected", "action": "WEIGHTED_TARGETS",
+		"position": 1, "provisioning_status": "ACTIVE", "admin_state_up": true, "redirect_pool_id": nil,
+		"targets": []any{map[string]any{"weight": 1, "pool_id": "foreign-pool"}, map[string]any{"weight": "unreadable"}},
+		"tags":    append(safetyRouteTags(t, id, role), openstackidentity.BackendResponseHeadersPolicyTag)}
+	p := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != "/lbaas/l7policies" {
+			t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		safetyWriteJSON(t, w, map[string]any{"l7policies": []any{policy}})
+	}), &gatewayTransitionRequests{})
+	p.fixedHTTPResponses, p.weightedHTTPTargets = true, true
+	inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: id}}, graphs: make([]observedRouteGraph, 1)}
+	listener := listeners.Listener{ID: "affected", Protocol: cloud.ListenerProtocolHTTP, ProjectID: "project-a",
+		L7Policies: []l7policies.L7Policy{{ID: "tagged"}}}
+	for _, refs := range [][]l7policies.L7Policy{listener.L7Policies, nil} {
+		listener.L7Policies = refs
+		err := p.observeListenerPolicies(t.Context(), &inventory, &listener, cloud.ListenerProtocolHTTP,
+			map[string]poolRouteOwner{"foreign-pool": {route: 1, backend: "foreign"}}, true)
+		var incomplete *httpFilterInventoryError
+		if !errors.Is(err, cloud.ErrOwnershipConflict) || errors.As(err, &incomplete) {
+			t.Fatalf("an explicit foreign pool must prevent a listener mutation even with an unreadable slot or parent inventory: %v", err)
+		}
 	}
 }

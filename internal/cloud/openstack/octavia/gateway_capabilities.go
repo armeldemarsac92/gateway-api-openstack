@@ -37,6 +37,7 @@ const (
 	GatewayCapabilityFixedHTTPResponses        = "fixed_http_responses_v1"
 	GatewayCapabilityWeightedHTTPTargets       = "weighted_http_targets_v1"
 	GatewayCapabilityTargetRequestFilters      = "weighted_http_target_request_filters_v1"
+	GatewayCapabilityTargetResponseHeaders     = "weighted_http_target_response_headers_v1"
 	GatewayCapabilityRequestHeaderOperations   = "request_header_operations_v1"
 	GatewayCapabilityResponseHeaderOperations  = "response_header_operations_v1"
 	GatewayCapabilityFrontendAuthFallback      = "frontend_client_auth_insecure_fallback_v1"

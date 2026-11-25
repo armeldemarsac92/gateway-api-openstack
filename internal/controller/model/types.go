@@ -44,6 +44,7 @@ type Input struct {
 	HTTPRequestMirror      bool
 	HTTPCORS               bool
 	BackendRequestFilters  bool
+	BackendResponseHeaders bool
 	BackendH2C             bool
 	EnableXBackend         bool
 	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`
