@@ -149,6 +149,27 @@ func TestTelemetryPolicyPrecedenceAndStatus(t *testing.T) {
 	require.Equal(t, []gatewayv1.PolicyAncestorStatus{foreign}, young.Status.Ancestors)
 }
 
+func TestTelemetrySamplingDefaultsAndInvalidFractions(t *testing.T) {
+	tracing := gatewayx.TracingConfig{}
+	full := cloud.TelemetryRate{Numerator: 1, Denominator: 1}
+	sampling, valid := telemetrySampling(tracing)
+	require.True(t, valid)
+	require.Nil(t, sampling, "legacy full-rate tracing uses the original Octavia payload")
+
+	tracing.ParentBasedSampling.Mode = gatewayx.ParentBasedSamplingModeEnabled
+	sampling, valid = telemetrySampling(tracing)
+	require.True(t, valid)
+	require.Equal(t, &cloud.TelemetrySampling{Base: full, Parent: &full}, sampling)
+
+	tracing.ParentBasedSampling.SamplingRate = &gatewayv1.Fraction{Numerator: 101}
+	_, valid = telemetrySampling(tracing)
+	require.False(t, valid)
+	tracing.ParentBasedSampling.Mode = gatewayx.ParentBasedSamplingModeDisabled
+	tracing.ParentBasedSampling.SamplingRate = &gatewayv1.Fraction{Numerator: 50}
+	_, valid = telemetrySampling(tracing)
+	require.False(t, valid, "a parent rate requires parent-based sampling")
+}
+
 func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) {
 	cfg := testConfig()
 	cfg.TelemetryPolicy, cfg.GatewayAPIChannel = true, features.FeatureChannelExperimental
@@ -167,6 +188,10 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	policy := telemetryTestPolicy("collector", 10)
 	policy.Spec.Tracing = gatewayx.TracingConfig{
 		Mode: gatewayx.TracingModeEnabled, ServiceName: "edge.apps", SpanName: "Edge request",
+		SamplingRate: &gatewayv1.Fraction{Numerator: 25},
+		ParentBasedSampling: gatewayx.ParentBasedSampling{
+			Mode: gatewayx.ParentBasedSamplingModeEnabled, SamplingRate: &gatewayv1.Fraction{Numerator: 1, Denominator: ptr.To(int32(2))},
+		},
 		Provider: gatewayx.TracingProvider{BackendRef: gatewayv1.BackendObjectReference{Name: gatewayv1.ObjectName(service.Name),
 			Namespace: ptr.To(gatewayv1.Namespace(service.Namespace)), Port: ptr.To(gatewayv1.PortNumber(8443))}},
 	}
@@ -200,7 +225,9 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	run()
 	require.Nil(t, calls[0], "status slot precedes the first exporter write")
 	run()
-	require.NotNil(t, calls[1])
+	require.NotNil(t, calls[1], "a policy with base 25/100 and sampled-parent 1/2 must reach the exporter")
+	require.Equal(t, &cloud.TelemetrySampling{Base: cloud.TelemetryRate{Numerator: 25, Denominator: 100},
+		Parent: &cloud.TelemetryRate{Numerator: 1, Denominator: 2}}, calls[1].Sampling)
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.12", Port: 9443}}, calls[1].Members)
 	require.Equal(t, "edge.apps", calls[1].ServiceName)
 	require.Equal(t, "Edge request", calls[1].SpanName)

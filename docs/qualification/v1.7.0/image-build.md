@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller enforced an absolute session-cookie timeout across routes to an Experimental XBackend. [Build record](image.json) · [Cookie traffic](provider/xbackend-cookie-deadline-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-40121968c76c59bce4fefaa1d2585094a3acbbd4)
+The linux/amd64 controller applied Experimental XTelemetryPolicy sampling rates to local requests. [Build record](image.json) · [Collector observations](provider/xtelemetry-sampling-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-470b62417e9e7e1536f642538f22084fc7fdb34c)
+
+The linux/amd64 controller enforced an absolute session-cookie timeout across routes to an Experimental XBackend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-40121968c76c59bce4fefaa1d2585094a3acbbd4/image.json) · [Cookie traffic](provider/xbackend-cookie-deadline-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-40121968c76c59bce4fefaa1d2585094a3acbbd4)
 
 The linux/amd64 controller preserved a UDPRoute's backend shares during grant and endpoint changes on a dedicated local Gateway. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-4418c52adff866a90d05fa8061c5405d5569bda3/image.json) · [UDP traffic](provider/udproute-packet-drop-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-4418c52adff866a90d05fa8061c5405d5569bda3)
 
