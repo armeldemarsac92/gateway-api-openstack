@@ -111,7 +111,7 @@ func run(ctx context.Context) error {
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
 	var httpCORS bool
-	var gatewayInfrastructureMetadata bool
+	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
 	var httpBackendRequestFilters bool
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
@@ -119,6 +119,7 @@ func run(ctx context.Context) error {
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
+	flag.BoolVar(&gatewayAddressRoutabilityCluster, "gateway-address-routability-cluster", false, "serve Cluster Gateway addresses through Kubernetes Service ClusterIPs")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
 	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
@@ -182,6 +183,7 @@ func run(ctx context.Context) error {
 
 	controllerConfig := controller.Config{
 		GatewayInfrastructureMetadata: gatewayInfrastructureMetadata,
+		ClusterGatewayAddresses:       gatewayAddressRoutabilityCluster,
 		ControllerName:                gatewayv1.GatewayController(controllerName),
 		ControllerVersion:             version,
 		GatewayAPIChannel:             gatewayAPIChannel,

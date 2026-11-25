@@ -179,7 +179,10 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		return w.withdrawBackendClientCertificate(ctx, request.Identity, gateway)
 	}
 	started = time.Now()
-	routes, err := w.Routes.ObserveRouteGraph(ctx, request, gateway.Object)
+	var routes RouteInputs
+	if !gateway.Node.AddressWithdrawalOnly() {
+		routes, err = w.Routes.ObserveRouteGraph(ctx, request, gateway.Object)
+	}
 	w.observeStage(StageRouteInput, started, err)
 	if err != nil {
 		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)

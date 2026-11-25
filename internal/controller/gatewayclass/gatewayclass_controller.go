@@ -210,6 +210,9 @@ func (r *Reconciler) reconcileParameters(ctx context.Context, scope *gatewayClas
 		if r.Config.GatewayAddressRoutabilityEnabled() {
 			class.Status.SupportedFeatures = []gatewayv1.SupportedFeature{{Name: gatewayv1.FeatureName(features.SupportGatewayAddressRoutability)}}
 		}
+		if r.Config.GatewayAddressRoutabilityClusterEnabled() {
+			class.Status.SupportedFeatures = append(class.Status.SupportedFeatures, gatewayv1.SupportedFeature{Name: gatewayv1.FeatureName(features.SupportGatewayAddressRoutabilityCluster)})
+		}
 		if r.Config.GatewayInfrastructureMetadata {
 			class.Status.SupportedFeatures = append(class.Status.SupportedFeatures, gatewayv1.SupportedFeature{Name: gatewayv1.FeatureName(features.SupportGatewayInfrastructure)})
 		}

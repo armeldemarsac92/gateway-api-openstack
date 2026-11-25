@@ -43,6 +43,9 @@ import (
 const (
 	discoveryControllerAnnotation = "gateway-api-openstack.github.io/discovery-controller"
 	discoveryMetadataAnnotation   = "gateway-api-openstack.github.io/discovery-metadata"
+	clusterAddressGatewayLabel    = "gateway-api-openstack.github.io/cluster-address-gateway"
+	clusterFrontendVIPAnnotation  = "gateway-api-openstack.github.io/cluster-frontend-vip"
+	serviceProxyNameLabel         = "service.kubernetes.io/service-proxy-name"
 	discoveryManager              = "gateway-api-openstack.github.io"
 	maxDiscoveryPorts             = 20000 // EndpointSlice API validation limit.
 )
@@ -108,31 +111,56 @@ func (r *Reconciler) reconcileGatewayDiscovery(ctx context.Context, gateway *gat
 		return err
 	}
 	address, _ := netip.ParseAddr(observation.State.VIPAddress)
-	address = address.Unmap()
-	ports := discoveryPorts(r.Config, gateway, primary, observation)
+	_, err := r.publishGatewayDiscovery(ctx, gateway, discoveryPublication{
+		key: discoveryServiceKey(gateway), clusterIP: corev1.ClusterIPNone, vip: address.Unmap(),
+		ports: discoveryPorts(r.Config, gateway, primary, observation),
+	})
+	return err
+}
+
+type discoveryPublication struct {
+	key        client.ObjectKey
+	clusterIP  string // None for headless discovery, empty for an allocated ClusterIP.
+	vip        netip.Addr
+	floatingIP netip.Addr
+	ports      []corev1.ServicePort
+	// Reserve the address before Octavia has a frontend to publish.
+	reserveFamily discoveryv1.AddressType
+}
+
+type discoverySliceCollision struct{ error }
+
+func (r *Reconciler) publishGatewayDiscovery(ctx context.Context, gateway *gatewayv1.Gateway, publication discoveryPublication) (string, error) {
+	key, address, ports := publication.key, publication.vip, publication.ports
+	headless := publication.clusterIP == corev1.ClusterIPNone
 	if len(ports) > maxDiscoveryPorts {
-		return fmt.Errorf("gateway serves more than %d ports, the EndpointSlice limit", maxDiscoveryPorts)
+		return "", fmt.Errorf("gateway serves more than %d ports, the EndpointSlice limit", maxDiscoveryPorts)
 	}
-	var family discoveryv1.AddressType
-	if address.IsGlobalUnicast() && address.Zone() == "" && len(ports) > 0 {
-		family = discoveryv1.AddressTypeIPv6
-		if address.Is4() {
-			family = discoveryv1.AddressTypeIPv4
-		}
+	family := publication.reserveFamily
+	reserving := family != ""
+	if !reserving && len(ports) > 0 {
+		family = discoveryAddressFamily(address)
 	}
 
-	key := discoveryServiceKey(gateway)
 	var service corev1.Service
 	err := r.APIReader.Get(ctx, key, &service)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("get Gateway discovery Service: %w", err)
+		return "", fmt.Errorf("get Gateway discovery Service: %w", err)
 	}
 	current := err == nil
 	owned := current && r.ownsDiscoveryObject(gateway, &service)
-	usable := owned && usableDiscoveryService(&service)
+	if owned && !headless && publication.conflictsWithFrontend(service.Spec.ClusterIP) {
+		return "", errors.Join(fmt.Errorf("ClusterIP of Service %s conflicts with the Octavia frontend", key),
+			r.withdrawDiscoveryPublication(ctx, gateway, key, true))
+	}
+	usable := owned && publication.usableService(&service, family)
 	if owned || !current && family != "" {
 		if err := r.checkDiscoverySliceAssociation(ctx, gateway, key, &service, owned); err != nil {
-			return err
+			var collision discoverySliceCollision
+			if !headless && errors.As(err, &collision) {
+				err = clusterAddressUnavailable{err}
+			}
+			return "", err
 		}
 	}
 
@@ -144,12 +172,16 @@ func (r *Reconciler) reconcileGatewayDiscovery(ctx context.Context, gateway *gat
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return fmt.Errorf("get Gateway discovery EndpointSlice: %w", err)
+			return "", fmt.Errorf("get Gateway discovery EndpointSlice: %w", err)
 		}
 		owned := r.ownsDiscoveryObject(gateway, &endpointSlice)
 		if addressFamily == family {
 			if !owned || endpointSlice.AddressType != family {
-				return fmt.Errorf("discovery EndpointSlice %s is already in use", sliceKey)
+				err := fmt.Errorf("discovery EndpointSlice %s is already in use", sliceKey)
+				if !headless {
+					err = clusterAddressUnavailable{err}
+				}
+				return "", err
 			}
 			if usable && sliceHasServiceOwner(&endpointSlice, &service) && endpointSlice.DeletionTimestamp.IsZero() {
 				active = &endpointSlice
@@ -158,30 +190,63 @@ func (r *Reconciler) reconcileGatewayDiscovery(ctx context.Context, gateway *gat
 		}
 		if owned {
 			if err := r.withdrawDiscoverySlice(ctx, &endpointSlice); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
 
 	if current && !usable {
-		return fmt.Errorf("discovery Service %s is already in use or has an incompatible spec", key)
+		err := fmt.Errorf("discovery Service %s is already in use or has an incompatible spec", key)
+		if !headless {
+			err = clusterAddressUnavailable{err}
+		}
+		return "", err
 	}
-	if !current && family == "" {
-		return nil
+	if family == "" && (!current || !headless) {
+		return "", nil
 	}
 	if !current {
 		service = corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name, OwnerReferences: []metav1.OwnerReference{discoveryOwner(gateway)}},
-			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: corev1.ClusterIPNone},
+			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: publication.clusterIP},
+		}
+		if !headless {
+			service.Spec.IPFamilies = []corev1.IPFamily{corev1.IPFamily(family)}
+			service.Spec.IPFamilyPolicy = ptr.To(corev1.IPFamilyPolicySingleStack)
 		}
 	}
 	base := service.DeepCopy()
-	service.Spec.Ports = ports
-	if err := r.applyDiscoveryMetadata(gateway, &service, nil); err != nil {
-		return err
+	if !reserving || !current {
+		service.Spec.Ports = ports
+	}
+	var serviceLabels map[string]string
+	if !headless {
+		serviceLabels = map[string]string{clusterAddressGatewayLabel: string(gateway.UID)}
+		delete(service.Labels, serviceProxyNameLabel)
+		delete(service.Labels, corev1.IsHeadlessService)
+		service.Spec.InternalTrafficPolicy = ptr.To(corev1.ServiceInternalTrafficPolicyCluster)
+	}
+	if err := r.applyDiscoveryMetadata(gateway, &service, serviceLabels); err != nil {
+		return "", err
+	}
+	if !headless && !reserving {
+		service.Annotations[clusterFrontendVIPAnnotation] = address.String()
 	}
 	if err := r.writeDiscoveryObject(ctx, base, &service); err != nil || family == "" {
-		return err
+		if !headless && !current && serviceIPUnavailable(err) {
+			err = clusterAddressUnavailable{err}
+		}
+		return "", err
+	}
+	if !headless && (!r.ownsDiscoveryObject(gateway, &service) || !publication.usableService(&service, family) || !clusterServiceProxyEnabled(&service)) {
+		err := fmt.Errorf("allocated ClusterIP for Service %s is incompatible with the Octavia frontend", key)
+		if publication.conflictsWithFrontend(service.Spec.ClusterIP) {
+			err = errors.Join(err, r.withdrawDiscoveryPublication(ctx, gateway, key, true))
+		}
+		return "", err
+	}
+	if reserving {
+		return service.Spec.ClusterIP, nil
 	}
 
 	if active == nil {
@@ -199,19 +264,52 @@ func (r *Reconciler) reconcileGatewayDiscovery(ctx context.Context, gateway *gat
 	}
 	baseSlice := active.DeepCopy()
 	active.Endpoints = []discoveryv1.Endpoint{{Addresses: []string{address.String()}, Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)}}}
-	active.Ports = make([]discoveryv1.EndpointPort, 0, len(ports))
-	for _, port := range ports {
-		active.Ports = append(active.Ports, discoveryv1.EndpointPort{Name: ptr.To(port.Name), Port: ptr.To(port.Port), Protocol: ptr.To(port.Protocol)})
-	}
+	active.Ports = discoveryEndpointPorts(ports)
 	reserved := map[string]string{
 		discoveryv1.LabelServiceName: service.Name,
 		discoveryv1.LabelManagedBy:   discoveryManager,
-		corev1.IsHeadlessService:     "",
+	}
+	delete(active.Labels, corev1.IsHeadlessService)
+	if headless {
+		reserved[corev1.IsHeadlessService] = ""
+	} else {
+		reserved[clusterAddressGatewayLabel] = string(gateway.UID)
 	}
 	if err := r.applyDiscoveryMetadata(gateway, active, reserved); err != nil {
-		return err
+		return "", err
 	}
-	return r.writeDiscoveryObject(ctx, baseSlice, active)
+	if err := r.writeDiscoveryObject(ctx, baseSlice, active); err != nil {
+		return "", err
+	}
+	if !headless && !r.validClusterEndpointSlice(gateway, &service, active, family) {
+		return "", fmt.Errorf("cluster address EndpointSlice %s does not match the Service and Octavia frontend", client.ObjectKeyFromObject(active))
+	}
+	return service.Spec.ClusterIP, nil
+}
+
+func discoveryAddressFamily(address netip.Addr) discoveryv1.AddressType {
+	if !address.IsGlobalUnicast() || address.Zone() != "" {
+		return ""
+	}
+	if address.Is4() {
+		return discoveryv1.AddressTypeIPv4
+	}
+	return discoveryv1.AddressTypeIPv6
+}
+
+func discoveryEndpointPorts(ports []corev1.ServicePort) []discoveryv1.EndpointPort {
+	endpointPorts := make([]discoveryv1.EndpointPort, 0, len(ports))
+	for _, port := range ports {
+		endpointPorts = append(endpointPorts, discoveryv1.EndpointPort{Name: ptr.To(port.Name), Port: ptr.To(port.Port), Protocol: ptr.To(port.Protocol)})
+	}
+	return endpointPorts
+}
+
+func clusterServiceProxyEnabled(service *corev1.Service) bool {
+	_, customProxy := service.Labels[serviceProxyNameLabel]
+	_, headless := service.Labels[corev1.IsHeadlessService]
+	return !customProxy && !headless && ptr.Deref(service.Spec.InternalTrafficPolicy, corev1.ServiceInternalTrafficPolicyCluster) ==
+		corev1.ServiceInternalTrafficPolicyCluster
 }
 
 // Check an existing publication even when no new provider result is usable.
@@ -242,13 +340,17 @@ func (r *Reconciler) checkDiscoverySliceAssociation(ctx context.Context, gateway
 			continue
 		}
 		collision := fmt.Errorf("discovery Service %s has an EndpointSlice managed elsewhere: %s", serviceKey, endpointSlice.Name)
+		var cleanupErr error
 		if owned {
 			// Removing the Service takes its name out of DNS even while the
 			// foreign slice is still present. The delete is fenced by its UID
 			// and resource version from the ownership check.
-			collision = errors.Join(collision, r.deleteDiscoveryObject(ctx, service))
+			cleanupErr = r.deleteDiscoveryObject(ctx, service)
 		}
-		return errors.Join(collision, r.withdrawGatewayDiscovery(ctx, gateway, false))
+		if err := errors.Join(cleanupErr, r.withdrawDiscoveryPublication(ctx, gateway, serviceKey, false)); err != nil {
+			return errors.Join(collision, err)
+		}
+		return discoverySliceCollision{collision}
 	}
 	return nil
 }
@@ -286,10 +388,26 @@ func discoveryPorts(config controller.Config, gateway *gatewayv1.Gateway, primar
 	return ports
 }
 
-func usableDiscoveryService(service *corev1.Service) bool {
-	return service.DeletionTimestamp.IsZero() && service.Spec.Type == corev1.ServiceTypeClusterIP &&
-		service.Spec.ClusterIP == corev1.ClusterIPNone && len(service.Spec.Selector) == 0 &&
-		len(service.Spec.ExternalIPs) == 0 && !service.Spec.PublishNotReadyAddresses
+func (p discoveryPublication) usableService(service *corev1.Service, family discoveryv1.AddressType) bool {
+	spec := service.Spec
+	if !service.DeletionTimestamp.IsZero() || spec.Type != corev1.ServiceTypeClusterIP ||
+		len(spec.Selector) != 0 || len(spec.ExternalIPs) != 0 || spec.PublishNotReadyAddresses {
+		return false
+	}
+	if p.clusterIP == corev1.ClusterIPNone {
+		return spec.ClusterIP == corev1.ClusterIPNone
+	}
+	address, _ := netip.ParseAddr(spec.ClusterIP)
+	return discoveryAddressFamily(address) != "" && !p.conflictsWithFrontend(spec.ClusterIP) &&
+		len(spec.ClusterIPs) == 1 && spec.ClusterIPs[0] == spec.ClusterIP && len(spec.IPFamilies) == 1 &&
+		spec.IPFamilies[0] == corev1.IPFamily(discoveryAddressFamily(address)) &&
+		(family == "" || string(spec.IPFamilies[0]) == string(family)) &&
+		(p.clusterIP == "" || spec.ClusterIP == p.clusterIP)
+}
+
+func (p discoveryPublication) conflictsWithFrontend(clusterIP string) bool {
+	ip, err := netip.ParseAddr(clusterIP)
+	return err == nil && (ip == p.vip || ip == p.floatingIP)
 }
 
 func sliceHasServiceOwner(slice *discoveryv1.EndpointSlice, service *corev1.Service) bool {
@@ -308,7 +426,10 @@ func (r *Reconciler) withdrawGatewayDiscovery(ctx context.Context, gateway *gate
 	if err := r.checkDiscoveryGateway(ctx, gateway, false); err != nil {
 		return err
 	}
-	key := discoveryServiceKey(gateway)
+	return r.withdrawDiscoveryPublication(ctx, gateway, discoveryServiceKey(gateway), removeService)
+}
+
+func (r *Reconciler) withdrawDiscoveryPublication(ctx context.Context, gateway *gatewayv1.Gateway, key client.ObjectKey, removeService bool) error {
 	objects := []client.Object{
 		&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: discoverySliceKey(key, discoveryv1.AddressTypeIPv4).Name}},
 		&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: discoverySliceKey(key, discoveryv1.AddressTypeIPv6).Name}},

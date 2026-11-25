@@ -147,6 +147,11 @@ func TestControllerEnvtest(t *testing.T) {
 	statusConfig.BackendTLSPolicy, statusConfig.BackendClientCertificate = true, true
 	statusConfig.OperatorHTTPS, statusConfig.HTTPSListenerIsolation, statusConfig.FrontendClientValidation = true, true, true
 	statusConfig.GatewayInfrastructureMetadata = true
+	statusConfig.ClusterGatewayAddresses = statusConfig.GatewayAddressRoutabilityEnabled()
+	if statusConfig.ClusterGatewayAddresses {
+		// Allow the ClusterIP collision case to observe the normal resync.
+		statusConfig.OpenStackResyncInterval = 3 * time.Second
+	}
 	statusProvider := &recordingProvider{}
 	startManager(t, statusConfig, statusProvider)
 

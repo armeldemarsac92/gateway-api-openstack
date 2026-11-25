@@ -40,6 +40,8 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 type Config struct {
 	// GatewayInfrastructureMetadata enables headless Service discovery of Octavia VIPs.
 	GatewayInfrastructureMetadata bool
+	// ClusterGatewayAddresses enables Service ClusterIPs for explicit Cluster requests.
+	ClusterGatewayAddresses bool
 	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
 	HTTPHeaderExact bool
 	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.
@@ -101,6 +103,10 @@ func (c Config) GatewayAddressRoutabilityEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
+func (c Config) GatewayAddressRoutabilityClusterEnabled() bool {
+	return c.ClusterGatewayAddresses && c.GatewayAddressRoutabilityEnabled() && c.GatewayInfrastructureMetadata
+}
+
 // XBackendEnabled reports whether this installation uses the Experimental bundle.
 func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
@@ -113,6 +119,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.ClusterGatewayAddresses && !c.GatewayAddressRoutabilityClusterEnabled() {
+		return fmt.Errorf("--gateway-address-routability-cluster requires --gateway-api-channel=experimental and --gateway-infrastructure-metadata")
+	}
 	if c.BackendClientCertificate && !c.BackendTLSPolicy {
 		return fmt.Errorf("--backend-client-certificate-map requires --octavia-backend-tls-policy")
 	}

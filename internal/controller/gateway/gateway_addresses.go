@@ -120,13 +120,18 @@ func (r *Reconciler) addressRejectionPreventsProgramming(gateway *gatewayv1.Gate
 		programmed.Reason == string(gatewayv1.GatewayReasonAddressNotAssigned)
 }
 
-func setAddressAssignmentCondition(gateway *gatewayv1.Gateway, satisfied int, providerIssue string) {
+func setAddressAssignmentCondition(gateway *gatewayv1.Gateway, satisfied int, providerIssue string, cluster clusterAddressAssignments) {
 	var unmet []string
 	for i, request := range gateway.Spec.Addresses {
-		if i != satisfied {
-			unmet = append(unmet, fmt.Sprintf("spec.addresses[%d] (type=%s, value=%q, routability=%q)", i,
-				ptr.Deref(request.Type, gatewayv1.IPAddressType), request.Value, request.Routability))
+		if i == satisfied || cluster.addresses[i] != "" {
+			continue
 		}
+		entry := fmt.Sprintf("spec.addresses[%d] (type=%s, value=%q, routability=%q)", i,
+			ptr.Deref(request.Type, gatewayv1.IPAddressType), request.Value, request.Routability)
+		if issue := cluster.issues[i]; issue != "" {
+			entry += ": " + issue
+		}
+		unmet = append(unmet, entry)
 	}
 	// Use the published v1.7 API reason AddressesAssigned. The prose of
 	// GEP-5093 also refers to the success reason as Assigned.
@@ -136,10 +141,10 @@ func setAddressAssignmentCondition(gateway *gatewayv1.Gateway, satisfied int, pr
 	if len(gateway.Spec.Addresses) == 0 {
 		message = "The default Gateway address is assigned"
 	}
-	if len(unmet) > 0 || providerIssue != "" {
+	if len(unmet) > 0 || len(gateway.Spec.Addresses) == 0 && providerIssue != "" {
 		status = metav1.ConditionFalse
 		reason = gatewayv1.GatewayReasonAddressesNotAssigned
-		if satisfied >= 0 {
+		if satisfied >= 0 || len(cluster.addresses) != 0 {
 			reason = gatewayv1.GatewayReasonAddressesPartiallyAssigned
 		}
 		message = "Unassigned address requests: " + strings.Join(unmet, ", ")
@@ -154,10 +159,28 @@ func setAddressAssignmentCondition(gateway *gatewayv1.Gateway, satisfied int, pr
 
 // observeAddressAssignment publishes only an observed assignment. It returns
 // whether the graph continues to serve an address rejected by the new spec.
-func (r *Reconciler) observeAddressAssignment(gateway *gatewayv1.Gateway, observation cloud.GatewayResult) bool {
+func (r *Reconciler) observeAddressAssignment(gateway *gatewayv1.Gateway, observation cloud.GatewayResult, cluster clusterAddressAssignments) bool {
+	hadCluster := hasClusterStatusAddress(gateway)
+	clearClusterStatusAddresses(gateway)
+	previous := gateway.Status.Addresses
+	appendCluster := func() {
+		appendAddress := func(value string) {
+			gateway.Status.Addresses = append(gateway.Status.Addresses, gatewayv1.GatewayStatusAddress{
+				Type: ptr.To(gatewayv1.IPAddressType), Value: value, Routability: ptr.To(gatewayv1.GatewayAddressRoutabilityCluster),
+			})
+		}
+		for i := range gateway.Spec.Addresses {
+			if value := cluster.addresses[i]; value != "" {
+				appendAddress(value)
+			}
+		}
+		for _, value := range cluster.retained {
+			appendAddress(value)
+		}
+	}
 	if observation.AddressAbsent {
 		gateway.Status.Addresses = nil
-		if observation.AddressIssue == "" {
+		if observation.AddressIssue == "" && !cluster.requested {
 			meta.RemoveStatusCondition(&gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
 			return false
 		}
@@ -174,6 +197,10 @@ func (r *Reconciler) observeAddressAssignment(gateway *gatewayv1.Gateway, observ
 	if ip, err := netip.ParseAddr(address); err == nil {
 		address = ip.String()
 	}
+	if hadCluster && !cluster.requested && observation.AddressIssue == "" && address == "" && len(previous) == 0 {
+		meta.RemoveStatusCondition(&gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+		return false
+	}
 	if address != "" && !observation.AddressAbsent && observation.AddressIssue == "" {
 		match := matchingAddressRequest(gateway.Spec.Addresses, address, fixedAllowed)
 		if match >= 0 || len(gateway.Spec.Addresses) == 0 {
@@ -182,24 +209,42 @@ func (r *Reconciler) observeAddressAssignment(gateway *gatewayv1.Gateway, observ
 				routability = gateway.Spec.Addresses[match].Routability
 			}
 			setExperimentalStatusAddress(gateway, address, routability)
-			setAddressAssignmentCondition(gateway, match, "")
+			appendCluster()
+			setAddressAssignmentCondition(gateway, match, "", cluster)
 			return false
 		}
 	}
 	retained := address != "" && !observation.AddressAbsent && observation.AddressActive
-	if observation.AddressIssue == "" && !retained {
+	if len(gateway.Spec.Addresses) != 0 {
+		// A private frontend needed by a ClusterIP is not an independently
+		// assigned address. Keep an old provider address only when the
+		// controller actually advertised it and no replacement was assigned.
+		retained = retained && len(cluster.addresses) == 0 && slices.ContainsFunc(previous, func(prior gatewayv1.GatewayStatusAddress) bool {
+			return prior.Value == address
+		})
+	}
+	if observation.AddressIssue == "" && !retained && !cluster.requested && !hadCluster {
 		return false
 	}
 	if !observation.AddressAbsent && !observation.AddressActive && !observation.AddressActivityObserved {
 		// In particular, Octavia may report PENDING_UPDATE before we can
 		// re-read enabled listeners or the Floating IP during replacement.
-		setAddressAssignmentCondition(gateway, -1, observation.AddressIssue)
-		return len(gateway.Status.Addresses) != 0
+		if observation.AddressIssue != "" || address == "" && observation.Outcome.State != cloud.OutcomeReady {
+			match := -1
+			if observation.AddressIssue == "" && len(previous) != 0 {
+				match = matchingAddressRequest(gateway.Spec.Addresses, previous[0].Value, fixedAllowed)
+			}
+			appendCluster()
+			if observation.AddressIssue != "" || len(cluster.addresses) > 0 || len(cluster.issues) > 0 || hadCluster {
+				setAddressAssignmentCondition(gateway, match, observation.AddressIssue, cluster)
+			}
+			return len(previous) != 0 && observation.AddressIssue != ""
+		}
 	}
 	if retained {
 		routability := gatewayv1.GatewayAddressRoutabilityDefault
-		for _, previous := range gateway.Status.Addresses {
-			if previous.Value == address && ptr.Deref(previous.Routability, "") == sentinelRoutability {
+		for _, prior := range previous {
+			if prior.Value == address && ptr.Deref(prior.Routability, "") == sentinelRoutability {
 				routability = sentinelRoutability
 				break
 			}
@@ -208,6 +253,7 @@ func (r *Reconciler) observeAddressAssignment(gateway *gatewayv1.Gateway, observ
 	} else {
 		gateway.Status.Addresses = nil
 	}
-	setAddressAssignmentCondition(gateway, -1, observation.AddressIssue)
-	return retained
+	appendCluster()
+	setAddressAssignmentCondition(gateway, -1, observation.AddressIssue, cluster)
+	return retained || len(cluster.retained) != 0
 }

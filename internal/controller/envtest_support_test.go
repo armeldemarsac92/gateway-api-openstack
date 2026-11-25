@@ -80,9 +80,22 @@ func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewayS
 func (p *recordingProvider) ensureExperimentalGatewayAddress(spec cloud.GatewaySpec) cloud.GatewayResult {
 	if existing, ok := p.gatewayStates[spec.Identity.GatewayUID]; ok {
 		result := cloud.GatewayReadyResult(existing)
-		result.AddressActive = true
+		result.AddressActive = existing.ListenerID != ""
 		if !slices.Contains(spec.RequestedVIPAddresses, "") && !slices.Contains(spec.RequestedVIPAddresses, existing.VIPAddress) {
 			result.AddressIssue = "Fixture cannot replace the existing VIP"
+			if loss := spec.ClusterAddressLoss; loss != nil && (!result.AddressActive ||
+				!slices.Contains(loss.RetainedClusterVIPs, existing.VIPAddress) &&
+					!slices.Contains(loss.RetainedProviderAddresses, existing.VIPAddress)) {
+				existing.ListenerID = ""
+				p.gatewayStates[spec.Identity.GatewayUID] = existing
+				result = cloud.GatewayProgressingResult("No Gateway address request could be assigned", time.Second)
+				result.State = existing
+				result.AddressIssue, result.AddressBlocked, result.AddressActivityObserved = result.Outcome.Message, true, true
+			}
+			return result
+		}
+		if !result.AddressActive {
+			return p.recordGatewayAddress(spec.Identity.GatewayUID, existing.VIPAddress)
 		}
 		return result
 	}
@@ -184,6 +197,10 @@ func newEnvtestGatewayReconciler(kubeClient client.Client, reader client.Reader,
 	gateway.Writer = writer
 	route.Writer = writer
 	return gateway
+}
+
+func (*recordingProvider) VIPSubnetIPVersion(context.Context, string) (int, error) {
+	return 4, nil
 }
 
 func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
