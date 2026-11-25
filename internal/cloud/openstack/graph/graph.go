@@ -48,6 +48,9 @@ type desiredGatewayGraph struct {
 	sniPaused              map[sniFragmentKey]bool
 	sniBlockedRoutes       map[string]bool
 	sniBackendPoolsCapable bool
+
+	sniPassthroughBackendPoolsCapable bool
+	sniBackendPoolDiscoveryPending    bool
 }
 
 type observedGatewayGraph struct {
@@ -89,6 +92,7 @@ type observedGatewayGraph struct {
 	protocol                 string
 	sni                      map[sniFragmentKey]*observedSNIFragment
 	sniBackendPoolsObserved  bool
+	sniListenerAttached      bool
 	rawTLSVerified           bool
 	rawTLSCapabilityVerified bool
 }
@@ -369,9 +373,6 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err := p.prepareSNIRouteBackendTLS(ctx, &desired, actual); err != nil {
 		return result, err
 	}
-	if err := p.prepareWeightedSNI(ctx, &desired, actual); err != nil {
-		return result, err
-	}
 	if result, handled, err := p.replayPendingSNIRejection(ctx, desired, actual); handled {
 		return result, err
 	}
@@ -489,7 +490,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		if isSNIProtocol(desired.protocol) && spec.Gateway.Disposition == cloud.GraphEnsure && result.Gateway.Outcome.State == cloud.OutcomeReady {
 			if err := p.verifySNICapability(ctx, desired, actual); err != nil {
-				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
+				return p.handleSNICapabilityError(ctx, desired, actual, result, err)
 			}
 		}
 		return p.retireUnusedBackendCA(ctx, desired.spec, actual, result)
@@ -497,7 +498,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
 	if !prepared {
 		if isSNIProtocol(desired.protocol) && err != nil {
-			return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
+			return p.handleSNICapabilityError(ctx, desired, actual, result, err)
 		}
 		return result, err
 	}
@@ -972,11 +973,13 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}) {
 			return invalid("TLS SNI suffix support is disabled")
 		}
-		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool { return route.BackendTLS != nil || len(route.BackendPools) != 0 }) {
+		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool {
+			return route.BackendTLS != nil || slices.ContainsFunc(route.BackendPools, func(pool cloud.TLSSNIBackendPool) bool { return pool.BackendTLS != nil })
+		}) {
 			return invalid("Backend TLS requires a TCP TLS termination profile")
 		}
 		if slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool {
-			return route.Passthrough && (!mixed || route.BackendTLS != nil || len(route.BackendPools) != 0)
+			return route.Passthrough && (!mixed || route.BackendTLS != nil)
 		}) {
 			return invalid("An explicit passthrough target requires mixed TLS and cannot originate backend TLS")
 		}
@@ -1576,7 +1579,8 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	if isSNIProtocol(desired.protocol) {
 		observed, err := p.observeSNIGraph(ctx, desired, actual, inventory)
-		if err != nil && observed.listener != nil && observed.rawTLSVerified && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+		if err != nil && observed.sniListenerAttached && (observed.rawTLSVerified || desired.protocol == cloud.ListenerProtocolTLSSNI) &&
+			desired.spec.Gateway.Disposition == cloud.GraphEnsure {
 			switch {
 			case observed.sniBackendPoolsObserved ||
 				slices.ContainsFunc(desired.sni, desiredSNIFragment.usesBackendPools):

@@ -1,0 +1,635 @@
+{
+  "gatewayAPI": {
+    "version": "v1.7.0",
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152"
+  },
+  "controller": "cf8c28e66c9a756cab3d9fe30d81f15a99892c15",
+  "image": "sha256:282d141610f451b0cf16f06372b73fa75a844b6cf78cbbf946ed6bf5b4041c14",
+  "managerSHA256": "529a1f83c0da0570861d7091af32430d448ac928da231bb0fa006d6d6d6506b5",
+  "octavia": "a35658dafc1ecc5fc7ae2f9852f3cc313b9130b4",
+  "octaviaWheelSHA256": "8ed6f73ee4b5ffb6f90fb26c806f26246663d9b56cad5a8b7796b06dabac7b76",
+  "octaviaLib": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+  "octaviaLibWheelSHA256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+  "haproxySHA256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+  "workloadSHA256": "8233297398ef80cd992b2aba5577bfb1c77ebeb232e0eff49a1c42ba1ef595ef",
+  "weights": {
+    "primary": 257,
+    "minority": 128
+  },
+  "connectionsPerPhase": 512,
+  "toleranceInConnections": 43,
+  "requiredCapabilities": [
+    "tls_sni_passthrough_v1",
+    "tls_sni_passthrough_weighted_pools_v1",
+    "tls_sni_weighted_pools_v1"
+  ],
+  "environment": "Local kind, the controller extracted from its signed-source image, Octavia REST API and database, Amphora HAProxy renderer and backend Pods. Cloud identity, network provisioning, RPC and Amphora transport are simulated.",
+  "baseline": {
+    "channel": "standard",
+    "controller": "0e4998b0a4ed1edb0000cf723e2480a5c80a74c7",
+    "octavia": "3ea393a1a5f4ecf476190635fd5a701e7eb0dd5b",
+    "octaviaLib": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+    "fixtureExit": 0,
+    "wrapperExit": 0,
+    "weightedProgrammed": {
+      "observedGeneration": 1,
+      "reason": "UnsupportedValue",
+      "status": "False"
+    },
+    "closedWeightedConnections": 24,
+    "successfulSiblingConnections": 32,
+    "weightedBackendTCPAccepts": 0
+  },
+  "channels": {
+    "standard": {
+      "kubernetes": "v1.36.4",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "routeSpecSHA256": "0b2638e6bf101e38082f2ce25806316ac049db1c03655ed610a75dddd158273c",
+      "phases": [
+        {
+          "phase": "granted",
+          "primary": 363,
+          "minority": 149,
+          "closed": 0,
+          "sibling": 32,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "pools": {
+            "primary": {
+              "weight": 257,
+              "enabled": true,
+              "members": 1
+            },
+            "minority": {
+              "weight": 128,
+              "enabled": true,
+              "members": 1
+            }
+          },
+          "backendLeafSHA256": {
+            "primary": "24601a4e77d4fec0436f2d5280c72a7369643e0282a2beeade2d357672ec6049",
+            "minority": "c5a95e90f81ad649528752e424eafca2ec14a04c7d2797ff5117d663888bf3b8",
+            "sibling": "e6f3996ddf7927d7ad193e5819a527cc9478ae05d625607ee22d3ba8f7dd5e78"
+          },
+          "podCountChanges": {
+            "minority": {
+              "echo": 149,
+              "resumed": 0,
+              "tcp": 149,
+              "tls": 149
+            },
+            "primary": {
+              "echo": 363,
+              "resumed": 0,
+              "tcp": 363,
+              "tls": 363
+            },
+            "sibling": {
+              "echo": 32,
+              "resumed": 0,
+              "tcp": 32,
+              "tls": 32
+            }
+          },
+          "renderedSHA256": "9485c4b5b8deef3cfbd99d811cf6587415590648ab03b54cf104b72c00bfb466",
+          "activeWorker": {
+            "configSHA256": "9485c4b5b8deef3cfbd99d811cf6587415590648ab03b54cf104b72c00bfb466",
+            "publication": "c3558af019464ccc8557900af081b1a7",
+            "status": 202,
+            "workerStopping": "0",
+            "workerDescription": "octavia-otlp-c3558af019464ccc8557900af081b1a7"
+          }
+        },
+        {
+          "phase": "grant-withdrawn",
+          "primary": 330,
+          "minority": 0,
+          "closed": 182,
+          "sibling": 32,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "pools": {
+            "primary": {
+              "weight": 257,
+              "enabled": true,
+              "members": 1
+            },
+            "minority": {
+              "weight": 128,
+              "enabled": false,
+              "members": 0
+            }
+          },
+          "backendLeafSHA256": {
+            "primary": "24601a4e77d4fec0436f2d5280c72a7369643e0282a2beeade2d357672ec6049",
+            "sibling": "e6f3996ddf7927d7ad193e5819a527cc9478ae05d625607ee22d3ba8f7dd5e78"
+          },
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 330,
+              "resumed": 0,
+              "tcp": 330,
+              "tls": 330
+            },
+            "sibling": {
+              "echo": 32,
+              "resumed": 0,
+              "tcp": 32,
+              "tls": 32
+            }
+          },
+          "renderedSHA256": "0d34d6458c076041181bb4d512ee10ff3bcec4de901ebb947639c38f9e7dcb2a",
+          "activeWorker": {
+            "configSHA256": "0d34d6458c076041181bb4d512ee10ff3bcec4de901ebb947639c38f9e7dcb2a",
+            "publication": "2c294a3ac7754aa4b0157af4b97e1189",
+            "status": 202,
+            "workerStopping": "0",
+            "workerDescription": "octavia-otlp-2c294a3ac7754aa4b0157af4b97e1189"
+          },
+          "directMinorityLeafSHA256": "c5a95e90f81ad649528752e424eafca2ec14a04c7d2797ff5117d663888bf3b8"
+        },
+        {
+          "phase": "grant-restored",
+          "primary": 336,
+          "minority": 176,
+          "closed": 0,
+          "sibling": 32,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "pools": {
+            "primary": {
+              "weight": 257,
+              "enabled": true,
+              "members": 1
+            },
+            "minority": {
+              "weight": 128,
+              "enabled": true,
+              "members": 1
+            }
+          },
+          "backendLeafSHA256": {
+            "minority": "c5a95e90f81ad649528752e424eafca2ec14a04c7d2797ff5117d663888bf3b8",
+            "primary": "24601a4e77d4fec0436f2d5280c72a7369643e0282a2beeade2d357672ec6049",
+            "sibling": "e6f3996ddf7927d7ad193e5819a527cc9478ae05d625607ee22d3ba8f7dd5e78"
+          },
+          "podCountChanges": {
+            "minority": {
+              "echo": 176,
+              "resumed": 0,
+              "tcp": 176,
+              "tls": 176
+            },
+            "primary": {
+              "echo": 336,
+              "resumed": 0,
+              "tcp": 336,
+              "tls": 336
+            },
+            "sibling": {
+              "echo": 32,
+              "resumed": 0,
+              "tcp": 32,
+              "tls": 32
+            }
+          },
+          "renderedSHA256": "f910b280a5f4e8b6d798d962be1c19ad519e86c7593ce76df922d8b1ac584295",
+          "activeWorker": {
+            "configSHA256": "f910b280a5f4e8b6d798d962be1c19ad519e86c7593ce76df922d8b1ac584295",
+            "publication": "17ab0989270d4f0b925faac6347cb380",
+            "status": 202,
+            "workerStopping": "0",
+            "workerDescription": "octavia-otlp-17ab0989270d4f0b925faac6347cb380"
+          }
+        }
+      ]
+    },
+    "experimental": {
+      "kubernetes": "v1.36.4",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "routeSpecSHA256": "0b2638e6bf101e38082f2ce25806316ac049db1c03655ed610a75dddd158273c",
+      "phases": [
+        {
+          "phase": "granted",
+          "primary": 331,
+          "minority": 181,
+          "closed": 0,
+          "sibling": 32,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "pools": {
+            "primary": {
+              "weight": 257,
+              "enabled": true,
+              "members": 1
+            },
+            "minority": {
+              "weight": 128,
+              "enabled": true,
+              "members": 1
+            }
+          },
+          "backendLeafSHA256": {
+            "minority": "fef2265fa453d754b70426bcd29dcb6980517d5229196679b211e0205a0f386b",
+            "primary": "f43c3b831a29454233018a204718e3ce002e486d1de769cd653705f44621bf85",
+            "sibling": "d717e2482f236bed9b6de997ab5897e000fd5bc9730a59bd6577e6b2b8f0fc8a"
+          },
+          "podCountChanges": {
+            "minority": {
+              "echo": 181,
+              "resumed": 0,
+              "tcp": 181,
+              "tls": 181
+            },
+            "primary": {
+              "echo": 331,
+              "resumed": 0,
+              "tcp": 331,
+              "tls": 331
+            },
+            "sibling": {
+              "echo": 32,
+              "resumed": 0,
+              "tcp": 32,
+              "tls": 32
+            }
+          },
+          "renderedSHA256": "a56b5c93566fd061531e40b3286e9a93e5d0e1b7d6d3c4d105b4d48638e4658a",
+          "activeWorker": {
+            "configSHA256": "a56b5c93566fd061531e40b3286e9a93e5d0e1b7d6d3c4d105b4d48638e4658a",
+            "publication": "67f2420809a94b8ea3d45dbb57e35a25",
+            "status": 202,
+            "workerStopping": "0",
+            "workerDescription": "octavia-otlp-67f2420809a94b8ea3d45dbb57e35a25"
+          }
+        },
+        {
+          "phase": "grant-withdrawn",
+          "primary": 352,
+          "minority": 0,
+          "closed": 160,
+          "sibling": 32,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "pools": {
+            "primary": {
+              "weight": 257,
+              "enabled": true,
+              "members": 1
+            },
+            "minority": {
+              "weight": 128,
+              "enabled": false,
+              "members": 0
+            }
+          },
+          "backendLeafSHA256": {
+            "primary": "f43c3b831a29454233018a204718e3ce002e486d1de769cd653705f44621bf85",
+            "sibling": "d717e2482f236bed9b6de997ab5897e000fd5bc9730a59bd6577e6b2b8f0fc8a"
+          },
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 352,
+              "resumed": 0,
+              "tcp": 352,
+              "tls": 352
+            },
+            "sibling": {
+              "echo": 32,
+              "resumed": 0,
+              "tcp": 32,
+              "tls": 32
+            }
+          },
+          "renderedSHA256": "e40377f6524297a0b9e2f3d31dfc40a48ee4e0e7b30cfe9fbfcc654c4d8fd4bc",
+          "activeWorker": {
+            "configSHA256": "e40377f6524297a0b9e2f3d31dfc40a48ee4e0e7b30cfe9fbfcc654c4d8fd4bc",
+            "publication": "d7c796c7b83b4914a3c1eabfd3ca57a3",
+            "status": 202,
+            "workerStopping": "0",
+            "workerDescription": "octavia-otlp-d7c796c7b83b4914a3c1eabfd3ca57a3"
+          },
+          "directMinorityLeafSHA256": "fef2265fa453d754b70426bcd29dcb6980517d5229196679b211e0205a0f386b"
+        },
+        {
+          "phase": "grant-restored",
+          "primary": 338,
+          "minority": 174,
+          "closed": 0,
+          "sibling": 32,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "pools": {
+            "primary": {
+              "weight": 257,
+              "enabled": true,
+              "members": 1
+            },
+            "minority": {
+              "weight": 128,
+              "enabled": true,
+              "members": 1
+            }
+          },
+          "backendLeafSHA256": {
+            "minority": "fef2265fa453d754b70426bcd29dcb6980517d5229196679b211e0205a0f386b",
+            "primary": "f43c3b831a29454233018a204718e3ce002e486d1de769cd653705f44621bf85",
+            "sibling": "d717e2482f236bed9b6de997ab5897e000fd5bc9730a59bd6577e6b2b8f0fc8a"
+          },
+          "podCountChanges": {
+            "minority": {
+              "echo": 174,
+              "resumed": 0,
+              "tcp": 174,
+              "tls": 174
+            },
+            "primary": {
+              "echo": 338,
+              "resumed": 0,
+              "tcp": 338,
+              "tls": 338
+            },
+            "sibling": {
+              "echo": 32,
+              "resumed": 0,
+              "tcp": 32,
+              "tls": 32
+            }
+          },
+          "renderedSHA256": "b02d141b7ddb9e613e96883f868f2cd7053ba3d632fd62dd26afb0cb8ffeb345",
+          "activeWorker": {
+            "configSHA256": "b02d141b7ddb9e613e96883f868f2cd7053ba3d632fd62dd26afb0cb8ffeb345",
+            "publication": "8f56391ae28d46d293ea750a69d7136a",
+            "status": 202,
+            "workerStopping": "0",
+            "workerDescription": "octavia-otlp-8f56391ae28d46d293ea750a69d7136a"
+          }
+        }
+      ]
+    }
+  }
+}

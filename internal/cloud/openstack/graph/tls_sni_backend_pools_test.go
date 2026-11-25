@@ -28,6 +28,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,6 +80,349 @@ func activeIndependentSNIFragment(target desiredSNIFragment) *observedSNIFragmen
 		fragment.backendTargets = append(fragment.backendTargets, octavia.WeightedTCPPolicyTarget{PoolID: leaf.pool.ID, Weight: backend.Weight})
 	}
 	return fragment
+}
+
+func largeSNIPoolsTestRoute(id Identity) cloud.TLSSNIRoute {
+	return cloud.TLSSNIRoute{Identity: id.Value(), Hostname: "app.example.test", BackendPools: []cloud.TLSSNIBackendPool{
+		{Weight: 257, ServiceUID: "stable", ServicePort: 443, Members: []cloud.Member{
+			{Address: "192.0.2.10", Port: 8443}, {Address: "192.0.2.11", Port: 8443},
+		}},
+		{Weight: 128, ServiceUID: "canary", ServicePort: 443, Members: []cloud.Member{{Address: "192.0.2.12", Port: 8443}}},
+	}}
+}
+
+func TestSNIExactWeightedPoolsRequireRegionalTransportCapabilities(t *testing.T) {
+	weighted := octavia.GatewayCapabilityTLSSNIWeightedPools
+	passthrough := octavia.GatewayCapabilityTLSSNIPassthrough
+	weightedPassthrough := octavia.GatewayCapabilityTLSSNIPassthroughWeightedPools
+	for _, tc := range []struct {
+		name         string
+		protocol     string
+		capabilities []string
+		available    bool
+	}{
+		{"terminate with existing weighted pools", cloud.ListenerProtocolTLSTerminate, []string{weighted}, true},
+		{"mixed terminate keeps existing capability", cloud.ListenerProtocolTLSMixed, []string{weighted}, true},
+		{"passthrough with all three", cloud.ListenerProtocolTLSSNI, []string{weighted, passthrough, weightedPassthrough}, true},
+		{"passthrough with legacy capabilities", cloud.ListenerProtocolTLSSNI, []string{weighted, passthrough}, false},
+		{"passthrough without base passthrough", cloud.ListenerProtocolTLSSNI, []string{weighted, weightedPassthrough}, false},
+		{"passthrough without base weighted", cloud.ListenerProtocolTLSSNI, []string{passthrough, weightedPassthrough}, false},
+		{"passthrough with indeterminate discovery", cloud.ListenerProtocolTLSSNI, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := safetyTestIdentity(t)
+			targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{largeSNIPoolsTestRoute(id)})
+			require.NoError(t, err)
+			desired, actual := weightedSNITestGraph(id, targets)
+			desired.protocol, actual.protocol = tc.protocol, tc.protocol
+			actual.rawTLSVerified, actual.rawTLSCapabilityVerified = true, true
+			actual.loadBalancer.Provider = "amphora"
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				require.Equal(t, "GET /lbaas/providers/amphora/gateway_capabilities", req.Method+" "+req.URL.Path)
+				if tc.capabilities == nil {
+					http.Error(w, "discovery unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": tc.capabilities})
+			}))
+			provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+			require.NoError(t, provider.prepareSNIRouteBackendTLS(t.Context(), &desired, actual))
+			require.Equal(t, !tc.available, desired.sni[0].weightedBlocked)
+			steps, result, err := provider.buildSNIGraphPlan(desired, actual)
+			require.NoError(t, err)
+			if tc.available {
+				require.Len(t, steps, 1)
+				require.Equal(t, sniCreatePool, steps[0].sni.kind)
+			} else {
+				require.Empty(t, steps)
+				require.Contains(t, result.Routes[0].Result.Outcome.Message, "Exact TLSRoute backend shares")
+			}
+		})
+	}
+}
+
+func TestSNIExactWeightedPolicyWirePreservesMixedPassthrough(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	route.Passthrough = true
+	route.BackendPools[1] = cloud.TLSSNIBackendPool{Weight: 128}
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, targets)
+	desired.protocol, actual.protocol = cloud.ListenerProtocolTLSMixed, cloud.ListenerProtocolTLSMixed
+	actual.state.ListenerID = "listener"
+	fragment := activeIndependentSNIFragment(targets[0])
+	fragment.policy, fragment.rule, fragment.backendTargets = nil, nil, nil
+	step, ok := nextSNIFragmentMutation(targets[0], fragment)
+	require.True(t, ok)
+	require.Equal(t, sniCreatePolicy, step.sni.kind)
+
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "POST /lbaas/l7policies", req.Method+" "+req.URL.Path)
+		var body map[string]map[string]any
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+		policy := body["l7policy"]
+		require.Equal(t, string(octavia.ActionWeightedTargets), policy["action"])
+		require.Equal(t, true, policy["tcp_tls_passthrough"])
+		require.Equal(t, false, policy["admin_state_up"])
+		require.NotContains(t, policy, "redirect_pool_id")
+		require.Equal(t, []any{
+			map[string]any{"pool_id": "pool-backend-0", "weight": float64(257)},
+			map[string]any{"pool_id": "pool-backend-1", "weight": float64(128)},
+		}, policy["targets"])
+		w.WriteHeader(http.StatusCreated)
+		safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]string{"id": "weighted"}})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	require.NoError(t, provider.executeSNIMutation(t.Context(), desired, actual, step.sni))
+	readback := activeIndependentSNIFragment(targets[0])
+	readback.passthrough = new(true)
+	require.True(t, readback.ready(targets[0]))
+	readback.passthrough = new(false)
+	require.False(t, readback.ready(targets[0]), "a terminating policy cannot prove the passthrough target")
+}
+
+func TestSNIPassthroughWeightedPoolMarksItsBackendService(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	route.Passthrough = true
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, targets)
+	desired.protocol, actual.protocol = cloud.ListenerProtocolTLSSNI, cloud.ListenerProtocolTLSSNI
+	actual.state.LoadBalancerID = "lb"
+	step, ok := nextSNIBackendPoolsMutation(targets[0], nil)
+	require.True(t, ok)
+	require.Equal(t, sniCreatePool, step.sni.kind)
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "POST /lbaas/pools", req.Method+" "+req.URL.Path)
+		var body struct {
+			Pool struct{ Tags []string }
+		}
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+		asserted := targets[0].backendPool(0)
+		require.Contains(t, body.Pool.Tags, sniBackendServiceTag(asserted.route))
+		require.Contains(t, body.Pool.Tags, openstackidentity.SNIPoolSlotTag(0))
+		w.WriteHeader(http.StatusCreated)
+		safetyWriteJSON(t, w, map[string]any{"pool": map[string]string{"id": "weighted-pool"}})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	require.NoError(t, provider.executeSNIMutation(t.Context(), desired, actual, step.sni))
+}
+
+func TestSNIExactWeightedDiscoveryPreservesProvenTrafficAndWithdrawsRevocation(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	old, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, old)
+	actual.loadBalancer.Provider = "amphora"
+	previous := activeIndependentSNIFragment(old[0])
+	actual.sni[old[0].key] = previous
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "GET /lbaas/providers/amphora/gateway_capabilities", req.Method+" "+req.URL.Path)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	plan := func(targets []desiredSNIFragment) []graphMutation {
+		t.Helper()
+		desired.sni = slices.Clone(targets)
+		require.NoError(t, provider.prepareSNIRouteBackendTLS(t.Context(), &desired, actual))
+		require.True(t, desired.sniBackendPoolDiscoveryPending)
+		require.True(t, desired.sni[0].weightedBlocked)
+		steps, _, err := provider.buildSNIGraphPlan(desired, actual)
+		require.NoError(t, err)
+		return steps
+	}
+	require.Empty(t, plan(old))
+	cause := provider.verifySNICapability(t.Context(), desired, actual)
+	result, err := provider.handleSNICapabilityError(t.Context(), desired, actual, cloud.GatewayGraphResult{}, cause)
+	require.NoError(t, err)
+	require.Equal(t, cloud.OutcomeProgressing, result.Gateway.Outcome.State)
+	_, err = provider.prepareGraphMutation(t.Context(), desired, actual, graphMutation{kind: graphEnableListener})
+	require.ErrorContains(t, err, "before reopening the frontend")
+
+	route.BackendPools[1] = cloud.TLSSNIBackendPool{Weight: 128}
+	revoked, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	steps := plan(revoked)
+	require.Len(t, steps, 1)
+	require.Equal(t, previous.backendPools[1].pool.ID, steps[0].sni.parentID)
+	require.Equal(t, sniDisableBackendTLSPool, steps[0].sni.kind)
+	previous.backendPools[1].pool.AdminStateUp = false
+	require.Empty(t, plan(revoked))
+	require.True(t, previous.policy.AdminStateUp)
+	require.True(t, previous.backendPools[0].pool.AdminStateUp)
+}
+
+func TestSNIExactWeightedReplacementStagesBehindAuthorizedFlatPool(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	flat := route
+	flat.BackendPools = nil
+	for _, backend := range route.BackendPools {
+		flat.BackendServices = append(flat.BackendServices, cloud.TLSBackendService{UID: backend.ServiceUID, Port: backend.ServicePort})
+		for _, member := range backend.Members {
+			member.Weight = 1
+			flat.Members = append(flat.Members, member)
+		}
+	}
+	slices.Reverse(flat.BackendServices)
+	old, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{flat})
+	require.NoError(t, err)
+	wanted, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, wanted)
+	desired.sniPassthroughBackendPoolsCapable = true
+	predecessor := activeSNIFragment(old[0], "flat")
+	predecessor.pool.Tags = append(predecessor.pool.Tags, sniWeightedPoolTag)
+	predecessor.backendTLS = octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true}
+	actual.sni[old[0].key] = predecessor
+	provider := &Provider{}
+	next := func() graphMutation {
+		t.Helper()
+		steps, _, err := provider.buildSNIGraphPlan(desired, actual)
+		require.NoError(t, err)
+		require.Len(t, steps, 1)
+		return steps[0]
+	}
+	stage := next()
+	require.Equal(t, graphSNIMutation, stage.kind)
+	require.Equal(t, sniCreatePool, stage.sni.kind)
+	require.True(t, stage.sni.preferPolicy)
+	require.True(t, predecessor.policy.AdminStateUp)
+
+	safeReplacement := activeIndependentSNIFragment(wanted[0])
+	safeReplacement.policy.ID = "replacement"
+	actual.sni[wanted[0].key] = safeReplacement
+	cutover := next()
+	require.Equal(t, gatewayDisableL7Policy, cutover.deletion.resource)
+	require.Equal(t, predecessor.policy.ID, cutover.deletion.resourceID)
+
+	route.BackendPools[1] = cloud.TLSSNIBackendPool{Weight: 128}
+	desired.sni, err = buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	delete(actual.sni, wanted[0].key)
+	require.Equal(t, predecessor.policy.ID, next().deletion.resourceID, "the flat policy with a revoked destination must close immediately")
+}
+
+func TestSNIExactWeightedLargeLeafUsesLeastConnections(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	route.BackendPools[0].Members = nil
+	for i := range cloud.MaxTCPRoundRobinMembers + 1 {
+		route.BackendPools[0].Members = append(route.BackendPools[0].Members, cloud.Member{
+			Address: fmt.Sprintf("10.1.%d.%d", i/256, i%256), Port: 8443,
+		})
+	}
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, targets)
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "POST /lbaas/pools", req.Method+" "+req.URL.Path)
+		var body map[string]map[string]any
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+		require.Equal(t, string(pools.LBMethodLeastConnections), body["pool"]["lb_algorithm"])
+		w.WriteHeader(http.StatusCreated)
+		safetyWriteJSON(t, w, map[string]any{"pool": map[string]string{"id": "large"}})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	step, ok := nextSNIFragmentMutation(targets[0], nil)
+	require.True(t, ok)
+	require.NoError(t, provider.executeSNIMutation(t.Context(), desired, actual, step.sni))
+
+	readback := activeIndependentSNIFragment(targets[0])
+	require.False(t, readback.ready(targets[0]))
+	readback.backendPools[0].pool.LBMethod = string(pools.LBMethodLeastConnections)
+	require.True(t, readback.ready(targets[0]))
+	require.Equal(t, string(pools.LBMethodRoundRobin), readback.backendPools[1].pool.LBMethod)
+
+	smaller := route
+	smaller.BackendPools = slices.Clone(route.BackendPools)
+	smaller.BackendPools[0].Members = route.BackendPools[0].Members[1:]
+	old, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{smaller})
+	require.NoError(t, err)
+	previous := activeIndependentSNIFragment(old[0])
+	require.True(t, targets[0].permitsBackendPool(previous.backendPools[0]), "adding an authorized endpoint leaves the prior round-robin pool safe during staging")
+}
+
+func TestSNIExactWeightedPoolsWithdrawBeforeReplacingOneRevokedShare(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		capability bool
+		scalar     bool
+	}{
+		{"native replacement", true, false},
+		{"legacy exact replacement after opt-out", false, true},
+		{"capability unavailable without exact replacement", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := safetyTestIdentity(t)
+			route := largeSNIPoolsTestRoute(id)
+			route.Passthrough = true
+			peer := cloud.TLSSNIRoute{Identity: id.Value(), Hostname: "peer.example.test", ServiceUID: "peer",
+				Members: []cloud.Member{{Address: "192.0.2.25", Port: 443}}}
+			peer.Identity.RouteUID = "peer"
+			old, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route, peer})
+			require.NoError(t, err)
+			revised := route
+			revised.BackendPools = slices.Clone(route.BackendPools)
+			revised.BackendPools[1] = cloud.TLSSNIBackendPool{Weight: 128}
+			if tc.capability || tc.scalar {
+				revised.BackendServiceMembers, revised.BackendPools = revised.BackendPools, nil
+				revised.BackendServices = []cloud.TLSBackendService{{UID: "stable", Port: 443}}
+				revised.Members = slices.Clone(route.BackendPools[0].Members)
+				for i := range revised.Members {
+					revised.Members[i].Weight = 1
+				}
+				revised.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 128, TotalWeight: 385}
+			}
+			wanted, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{revised, peer})
+			require.NoError(t, err)
+			desired, actual := weightedSNITestGraph(id, wanted)
+			desired.protocol, actual.protocol = cloud.ListenerProtocolTLSMixed, cloud.ListenerProtocolTLSMixed
+			actual.rawTLSVerified, actual.rawTLSCapabilityVerified = true, true
+			actual.loadBalancer.Provider = "amphora"
+			previous, neighbor := activeIndependentSNIFragment(old[0]), activeSNIFragment(old[1], "neighbor")
+			previous.passthrough = new(true)
+			actual.sni[old[0].key], actual.sni[old[1].key] = previous, neighbor
+
+			capabilities := []string{octavia.GatewayCapabilityTLSSNIWeightedPools, octavia.GatewayCapabilityTLSSNIPassthrough,
+				octavia.GatewayCapabilityTCPConnectionRejection}
+			if tc.capability {
+				capabilities = append(capabilities, octavia.GatewayCapabilityTLSSNIPassthroughWeightedPools)
+			}
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				require.Equal(t, "GET /lbaas/providers/amphora/gateway_capabilities", req.Method+" "+req.URL.Path)
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+			}))
+			provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
+				ProviderConfig{TCPConnectionRejection: tc.capability || tc.scalar})
+			require.NoError(t, provider.prepareSNIRouteBackendTLS(t.Context(), &desired, actual))
+			require.Equal(t, !tc.scalar, desired.sni[0].usesBackendPools())
+			steps, result, err := provider.buildSNIGraphPlan(desired, actual)
+			require.NoError(t, err)
+			require.Len(t, steps, 1)
+			require.Equal(t, cloud.OutcomeReady, result.Routes[1].Result.Outcome.State)
+			require.Equal(t, sniDisableBackendTLSPool, steps[0].sni.kind)
+			require.Equal(t, previous.backendPools[1].pool.ID, steps[0].sni.parentID)
+			previous.backendPools[1].pool.AdminStateUp = false
+
+			steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+			require.NoError(t, err)
+			require.Len(t, steps, 1)
+			if !tc.capability && !tc.scalar {
+				require.Equal(t, gatewayDisableL7Policy, steps[0].deletion.resource)
+				require.Equal(t, previous.policy.ID, steps[0].deletion.resourceID)
+				return
+			}
+			require.Equal(t, sniCreatePool, steps[0].sni.kind)
+			require.True(t, steps[0].sni.preferPolicy)
+			require.Equal(t, cloud.OutcomeReady, result.Routes[1].Result.Outcome.State)
+			require.True(t, previous.backendPools[0].pool.AdminStateUp)
+			require.True(t, previous.policy.AdminStateUp)
+		})
+	}
 }
 
 func TestSNIIndependentBackendPoolsStageStrictTransportAndExactTargets(t *testing.T) {

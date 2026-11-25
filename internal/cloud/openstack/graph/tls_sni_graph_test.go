@@ -737,6 +737,7 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 	var writes []string
 	var expectReplay map[string]any
 	neutronFailed := true
+	capabilityReadFailed := false
 	clients := ServiceClients{
 		ProjectID: "project-a",
 		Network: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -751,6 +752,10 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 		})),
 		LoadBalancer: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities" {
+				if capabilityReadFailed {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
 				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{"tcp_tls_termination_v1", "tls_sni_passthrough_v1", "tls_sni_suffix_v1"}})
 				return
 			}
@@ -931,6 +936,11 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 		if err != nil || !found || observation.Outcome.State != cloud.OutcomeProgressing || observation.State.ListenerID != "listener" {
 			t.Fatalf("identity-only TCP TLS observation = %#v found=%t err=%v", observation, found, err)
 		}
+		capabilityReadFailed = true
+		t.Cleanup(func() { capabilityReadFailed = false })
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), ensure); err != nil || len(writes) != 0 {
+			t.Fatalf("an indeterminate capability read must preserve the verified terminating frontend: err=%v writes=%v", err, writes)
+		}
 		ensure.Gateway.TLSSNIRoutes = nil
 		result, err = provider.ReconcileGatewayGraph(t.Context(), ensure)
 		if err != nil || len(writes) != 1 || result.Outcome.State != cloud.OutcomeProgressing {
@@ -956,6 +966,18 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
 		if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(writes) != 0 {
 			t.Fatalf("a conflicting route UID cannot authorize a mutation: err=%v writes=%v", err, writes)
+		}
+	})
+	t.Run("unproven listener binding cannot authorize weighted frontend withdrawal", func(t *testing.T) {
+		writes, neutronFailed = nil, false
+		binding := listener["protocol_port"]
+		listener["protocol_port"] = spec.Gateway.Spec.ListenerPort + 1
+		t.Cleanup(func() { listener["protocol_port"] = binding })
+		ensure := spec
+		ensure.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{largeSNIPoolsTestRoute(routeID)}
+		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), ensure); !errors.Is(err, cloud.ErrOwnershipConflict) || len(writes) != 0 {
+			t.Fatalf("an unproven listener binding cannot authorize a mutation: err=%v writes=%v", err, writes)
 		}
 	})
 }

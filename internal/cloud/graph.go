@@ -150,15 +150,21 @@ type TLSSNIRoute struct {
 	// BackendServices identifies the contributing Services and ports of a
 	// weighted rule. Single-backend targets keep their original identity.
 	BackendServices []TLSBackendService `json:",omitempty"`
-	// BackendServiceMembers retains the resolver's per-Service ownership of
-	// endpoints before flattening. It is used only to keep authorized pools
-	// serving during replacement and does not change the flat pool identity.
+	// BackendServiceMembers retains the per-reference weights, endpoints and
+	// empty shares before flattening. It does not change the flat pool identity.
 	BackendServiceMembers []TLSSNIBackendPool `json:"-"`
-	// BackendPools keeps each Service's transport and relative connection share
-	// on terminating listeners when one or more Services need backend TLS.
+	// BackendPools keeps each Service's transport and exact connection share
+	// when a single pool cannot preserve the route's forwarding requirements.
 	BackendPools []TLSSNIBackendPool `json:",omitempty"`
 	// TCPConnectionRejection reserves the unavailable share of new connections.
 	TCPConnectionRejection *TCPConnectionRejection `json:",omitempty"`
+}
+
+// UseBackendPools replaces flattened member weights with independent pools.
+func (route *TLSSNIRoute) UseBackendPools(pools []TLSSNIBackendPool) {
+	route.BackendServices, route.BackendServiceMembers, route.Members = nil, nil, nil
+	route.TCPConnectionRejection = nil
+	route.BackendPools = pools
 }
 
 // TLSBackendService identifies a Service port that contributes to an SNI pool.
@@ -176,6 +182,9 @@ type TLSSNIBackendPool struct {
 	Members     []Member
 	BackendTLS  *BackendTLSValidation `json:",omitempty"`
 }
+
+// MaxTCPRoundRobinMembers is the active server limit of an HAProxy round-robin pool.
+const MaxTCPRoundRobinMembers = 4095
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always
 // required; the remaining desired fields are required only for Ensure.
