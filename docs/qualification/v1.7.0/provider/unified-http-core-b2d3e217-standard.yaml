@@ -1,0 +1,41 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-25T16:50:51+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: b2d3e2179102a6a5015663427c019b9ba55a5579
+kind: ConformanceReport
+mode: local-octavia-amphora-signed
+profiles:
+- core:
+    failedTests:
+    - GatewayModifyListeners
+    - GatewaySecretMissingReferenceGrant
+    - GatewaySecretReferenceGrantAllInNamespace
+    - GatewaySecretReferenceGrantSpecific
+    - HTTPRouteHTTPSListener
+    - HTTPRouteHeaderMatching
+    - HTTPRouteHostnameIntersection
+    - HTTPRouteListenerHostnameMatching
+    - HTTPRouteMatching
+    - HTTPRouteMatchingAcrossRoutes
+    - HTTPRouteMultipleGateways
+    - HTTPRoutePathMatchOrder
+    - HTTPRouteRequestHeaderModifier
+    - HTTPRouteRuleOrder
+    - HTTPRouteServiceTypes
+    result: failure
+    statistics:
+      Failed: 15
+      Passed: 25
+      Skipped: 0
+  name: GATEWAY-HTTP
+  summary: Core tests failed with 15 test failures.
+succeededProvisionalTests:
+- GatewayPreserveForeignConditions
+- HTTPRoutePreserveForeignStatus
