@@ -62,6 +62,8 @@ The [class configuration reference](docs/reference/class-configuration.md) descr
 An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Overlapping plain HTTP sections on one port remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
 Experimental HTTP and terminated HTTPS listener filters require `--gateway-api-channel=experimental`, `--octavia-listener-request-filters` and an Amphora region advertising `listener_request_filters_v1`. The controller compiles ordered HTTP ExternalAuth stages with core Service backends, using a ReferenceGrant for access across namespaces. It rejects unknown extensions and authorization backends that require gRPC, TLS or request body forwarding. The controller needs read access to BackendTLSPolicies to reject a Service port that requires TLS. Response header selection preserves the request's original authority, including when the selection is empty. The local HTTP listener qualification exercised cross-namespace grant removal and restoration. Deployed Hibiscus qualification remains pending. [Operator instructions and traffic receipt](docs/operator-octavia-listener-request-filters.md)
 
+An Experimental HTTPRoute can authorize selected rules through an HTTP or Envoy v3 gRPC Service. A rule can forward a bounded request body to its authorizer. In the local grant trial the public path continued serving during withdrawal, recovery and restoration of the protected rules. [Operator setup](docs/operator-octavia-http-actions.md#httproute-external-authorization) · [Grant and certificate changes](docs/qualification/v1.7.0/provider/http-route-grpc-external-auth/README.md) · [Body size and traffic](docs/qualification/v1.7.0/provider/http-route-external-auth-forward-body/README.md)
+
 The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status
@@ -70,6 +72,8 @@ Phase 4 connectivity features are implemented, with live validation and Core des
 Phase 5 includes the logical HTTP model, shared backend input collection, reference watches, and local Endpoint mode implementation.
 See the [compatibility record](docs/providers/compatibility.md) for completed checks and outstanding evidence.
 Development results do not establish general OpenStack support or Gateway API conformance.
+
+The signed Hibiscus controller passed all 40 upstream GATEWAY-HTTP Core cases on each v1.7.0 channel in separate local kind and Amphora fixtures. The deployed Hibiscus runs are pending. [Local reports and input pins](docs/qualification/v1.7.0/provider/unified-http-core-598db990b3ba/README.md) · [Regional ledger](docs/qualification/v1.7.0/live-runs.md)
 
 The [upstream roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features. The [Hibiscus plan](docs/superpowers/plans/2026-11-20-hibiscus.md) extends the target to the full v1.7.0 release.
 The controller and public Octavia extensions are developed and exercised together where a Gateway API feature needs provider support.
