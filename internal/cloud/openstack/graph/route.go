@@ -471,8 +471,8 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 		if backend.SessionPersistenceRule != "" && (xBackend || backend.ServiceSessionPersistencePending ||
-			mirrorsUsed[index] || backend.BackendTLS != nil && !deniedTLS) {
-			return invalid(errors.New("rule session persistence requires a primary cleartext HTTP or h2c Service endpoint pool"))
+			mirrorsUsed[index] || backend.BackendH2C && backend.BackendTLS != nil && !deniedTLS) {
+			return invalid(errors.New("rule session persistence requires a primary HTTP Service Endpoint pool with a compatible transport"))
 		}
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
