@@ -125,6 +125,16 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 				seen[key] = struct{}{}
 			}
 		}
+		if r.routes.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+			for key, gateway := range gateways {
+				if _, included := seen[key]; included {
+					continue
+				}
+				if _, ok := model.DefaultGatewayParent(route.Spec.CommonRouteSpec, route.Namespace, gateway); ok {
+					peers[key] = append(peers[key], route)
+				}
+			}
+		}
 	}
 	ancestors := make(map[types.NamespacedName]backendTLSPolicyConditions, len(gateways))
 	availability := make(map[backendTLSRequirements]backendTLSAvailability, 2)
@@ -333,6 +343,10 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 // liveGatewayRoutePeers refreshes candidate routes before evaluating attachment.
 // The indexed discovery only nominates candidates for policy status reporting.
 func (r *Reconciler) liveGatewayRoutePeers(ctx context.Context, gateway *gatewayv1.Gateway) ([]gatewayv1.HTTPRoute, error) {
+	if r.Config.DefaultGatewaysEnabled() && gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+		// A default candidate that is absent from the cache may win profile election.
+		return r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, gateway), gateway)
+	}
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	filter := client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey}
 	var candidates []gatewayv1.HTTPRoute

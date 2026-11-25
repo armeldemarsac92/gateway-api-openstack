@@ -19,18 +19,21 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -164,6 +167,43 @@ func TestGatewayExcludesRemovedHostnameFromSingletonAttachedRoutes(t *testing.T)
 	if err != nil || counts.counts[survivor.Name] != 0 {
 		t.Fatalf("singleton counts before the old route status is refreshed = %v, %v", counts, err)
 	}
+}
+
+func TestGatewayCountsUnreportedAcceptedParentAtRouteStatusLimit(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+	listener := &gateway.Spec.Listeners[0]
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	base := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "implicit", Generation: 1},
+		Spec: gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{UseDefaultGateways: gatewayv1.GatewayDefaultScopeAll},
+			Rules: []gatewayv1.HTTPRouteRule{{}}},
+	}
+	for i := range controller.RouteParentStatusLimit {
+		ref := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("foreign-%d", i))}
+		base.Status.Parents = append(base.Status.Parents, gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: "foreign.example/controller"})
+	}
+	reported := base.DeepCopy()
+	reported.Name = "already-counted"
+	reported.Status.Parents[0] = gatewayv1.RouteParentStatus{ParentRef: parent, ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{{Type: "Accepted", Status: metav1.ConditionTrue, ObservedGeneration: 1}}}
+	rejected := reported.DeepCopy()
+	rejected.Name, rejected.Status.Parents[0].Conditions[0].Status = "rejected", metav1.ConditionFalse
+	denied := base.DeepCopy()
+	denied.Name, denied.Namespace = "other-namespace", "apps"
+	unsupported := base.DeepCopy()
+	unsupported.Name, unsupported.Spec.Rules = "unsupported", nil
+	scheme := testScheme(t)
+	require.NoError(t, gatewayx.Install(scheme))
+	kube := indexedFakeClientBuilder(scheme, cfg).WithObjects(base, reported, rejected, denied, unsupported).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg, AdmitsHTTPRouteListener: func(route *gatewayv1.HTTPRoute, _ *gatewayv1.Gateway, _ gatewayv1.ParentReference, _ *gatewayv1.Listener, _ []corev1.Namespace) bool {
+		return len(route.Spec.Rules) != 0
+	}}
+	got, err := r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{listener})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, got.counts[listener.Name])
 }
 
 func TestGatewayReportsGRPCBackendTLSAncestorLimitUntilRouteRecovers(t *testing.T) {

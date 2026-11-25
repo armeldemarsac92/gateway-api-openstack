@@ -106,7 +106,7 @@ func routeKey(route *gatewayv1.HTTPRoute) routeObjectKey {
 }
 
 func (r *Reconciler) liveRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, route *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
-	routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, gateway))
+	routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, gateway), gateway)
 	if err != nil {
 		return routeGraphAdmission{}, err
 	}
@@ -342,6 +342,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.BackendResponseHeaders = r.Config.ResponseHeaderModifier && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
 	input.RouteSessionPersistence = r.Config.RouteSessionPersistenceEnabled()
+	input.DefaultGateways = r.Config.DefaultGatewaysEnabled()
 	input.OriginalRulePositions = originalRulePositions
 	tlsObserver := graph.NewBackendTLSObserver(reader, r.Config.ClusterTrustBundles)
 	input.EnableXBackend = r.Config.XBackendEnabled()

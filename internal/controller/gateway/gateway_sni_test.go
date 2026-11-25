@@ -588,6 +588,71 @@ func TestSNIGatewayCannotReplaceStoredNodePortTopology(t *testing.T) {
 	}
 }
 
+func TestTLSRouteDefaultGatewayAttachments(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel, cfg.TLSSNIPassthrough = "experimental", true
+	first := programmedTestGateway(cfg)
+	first.Spec.Listeners = []gatewayv1.Listener{testSNIListener()}
+	first.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+	second := first.DeepCopy()
+	second.Name, second.UID = "second", "second-uid"
+	route := testSNIRoute(first, "tenant", first.Namespace, "tenant.example.test")
+	route.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+	route.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName("absent"))
+	original := route.Spec.DeepCopy()
+	service, endpoints := testSNIBackend(first.Namespace, "service", "192.0.2.100")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).
+		WithObjects(route, service, endpoints).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+	report := func(parent *gatewayv1.Gateway, forwards bool) {
+		t.Helper()
+		listener := &parent.Spec.Listeners[0]
+		snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listener}
+		observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		targets := observation.targets()
+		if forwards {
+			require.Len(t, targets, 1)
+			require.Equal(t, parent.Name, targets[0].Identity.GatewayName)
+		} else {
+			require.Empty(t, targets)
+		}
+		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{
+			Identity: controller.RouteIdentity(cfg, parent, route), Result: cloud.RouteReadyResult(cloud.RouteState{}),
+		}}}
+		require.NoError(t, r.reportSNIRoutes(t.Context(), snapshot, observation, result, nil))
+		require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(route), route))
+		require.Equal(t, original, &route.Spec)
+		counts, err := r.attachedRoutes(t.Context(), parent, []*gatewayv1.Listener{listener})
+		require.NoError(t, err)
+		if forwards {
+			require.EqualValues(t, 1, counts.counts[listener.Name])
+		} else {
+			require.Zero(t, counts.counts[listener.Name])
+		}
+	}
+	report(first, true)
+	report(second, true)
+	require.Len(t, route.Status.Parents, 3)
+	for _, status := range route.Status.Parents {
+		if status.ParentRef.SectionName == nil {
+			require.True(t, meta.IsStatusConditionTrue(status.Conditions, cfg.Domain()+"/Programmed"))
+		} else {
+			require.Equal(t, string(gatewayv1.RouteReasonNoMatchingParent), meta.FindStatusCondition(status.Conditions, "Accepted").Reason)
+		}
+	}
+
+	first.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+	report(first, false)
+	require.Len(t, route.Status.Parents, 2)
+	for _, status := range route.Status.Parents {
+		if status.ParentRef.SectionName == nil {
+			require.Equal(t, gatewayv1.ObjectName(second.Name), status.ParentRef.Name)
+			require.True(t, meta.IsStatusConditionTrue(status.Conditions, "Accepted"))
+		}
+	}
+}
+
 func TestSNIRouteDeferredReadbackRequiresSameAuthorizedTargets(t *testing.T) {
 	cfg := testConfig()
 	gateway := programmedTestGateway(cfg)

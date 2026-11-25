@@ -419,6 +419,7 @@ func run(ctx context.Context) error {
 		Recorder:                       eventRecorder,
 		Config:                         controllerConfig,
 	}
+	gatewayReconciler.AdmitsHTTPRouteListener = routeReconciler.AdmitsListener
 	if controllerConfig.XBackendClientCertificate {
 		routeReconciler.XBackendClientCertificates = resolver
 	}

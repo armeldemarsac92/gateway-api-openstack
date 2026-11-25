@@ -269,7 +269,7 @@ func TestMissingTCPBindingCheckpointBlocksMutation(t *testing.T) {
 		t.Fatalf("lost checkpoint accepted by writer: %v", err)
 	}
 	route.SetAnnotations(nil)
-	if _, _, err := r.routeBinding(viewRoute(route)); !errors.Is(err, cloud.ErrOwnershipConflict) {
+	if _, err := r.routeBindings(viewRoute(route)); !errors.Is(err, cloud.ErrOwnershipConflict) {
 		t.Fatalf("orphan finalizer treated as unbound: %v", err)
 	}
 }
@@ -319,10 +319,34 @@ func readyRouteWriter(t *testing.T, r *Reconciler) applyRouteGraphFunc {
 func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route client.Object, mode cloud.MemberMode) cloud.Identity {
 	t.Helper()
 	ctx := t.Context()
-	for _, object := range []client.Object{gateway, route} {
-		if err := r.Get(ctx, client.ObjectKeyFromObject(object), object); err != nil {
+	bindGatewayFixture(t, r, gateway, mode)
+	if err := r.Get(ctx, client.ObjectKeyFromObject(route), route); err != nil {
+		t.Fatal(err)
+	}
+	base := viewRoute(route).copyObject()
+	identity := controller.RouteIdentity(r.Config, gateway, route)
+	controller.ApplyRouteBinding(r.Config, route, identity)
+	if err := r.Patch(ctx, route, controller.OptimisticMergeFrom(base)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := r.planRoute(ctx, viewRoute(route), identity, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.desired != nil {
+		plan.targetStatus = routeCondition(viewRoute(route), r.forwardingTargetType(), metav1.ConditionFalse, "Pending", plan.target)
+		if err := r.patchStatuses(ctx, viewRoute(route), plan); err != nil {
 			t.Fatal(err)
 		}
+	}
+	return identity
+}
+
+func bindGatewayFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, mode cloud.MemberMode) {
+	t.Helper()
+	ctx := t.Context()
+	if err := r.Get(ctx, client.ObjectKeyFromObject(gateway), gateway); err != nil {
+		t.Fatal(err)
 	}
 	baseGateway := gateway.DeepCopy()
 	gateway.Annotations = map[string]string{
@@ -344,23 +368,6 @@ func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route 
 	if err := r.Patch(ctx, gateway, controller.OptimisticMergeFrom(baseGateway)); err != nil {
 		t.Fatal(err)
 	}
-	base := viewRoute(route).copyObject()
-	identity := controller.RouteIdentity(r.Config, gateway, route)
-	controller.ApplyRouteBinding(r.Config, route, identity)
-	if err := r.Patch(ctx, route, controller.OptimisticMergeFrom(base)); err != nil {
-		t.Fatal(err)
-	}
-	plan, err := r.planRoute(ctx, viewRoute(route), identity, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.desired != nil {
-		plan.targetStatus = routeCondition(viewRoute(route), r.forwardingTargetType(), metav1.ConditionFalse, "Pending", plan.target)
-		if err := r.patchStatuses(ctx, viewRoute(route), plan); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return identity
 }
 
 func TestTCPRouteScopedParentSelectors(t *testing.T) {

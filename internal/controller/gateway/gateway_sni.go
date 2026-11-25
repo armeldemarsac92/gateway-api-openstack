@@ -275,8 +275,9 @@ func (r *Reconciler) admitSNIRoutesForListener(ctx context.Context, snapshot *ga
 		if !route.DeletionTimestamp.IsZero() {
 			continue
 		}
-		parents := slices.DeleteFunc(slices.Clone(route.Spec.ParentRefs), func(ref gatewayv1.ParentReference) bool {
-			return !sniParentTargetsGateway(route.Namespace, ref, snapshot.gateway)
+		refs := model.EffectiveParentRefs(route.Spec.CommonRouteSpec, route.Namespace, snapshot.gateway, r.Config.DefaultGatewaysEnabled())
+		parents := slices.DeleteFunc(slices.Clone(refs), func(ref gatewayv1.ParentReference) bool {
+			return !parentRefTargetsGateway(route.Namespace, ref, snapshot.gateway)
 		})
 		ownsStatus := slices.ContainsFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
 			return r.ownsSNIParent(route, snapshot.gateway, status)
@@ -322,7 +323,7 @@ func (observation sniRouteObservation) hostnameOwners() map[string]sniHostnameOw
 	return owners
 }
 
-func sniParentTargetsGateway(namespace string, ref gatewayv1.ParentReference, gateway *gatewayv1.Gateway) bool {
+func parentRefTargetsGateway(namespace string, ref gatewayv1.ParentReference, gateway *gatewayv1.Gateway) bool {
 	return controller.IsGatewayParentRef(ref) && string(ref.Name) == gateway.Name &&
 		string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(namespace))) == gateway.Namespace
 }
@@ -337,12 +338,12 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "The Gateway has no supported TLS SNI listener")
 		return nil
 	}
-	if !slices.ContainsFunc(entry.parents, func(ref gatewayv1.ParentReference) bool { return sniParentSelectsListener(ref, *listener) }) {
-		entry.reject(gatewayv1.RouteReasonNoMatchingParent, sniParentNoMatchingListenerMessage)
+	if !r.Config.DefaultGatewaysEnabled() && len(route.Spec.ParentRefs) != 1 {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLSRoute requires one parentRef on the Standard channel")
 		return nil
 	}
-	if len(route.Spec.ParentRefs) != 1 {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLSRoute requires one Gateway parentRef")
+	if !slices.ContainsFunc(entry.parents, func(ref gatewayv1.ParentReference) bool { return sniParentSelectsListener(ref, *listener) }) {
+		entry.reject(gatewayv1.RouteReasonNoMatchingParent, sniParentNoMatchingListenerMessage)
 		return nil
 	}
 	var namespaces []corev1.Namespace
@@ -406,70 +407,21 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 	}
 	var missing *octavia.MissingGatewayCapability
 	mixedUnavailable := errors.As(providerErr, &missing) && missing.Capability == octavia.GatewayCapabilityTCPTLSMixedMode
-	programmedType := r.Config.Domain() + "/Programmed"
-	targetType := r.Config.Domain() + "/ForwardingTarget"
-	for _, entry := range observation.parentResults() {
-		base := entry.route
+	for _, sections := range observation.groupByRoute() {
+		base := sections[0].route
 		target := base.DeepCopy()
-		fingerprint, err := sniForwardingFingerprint(snapshot.gateway, entry.targets)
-		if err != nil {
-			return err
-		}
 		outcome := outcomes[string(base.UID)]
+		var statusErr error
 		r.updateSNIRouteParents(target, snapshot.gateway, func(status *gatewayv1.RouteParentStatus) bool {
-			if mixedUnavailable && entry.acceptedReason == gatewayv1.RouteReasonAccepted {
-				r.setRejectedSNIParent(status, gatewayv1.RouteReasonUnsupportedValue, "Octavia does not advertise same-port mixed TLS in this region", base.Generation)
-				return true
+			if statusErr == nil {
+				entry := sections.forParent(status.ParentRef)
+				statusErr = r.reportSNIParent(snapshot.gateway, status, entry, outcome, mixedUnavailable)
 			}
-			accepted, resolved, programmed := metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionFalse
-			if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
-				accepted = metav1.ConditionTrue
-			}
-			resolvedReason, resolvedMessage := entry.resolvedReason, entry.resolvedMessage
-			switch resolvedReason {
-			case gatewayv1.RouteReasonPending:
-			case "":
-				resolvedReason, resolvedMessage = gatewayv1.RouteReasonPending, "The TLSRoute is not attached"
-			case gatewayv1.RouteReasonResolvedRefs:
-				resolved = metav1.ConditionTrue
-			default:
-				resolved = metav1.ConditionFalse
-			}
-			checkpoint := meta.FindStatusCondition(status.Conditions, targetType)
-			previouslyProgrammed := meta.FindStatusCondition(status.Conditions, programmedType)
-			retain := outcome.ObservationDeferred && checkpoint != nil && checkpoint.Status == metav1.ConditionTrue &&
-				checkpoint.ObservedGeneration == base.Generation && checkpoint.Message == fingerprint &&
-				previouslyProgrammed != nil && previouslyProgrammed.Status == metav1.ConditionTrue &&
-				previouslyProgrammed.ObservedGeneration == base.Generation
-			programmedReason, programmedMessage := "Pending", "Waiting for a coherent Octavia listener, policy, rule and backend readback"
-			switch {
-			case accepted == metav1.ConditionFalse:
-				programmedReason, programmedMessage = string(entry.acceptedReason), entry.acceptedMessage
-			case entry.programmingDiagnostic != nil:
-				programmedReason, programmedMessage = entry.programmingDiagnostic.Reason, entry.programmingDiagnostic.Message
-			case resolved == metav1.ConditionFalse && len(entry.targets) != len(entry.hostnames):
-				programmedReason, programmedMessage = string(resolvedReason), resolvedMessage
-			case len(entry.hostnames) == 0:
-				programmedReason, programmedMessage = "Conflicted", "Higher-priority TLSRoutes match every SNI hostname of this route"
-			case resolvedReason == gatewayv1.RouteReasonPending:
-				programmedMessage = resolvedMessage
-			case len(entry.targets) != len(entry.hostnames):
-				programmedMessage = "The backend Service has no ready IPv4 endpoints"
-			case outcome.Outcome.State == cloud.OutcomeReady || retain:
-				programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms forwarding for the selected SNI hostnames and their backend"
-			case outcome.Outcome.State == cloud.OutcomeProgressing && outcome.Outcome.Message != "":
-				programmedMessage = outcome.Outcome.Message
-			}
-			controller.SetCondition(&status.Conditions, controller.Condition("Accepted", accepted, string(entry.acceptedReason), entry.acceptedMessage, base.Generation))
-			controller.SetCondition(&status.Conditions, controller.Condition("ResolvedRefs", resolved, string(resolvedReason), resolvedMessage, base.Generation))
-			controller.SetCondition(&status.Conditions, controller.Condition(programmedType, programmed, programmedReason, programmedMessage, base.Generation))
-			if programmed == metav1.ConditionTrue {
-				controller.SetCondition(&status.Conditions, controller.Condition(targetType, metav1.ConditionTrue, "Observed", fingerprint, base.Generation))
-			} else {
-				meta.RemoveStatusCondition(&status.Conditions, targetType)
-			}
-			return true
+			return statusErr == nil
 		})
+		if statusErr != nil {
+			return statusErr
+		}
 		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
 			return err
 		}
@@ -477,24 +429,99 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 	return nil
 }
 
-// One Gateway parent status represents all logical sections selected on its
-// shared port. The accepted attachment and every effective target contribute.
-func (observation sniRouteObservation) parentResults() sniRouteObservation {
-	var results sniRouteObservation
+func (r *Reconciler) reportSNIParent(gateway *gatewayv1.Gateway, status *gatewayv1.RouteParentStatus, entry sniRouteStatus, outcome cloud.RouteResult, mixedUnavailable bool) error {
+	base := entry.route
+	programmedType := r.Config.Domain() + "/Programmed"
+	targetType := r.Config.Domain() + "/ForwardingTarget"
+	fingerprint, err := sniForwardingFingerprint(gateway, entry.targets)
+	if err != nil {
+		return err
+	}
+	if mixedUnavailable && entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+		r.setRejectedSNIParent(status, gatewayv1.RouteReasonUnsupportedValue, "Octavia does not advertise same-port mixed TLS in this region", base.Generation)
+		return nil
+	}
+	accepted, resolved, programmed := metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionFalse
+	if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+		accepted = metav1.ConditionTrue
+	}
+	resolvedReason, resolvedMessage := entry.resolvedReason, entry.resolvedMessage
+	switch resolvedReason {
+	case gatewayv1.RouteReasonPending:
+	case "":
+		resolvedReason, resolvedMessage = gatewayv1.RouteReasonPending, "The TLSRoute is not attached"
+	case gatewayv1.RouteReasonResolvedRefs:
+		resolved = metav1.ConditionTrue
+	default:
+		resolved = metav1.ConditionFalse
+	}
+	checkpoint := meta.FindStatusCondition(status.Conditions, targetType)
+	previouslyProgrammed := meta.FindStatusCondition(status.Conditions, programmedType)
+	retain := outcome.ObservationDeferred && checkpoint != nil && checkpoint.Status == metav1.ConditionTrue &&
+		checkpoint.ObservedGeneration == base.Generation && checkpoint.Message == fingerprint &&
+		previouslyProgrammed != nil && previouslyProgrammed.Status == metav1.ConditionTrue &&
+		previouslyProgrammed.ObservedGeneration == base.Generation
+	programmedReason, programmedMessage := "Pending", "Waiting for a coherent Octavia listener, policy, rule and backend readback"
+	switch {
+	case accepted == metav1.ConditionFalse:
+		programmedReason, programmedMessage = string(entry.acceptedReason), entry.acceptedMessage
+	case entry.programmingDiagnostic != nil:
+		programmedReason, programmedMessage = entry.programmingDiagnostic.Reason, entry.programmingDiagnostic.Message
+	case resolved == metav1.ConditionFalse && len(entry.targets) != len(entry.hostnames):
+		programmedReason, programmedMessage = string(resolvedReason), resolvedMessage
+	case len(entry.hostnames) == 0:
+		programmedReason, programmedMessage = "Conflicted", "Higher-priority TLSRoutes match every SNI hostname of this route"
+	case resolvedReason == gatewayv1.RouteReasonPending:
+		programmedMessage = resolvedMessage
+	case len(entry.targets) != len(entry.hostnames):
+		programmedMessage = "The backend Service has no ready IPv4 endpoints"
+	case outcome.Outcome.State == cloud.OutcomeReady || retain:
+		programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms forwarding for the selected SNI hostnames and their backend"
+	case outcome.Outcome.State == cloud.OutcomeProgressing && outcome.Outcome.Message != "":
+		programmedMessage = outcome.Outcome.Message
+	}
+	controller.SetCondition(&status.Conditions, controller.Condition("Accepted", accepted, string(entry.acceptedReason), entry.acceptedMessage, base.Generation))
+	controller.SetCondition(&status.Conditions, controller.Condition("ResolvedRefs", resolved, string(resolvedReason), resolvedMessage, base.Generation))
+	controller.SetCondition(&status.Conditions, controller.Condition(programmedType, programmed, programmedReason, programmedMessage, base.Generation))
+	if programmed == metav1.ConditionTrue {
+		controller.SetCondition(&status.Conditions, controller.Condition(targetType, metav1.ConditionTrue, "Observed", fingerprint, base.Generation))
+	} else {
+		meta.RemoveStatusCondition(&status.Conditions, targetType)
+	}
+	return nil
+}
+
+// Keep one optimistic status write per Route, in inventory order, even when
+// several sections or parent references select its shared listener.
+func (observation sniRouteObservation) groupByRoute() []sniRouteObservation {
+	var groups []sniRouteObservation
 	byRoute := make(map[client.ObjectKey]int)
 	for _, entry := range observation {
 		key := client.ObjectKeyFromObject(entry.route)
-		i, exists := byRoute[key]
+		index, exists := byRoute[key]
 		if !exists {
-			byRoute[key] = len(results)
-			results = append(results, entry)
+			index = len(groups)
+			byRoute[key] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], entry)
+	}
+	return groups
+}
+
+// Each parent reports the listener sections it selected. An unscoped
+// reference may span multiple sections while another selects just one.
+func (sections sniRouteObservation) forParent(ref gatewayv1.ParentReference) sniRouteStatus {
+	current := sniRouteStatus{route: sections[0].route}
+	current.reject(gatewayv1.RouteReasonNoMatchingParent, sniParentNoMatchingListenerMessage)
+	for _, entry := range sections {
+		if entry.listener != nil && !sniParentSelectsListener(ref, *entry.listener) {
 			continue
 		}
-		current := &results[i]
 		if current.acceptedReason != gatewayv1.RouteReasonAccepted {
 			if entry.acceptedReason == gatewayv1.RouteReasonAccepted ||
 				current.acceptedReason == gatewayv1.RouteReasonNoMatchingParent {
-				*current = entry
+				current = entry
 			}
 			continue
 		}
@@ -510,7 +537,7 @@ func (observation sniRouteObservation) parentResults() sniRouteObservation {
 			current.resolvedReason, current.resolvedMessage = entry.resolvedReason, entry.resolvedMessage
 		}
 	}
-	return results
+	return current
 }
 
 func sniForwardingFingerprint(gateway *gatewayv1.Gateway, targets []cloud.TLSSNIRoute) (string, error) {

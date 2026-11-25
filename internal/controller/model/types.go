@@ -36,6 +36,7 @@ import (
 type Input struct {
 	// OperatorHTTPS allows HTTPS sections admitted by the stock frontend profile.
 	OperatorHTTPS          bool
+	DefaultGateways        bool
 	RequestHeaderModifier  bool
 	ResponseHeaderModifier bool
 	HTTPRequestRedirect    bool
@@ -191,6 +192,7 @@ const (
 
 // ParentAttachment preserves an individual ParentRef and its selected listeners.
 type ParentAttachment struct {
+	// Index is the declared parent position, or -1 for an implicit Gateway.
 	Index       int
 	Reference   gatewayv1.ParentReference
 	State       AttachmentState

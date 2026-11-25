@@ -161,13 +161,20 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *httpRouteScope)
 	detaching := scope.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching
 	parents, err := r.managedParents(ctx, scope.route)
 	if err != nil {
-		if detaching {
-			return r.finalizeRoute(ctx, scope)
+		bindings, bindingErr := controller.StoredRouteGatewayBindings(r.Config, scope.route)
+		if bindingErr != nil {
+			return ctrl.Result{}, errors.Join(err, bindingErr)
 		}
-		if _, bindingErr := controller.StoredRouteGatewayBindings(r.Config, scope.route); bindingErr != nil {
-			return ctrl.Result{}, bindingErr
+		// Discovery cannot authorize a new withdrawal. Previously sealed cleanup
+		// still belongs to its original Gateway and can progress independently.
+		var cleanup []cloud.Identity
+		for _, binding := range bindings {
+			if binding.Lifecycle == controller.RouteDetaching {
+				cleanup = append(cleanup, binding.Identity)
+			}
 		}
-		return ctrl.Result{}, err
+		result, cleanupErr := r.detachRouteParents(ctx, scope.route, cleanup)
+		return result, errors.Join(err, cleanupErr)
 	}
 	groups := groupManagedRouteParents(parents)
 	if len(groups) > 1 || controller.HasRouteGatewayBindings(r.Config, scope.route) {

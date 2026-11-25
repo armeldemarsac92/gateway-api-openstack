@@ -84,6 +84,7 @@ func (r *Reconciler) routeChanges() predicate.Predicate {
 				r.Config.RouteLifecycleAnnotation(), r.Config.RouteGatewayUIDAnnotation(),
 				r.Config.RouteGatewayNameAnnotation(), r.Config.RouteGatewayNamespaceAnnotation(),
 				r.Config.RouteClusterIDAnnotation(), r.Config.RouteProjectIDAnnotation(), r.Config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType), r.Config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType),
+				r.Config.RouteGatewayBindingsAnnotation(),
 			} {
 				if old[key] != current[key] {
 					return true
@@ -121,14 +122,27 @@ func (r *Reconciler) addGatewayRoutes(ctx context.Context, keys routeRequests, g
 
 func (r *Reconciler) enqueueGateway(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := routeRequests{}
-	r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(object), controller.IndexL4RouteByParentGateway, controller.IndexL4RouteByStatusGateway, controller.IndexL4RouteByBoundGateway)
+	if gateway, ok := object.(*gatewayv1.Gateway); ok {
+		r.addGatewayChange(ctx, keys, gateway)
+	}
 	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) addGatewayChange(ctx context.Context, keys routeRequests, gateway *gatewayv1.Gateway) {
+	r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(gateway), controller.IndexL4RouteByParentGateway, controller.IndexL4RouteByStatusGateway, controller.IndexL4RouteByBoundGateway)
+	if r.Config.DefaultGatewaysEnabled() && gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+		r.addDefaultRoutes(ctx, keys)
+	}
+}
+
+func (r *Reconciler) addDefaultRoutes(ctx context.Context, keys routeRequests) {
+	keys.add(r.cachedRoutes(ctx, client.MatchingFields{controller.IndexRouteByDefaultGateways: string(gatewayv1.GatewayDefaultScopeAll)}))
 }
 
 func (r *Reconciler) enqueueClass(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := routeRequests{}
 	for _, gateway := range r.gatewaysForClass(ctx, object.GetName()) {
-		r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(&gateway), controller.IndexL4RouteByParentGateway, controller.IndexL4RouteByStatusGateway, controller.IndexL4RouteByBoundGateway)
+		r.addGatewayChange(ctx, keys, &gateway)
 	}
 	return controller.SortedRequests(keys)
 }
@@ -160,15 +174,37 @@ func (r *Reconciler) addPeers(ctx context.Context, keys routeRequests, routes []
 			checked[key] = true
 		}
 	}
+	wantsDefaults := false
 	for _, route := range routes {
+		wantsDefaults = wantsDefaults || route.commonSpec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll
 		for _, ref := range route.parentRefs {
 			if controller.IsGatewayParentRef(ref) {
 				add(gatewayKey(route, ref))
 			}
 		}
-		if identity, present, err := r.routeBinding(route); present && err == nil {
-			add(client.ObjectKey{Namespace: identity.GatewayNamespace, Name: identity.GatewayName})
+		bound, _ := controller.RouteBoundGatewayKeys(r.Config, route.Object)
+		for _, key := range bound {
+			add(key)
 		}
+	}
+	if !r.Config.DefaultGatewaysEnabled() || !wantsDefaults && len(checked) == 0 {
+		return
+	}
+	var gateways gatewayv1.GatewayList
+	if err := r.List(ctx, &gateways, client.MatchingFields{controller.IndexGatewayByDefaultScope: string(gatewayv1.GatewayDefaultScopeAll)}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list default Gateways for route attachment change", "kind", r.kind())
+		return
+	}
+	defaultsAffected := false
+	for _, gateway := range gateways.Items {
+		key := client.ObjectKeyFromObject(&gateway)
+		if wantsDefaults || checked[key] {
+			add(key)
+			defaultsAffected = true
+		}
+	}
+	if defaultsAffected {
+		r.addDefaultRoutes(ctx, keys)
 	}
 }
 
@@ -201,6 +237,9 @@ func (r *Reconciler) enqueueNode(ctx context.Context, _ client.Object) []reconci
 			topology, err := controller.StoredGatewayTopology(r.Config, &gateway)
 			if err == nil && topology.Topology.MemberMode == cloud.MemberModeNodePort {
 				r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(&gateway), controller.IndexL4RouteByParentGateway)
+				if r.Config.DefaultGatewaysEnabled() && gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+					r.addDefaultRoutes(ctx, keys)
+				}
 			}
 		}
 	}

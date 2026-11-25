@@ -87,6 +87,10 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 	sets := make(map[types.NamespacedName]*gatewayv1.ListenerSet)
 	var consumers []gatewayv1.HTTPRoute
 	for _, route := range routes {
+		if r.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+			consumers = append(consumers, route)
+			continue
+		}
 		for _, parent := range route.Spec.ParentRefs {
 			if key := model.ListenerSetRefKey(parent, route.Namespace); key.Name != "" && r.kind() == model.HTTPRouteKind {
 				set, observed := sets[key]

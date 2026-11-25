@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -31,6 +32,16 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
+// RouteParentStatusLimit is the maximum number of entries in RouteStatus.Parents.
+const RouteParentStatusLimit = 32
+
+// RouteGatewayTarget records the admitted transport forwarding configuration.
+type RouteGatewayTarget struct {
+	Value      string `json:"value"`
+	Generation int64  `json:"generation"`
+	Observed   bool   `json:"observed,omitempty"`
+}
+
 // RouteGatewayBinding describes the ownership checkpoint for one route fragment.
 type RouteGatewayBinding struct {
 	Identity  cloud.Identity
@@ -38,27 +49,29 @@ type RouteGatewayBinding struct {
 	Anchor    int
 	// ExplicitScope records whether the cluster and project were both persisted.
 	ExplicitScope bool
+	Forwarding    RouteGatewayTarget
 }
 
 type persistedRouteGatewayBinding struct {
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-	UID       string `json:"uid"`
-	Cluster   string `json:"cluster"`
-	Project   string `json:"project"`
-	Lifecycle string `json:"lifecycle"`
-	Anchor    int    `json:"anchor,omitempty"`
+	Namespace  string              `json:"namespace"`
+	Name       string              `json:"name"`
+	UID        string              `json:"uid"`
+	Cluster    string              `json:"cluster"`
+	Project    string              `json:"project"`
+	Lifecycle  string              `json:"lifecycle"`
+	Anchor     int                 `json:"anchor,omitempty"`
+	Forwarding *RouteGatewayTarget `json:"forwarding,omitempty"`
 }
 
-// RouteGatewayBindingsAnnotation records multiple HTTP-profile bindings after enrollment.
+// RouteGatewayBindingsAnnotation records multiple Gateway bindings after enrollment.
 func (c Config) RouteGatewayBindingsAnnotation() string {
 	return c.Domain() + "/route-gateway-bindings-" + c.controllerKey()
 }
 
-// HasRouteGatewayBindings reports whether an HTTP-profile route has the multi-parent checkpoint.
+// HasRouteGatewayBindings reports whether a supported route has the multi-parent checkpoint.
 func HasRouteGatewayBindings(config Config, route client.Object) bool {
 	_, exists := route.GetAnnotations()[config.RouteGatewayBindingsAnnotation()]
-	return exists && scopedRouteProtocol(route) == gatewayv1.HTTPProtocolType
+	return exists && scopedRouteProtocol(route) != ""
 }
 
 func unvalidatedRouteGatewayBindings(config Config, route client.Object) []persistedRouteGatewayBinding {
@@ -93,15 +106,24 @@ func StoredRouteGatewayBindings(config Config, route client.Object) ([]RouteGate
 	annotations := route.GetAnnotations()
 	if !HasRouteGatewayBindings(config, route) {
 		identity, present, err := StoredRouteIdentity(config, route)
-		if err != nil || !present {
+		if err != nil {
 			return nil, err
 		}
-		return []RouteGatewayBinding{{
-			Identity:      identity,
-			Lifecycle:     annotations[config.RouteLifecycleAnnotation()],
-			Anchor:        ScopedRouteAnchor(config, route, scopedRouteProtocol(route)),
-			ExplicitScope: annotations[config.RouteClusterIDAnnotation()] != "" && annotations[config.RouteProjectIDAnnotation()] != "",
-		}}, nil
+		var bindings []RouteGatewayBinding
+		if present {
+			bindings = []RouteGatewayBinding{{
+				Identity:      identity,
+				Lifecycle:     annotations[config.RouteLifecycleAnnotation()],
+				Anchor:        ScopedRouteAnchor(config, route, scopedRouteProtocol(route)),
+				ExplicitScope: annotations[config.RouteClusterIDAnnotation()] != "" && annotations[config.RouteProjectIDAnnotation()] != "",
+			}}
+		}
+		if raw, exists := annotations[l4RouteTargetAnnotation(config)]; exists && isTransportRoute(route) {
+			if !present || json.Unmarshal([]byte(raw), &bindings[0].Forwarding) != nil || bindings[0].Forwarding.Value == "" {
+				return nil, invalidRouteForwardingTarget(route)
+			}
+		}
+		return bindings, validateRouteForwardingTargets(config, route, bindings)
 	}
 
 	invalid := fmt.Errorf("%w: invalid Gateway bindings for route %s/%s", cloud.ErrOwnershipConflict, route.GetNamespace(), route.GetName())
@@ -134,6 +156,12 @@ func StoredRouteGatewayBindings(config Config, route client.Object) ([]RouteGate
 		}
 		uids[item.UID] = struct{}{}
 		binding := RouteGatewayBinding{Identity: identity, Lifecycle: item.Lifecycle, Anchor: item.Anchor, ExplicitScope: true}
+		if item.Forwarding != nil {
+			if item.Forwarding.Value == "" {
+				return nil, invalidRouteForwardingTarget(route)
+			}
+			binding.Forwarding = *item.Forwarding
+		}
 		checkpoint := routeGatewayBindingFinalizer(config, route, binding)
 		if !controllerutil.ContainsFinalizer(route, checkpoint) {
 			return nil, invalid
@@ -146,7 +174,10 @@ func StoredRouteGatewayBindings(config Config, route client.Object) ([]RouteGate
 			return nil, invalid
 		}
 	}
-	return bindings, nil
+	if _, exists := annotations[l4RouteTargetAnnotation(config)]; exists && isTransportRoute(route) {
+		return nil, invalidRouteForwardingTarget(route)
+	}
+	return bindings, validateRouteForwardingTargets(config, route, bindings)
 }
 
 // StoredRouteGatewayBinding selects one binding by its Gateway identity.
@@ -166,7 +197,66 @@ func StoredRouteGatewayBinding(config Config, route client.Object, gateway cloud
 // RouteGatewayBindingSealed checks the route finalizer and this fragment's checkpoint.
 func RouteGatewayBindingSealed(config Config, route client.Object, binding RouteGatewayBinding) bool {
 	return controllerutil.ContainsFinalizer(route, config.RouteFinalizer()) &&
-		controllerutil.ContainsFinalizer(route, routeGatewayBindingFinalizer(config, route, binding))
+		controllerutil.ContainsFinalizer(route, routeGatewayBindingFinalizer(config, route, binding)) &&
+		(binding.Forwarding.Value == "" || controllerutil.ContainsFinalizer(route, routeForwardingFinalizer(config, binding)))
+}
+
+func isTransportRoute(route client.Object) bool {
+	protocol := scopedRouteProtocol(route)
+	return protocol == gatewayv1.TCPProtocolType || protocol == gatewayv1.UDPProtocolType
+}
+
+func l4RouteTargetAnnotation(config Config) string {
+	return config.Domain() + "/l4route-target-" + config.controllerKey()
+}
+
+func l4RouteTargetFinalizerPrefix(config Config) string {
+	return l4RouteTargetAnnotation(config) + "-"
+}
+
+func routeForwardingFinalizer(config Config, binding RouteGatewayBinding) string {
+	id := binding.Identity
+	target := binding.Forwarding
+	input := strings.Join([]string{id.ClusterID, id.OpenStackProjectID, id.GatewayNamespace, id.GatewayName, id.GatewayUID,
+		id.RouteNamespace, id.RouteName, id.RouteUID, strconv.FormatInt(target.Generation, 10), target.Value, strconv.FormatBool(target.Observed)}, "\x00")
+	digest := sha256.Sum256([]byte(input))
+	return l4RouteTargetFinalizerPrefix(config) + fmt.Sprintf("%x", digest[:12])
+}
+
+func invalidRouteForwardingTarget(route client.Object) error {
+	return fmt.Errorf("%w: invalid forwarding checkpoint for route %s/%s", cloud.ErrOwnershipConflict, route.GetNamespace(), route.GetName())
+}
+
+func validateRouteForwardingTargets(config Config, route client.Object, bindings []RouteGatewayBinding) error {
+	targets := make(map[string]struct{})
+	for _, binding := range bindings {
+		if binding.Forwarding == (RouteGatewayTarget{}) {
+			continue
+		}
+		if !isTransportRoute(route) || binding.Forwarding.Value == "" ||
+			binding.Forwarding.Generation < 0 || binding.Forwarding.Generation > route.GetGeneration() ||
+			!RouteGatewayBindingSealed(config, route, binding) {
+			return invalidRouteForwardingTarget(route)
+		}
+		targets[routeForwardingFinalizer(config, binding)] = struct{}{}
+	}
+	if isTransportRoute(route) {
+		for _, finalizer := range route.GetFinalizers() {
+			if _, exists := targets[finalizer]; !exists && strings.HasPrefix(finalizer, l4RouteTargetFinalizerPrefix(config)) {
+				return invalidRouteForwardingTarget(route)
+			}
+		}
+	}
+	return nil
+}
+
+func clearRouteForwardingTargets(config Config, route client.Object) {
+	if isTransportRoute(route) {
+		delete(route.GetAnnotations(), l4RouteTargetAnnotation(config))
+		route.SetFinalizers(slices.DeleteFunc(route.GetFinalizers(), func(finalizer string) bool {
+			return strings.HasPrefix(finalizer, l4RouteTargetFinalizerPrefix(config))
+		}))
+	}
 }
 
 func routeGatewayBindingFinalizer(config Config, route client.Object, binding RouteGatewayBinding) string {
@@ -178,9 +268,13 @@ func routeGatewayBindingFinalizer(config Config, route client.Object, binding Ro
 	return checkpoint
 }
 
-// ApplyHTTPRouteGatewayBinding updates or appends one checkpoint. The first
+// ApplyRouteGatewayBinding updates or appends one checkpoint. The first
 // binding retains its compatible singleton representation until a second is added.
-func ApplyHTTPRouteGatewayBinding(config Config, route client.Object, bindings []RouteGatewayBinding, binding RouteGatewayBinding) error {
+func ApplyRouteGatewayBinding(config Config, route client.Object, bindings []RouteGatewayBinding, binding RouteGatewayBinding) error {
+	if binding.Forwarding != (RouteGatewayTarget{}) && (!isTransportRoute(route) || binding.Forwarding.Value == "" ||
+		binding.Forwarding.Generation < 0 || binding.Forwarding.Generation > route.GetGeneration()) {
+		return invalidRouteForwardingTarget(route)
+	}
 	if !HasRouteGatewayBindings(config, route) &&
 		(len(bindings) == 0 || len(bindings) == 1 && SameGatewayIdentity(bindings[0].Identity, binding.Identity)) {
 		ApplyRouteBinding(config, route, binding.Identity)
@@ -188,7 +282,16 @@ func ApplyHTTPRouteGatewayBinding(config Config, route client.Object, bindings [
 		if binding.Anchor != 0 {
 			SealRouteAnchor(config, route, binding.Identity, binding.Anchor)
 		} else {
-			delete(route.GetAnnotations(), config.RouteListenerPortAnnotation(gatewayv1.HTTPProtocolType))
+			delete(route.GetAnnotations(), config.RouteListenerPortAnnotation(scopedRouteProtocol(route)))
+		}
+		clearRouteForwardingTargets(config, route)
+		if binding.Forwarding.Value != "" {
+			contents, err := json.Marshal(binding.Forwarding)
+			if err != nil {
+				return err
+			}
+			route.GetAnnotations()[l4RouteTargetAnnotation(config)] = string(contents)
+			controllerutil.AddFinalizer(route, routeForwardingFinalizer(config, binding))
 		}
 		return nil
 	}
@@ -196,7 +299,7 @@ func ApplyHTTPRouteGatewayBinding(config Config, route client.Object, bindings [
 	for _, existing := range bindings {
 		if existing.Lifecycle != RouteAttached && existing.Lifecycle != RouteDetaching ||
 			!RouteGatewayBindingSealed(config, route, existing) {
-			return fmt.Errorf("%w: incomplete HTTP route binding checkpoint", cloud.ErrOwnershipConflict)
+			return fmt.Errorf("%w: incomplete route binding checkpoint", cloud.ErrOwnershipConflict)
 		}
 	}
 	index := slices.IndexFunc(bindings, func(existing RouteGatewayBinding) bool {
@@ -214,10 +317,14 @@ func storeRouteGatewayBindings(config Config, route client.Object, bindings []Ro
 	var encoded []persistedRouteGatewayBinding
 	for _, binding := range bindings {
 		id := binding.Identity
-		encoded = append(encoded, persistedRouteGatewayBinding{
+		item := persistedRouteGatewayBinding{
 			Namespace: id.GatewayNamespace, Name: id.GatewayName, UID: id.GatewayUID,
 			Cluster: id.ClusterID, Project: id.OpenStackProjectID, Lifecycle: binding.Lifecycle, Anchor: binding.Anchor,
-		})
+		}
+		if binding.Forwarding.Value != "" {
+			item.Forwarding = &binding.Forwarding
+		}
+		encoded = append(encoded, item)
 	}
 	contents, err := json.Marshal(encoded)
 	if err != nil {
@@ -231,6 +338,7 @@ func storeRouteGatewayBindings(config Config, route client.Object, bindings []Ro
 		legacyGatewayUID = route.GetAnnotations()[config.RouteGatewayUIDAnnotation()]
 	}
 	ClearRouteBinding(config, route)
+	clearRouteForwardingTargets(config, route)
 	delete(route.GetAnnotations(), config.RouteGatewayBindingsAnnotation())
 	if len(bindings) == 0 {
 		return nil
@@ -242,6 +350,9 @@ func storeRouteGatewayBindings(config Config, route client.Object, bindings []Ro
 	annotations[config.RouteGatewayBindingsAnnotation()] = string(contents)
 	for _, binding := range bindings {
 		controllerutil.AddFinalizer(route, routeGatewayBindingFinalizer(config, route, binding))
+		if binding.Forwarding.Value != "" {
+			controllerutil.AddFinalizer(route, routeForwardingFinalizer(config, binding))
+		}
 		if legacyFailure != "" && binding.Identity.GatewayUID == legacyGatewayUID {
 			annotations[config.RouteGatewayCleanupFailureAnnotation(legacyGatewayUID)] = legacyFailure
 		}
@@ -255,6 +366,7 @@ func storeRouteGatewayBindings(config Config, route client.Object, bindings []Ro
 func RemoveRouteGatewayBinding(config Config, route client.Object, bindings []RouteGatewayBinding, identity cloud.Identity) error {
 	if !HasRouteGatewayBindings(config, route) {
 		ClearRouteBinding(config, route)
+		clearRouteForwardingTargets(config, route)
 		return nil
 	}
 	bindings = slices.DeleteFunc(bindings, func(binding RouteGatewayBinding) bool { return binding.Identity == identity })
@@ -278,7 +390,7 @@ func SealRouteGatewayAnchor(config Config, route client.Object, identity cloud.I
 	for _, binding := range bindings {
 		if SameGatewayIdentity(identity, binding.Identity) {
 			binding.Anchor = port
-			return ApplyHTTPRouteGatewayBinding(config, route, bindings, binding)
+			return ApplyRouteGatewayBinding(config, route, bindings, binding)
 		}
 	}
 	return fmt.Errorf("%w: route has no checkpoint for the enrolling Gateway", cloud.ErrOwnershipConflict)

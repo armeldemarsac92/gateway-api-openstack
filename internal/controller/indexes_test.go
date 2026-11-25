@@ -246,13 +246,13 @@ func TestBoundGatewayKeyRequiresCompleteStoredIdentity(t *testing.T) {
 		config.RouteGatewayNameAnnotation():      "edge",
 		config.RouteGatewayUIDAnnotation():       "gateway-uid",
 	}}}
-	if got, want := boundGatewayKey(config, route), "gateways/edge"; got != want {
-		t.Fatalf("boundGatewayKey() = %q, want %q", got, want)
+	if got, want := boundGatewayKeys(config, route), []string{"gateways/edge"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("boundGatewayKeys() = %q, want %q", got, want)
 	}
 
 	delete(route.Annotations, config.RouteGatewayUIDAnnotation())
-	if got := boundGatewayKey(config, route); got != "" {
-		t.Fatalf("boundGatewayKey() with incomplete identity = %q, want empty", got)
+	if got := boundGatewayKeys(config, route); len(got) != 0 {
+		t.Fatalf("boundGatewayKeys() with incomplete identity = %q, want empty", got)
 	}
 }
 

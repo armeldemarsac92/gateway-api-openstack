@@ -100,6 +100,38 @@ func TestBackendTLSPolicySystemCAReportsRegionalAvailability(t *testing.T) {
 	require.Empty(t, tls.CAPEM)
 }
 
+func TestNamespaceChangeRequeuesTLSBackendPoliciesAcrossDefaultGateway(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	cfg.BackendTLSPolicy, cfg.TCPTLSTermination = true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "shared"},
+		Spec: gatewayv1.GatewaySpec{DefaultScope: gatewayv1.GatewayDefaultScopeAll}}
+	objects := []client.Object{gateway}
+	makeRoute := func(namespace string, spec gatewayv1.CommonRouteSpec) {
+		meta := metav1.ObjectMeta{Name: "app", Namespace: namespace}
+		ref := gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "service", Port: ptr.To(gatewayv1.PortNumber(443))}}
+		objects = append(objects, &gatewayv1.TLSRoute{ObjectMeta: meta, Spec: gatewayv1.TLSRouteSpec{
+			CommonRouteSpec: spec, Hostnames: []gatewayv1.Hostname{"api.example.test"}, Rules: []gatewayv1.TLSRouteRule{{BackendRefs: []gatewayv1.BackendRef{ref}}},
+		}}, &gatewayv1.BackendTLSPolicy{ObjectMeta: meta, Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: "service"}}},
+		}})
+	}
+	makeRoute("older", gatewayv1.CommonRouteSpec{UseDefaultGateways: gatewayv1.GatewayDefaultScopeAll})
+	explicit := gatewayv1.ParentReference{Name: "shared", Namespace: ptr.To(gatewayv1.Namespace("infra"))}
+	makeRoute("contender", gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{explicit}})
+	explicit.Name = "unrelated"
+	makeRoute("elsewhere", gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{explicit}})
+	scheme := testScheme(t)
+	require.NoError(t, gatewayx.Install(scheme))
+	kube := indexedFakeClientBuilder(scheme, cfg).WithObjects(objects...).Build()
+	r := Reconciler{Config: cfg, Client: kube}
+	requests := r.enqueuePoliciesForTLSRouteDependency(t.Context(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "older"}})
+	require.ElementsMatch(t, []ctrl.Request{
+		{NamespacedName: types.NamespacedName{Namespace: "older", Name: "app"}},
+		{NamespacedName: types.NamespacedName{Namespace: "contender", Name: "app"}},
+	}, requests)
+}
+
 func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	f.reconciler.Config.BackendTLSPolicy = true
@@ -431,6 +463,7 @@ func TestBackendTLSAncestorCapacityPreservesRowsAndAllocatesOneReplacement(t *te
 
 func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
 	cfg := testConfig()
+	cfg.GatewayAPIChannel = "experimental"
 	cfg.BackendTLSPolicy, cfg.TCPTLSTermination = true, true
 	f := newRouteModelInputFixtureWithConfig(t, cfg)
 	f.reconciler.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
@@ -569,6 +602,15 @@ func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
 	require.Empty(t, reconcileCanary())
 	require.True(t, meta.IsStatusConditionTrue(reconcile()[tlsName], string(gatewayv1.PolicyConditionAccepted)))
 
+	tlsGateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+	require.NoError(t, f.client.Update(t.Context(), tlsGateway))
+	tlsRoute.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+	tlsRoute.Spec.ParentRefs = nil
+	require.NoError(t, f.client.Update(t.Context(), tlsRoute))
+	require.True(t, meta.IsStatusConditionTrue(reconcile()[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+	tlsGateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+	require.NoError(t, f.client.Update(t.Context(), tlsGateway))
+	require.NotContains(t, reconcile(), tlsName)
 	require.NoError(t, f.client.Delete(t.Context(), tlsRoute))
 	conditions = reconcile()
 	require.Len(t, conditions, 1)

@@ -20,7 +20,13 @@ package controller_test
 
 import (
 	"context"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -226,6 +232,189 @@ func testSharedHTTPGateway(t *testing.T, c client.Client, cfg controller.Config)
 		t.Fatal(err)
 	}
 	waitForAttachment(true, 1)
+}
+
+func testDefaultGatewayAttachments(t *testing.T, c client.Client, cfg controller.Config, protocol gatewayv1.ProtocolType) {
+	t.Helper()
+	namespace := "default-gateways-" + strings.ToLower(string(protocol))
+	apps := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace + "-apps", Labels: map[string]string{"default-gateway": namespace}}}
+	parameters := envtestClassParameters(namespace)
+	parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: namespace}, Spec: gatewayv1.GatewayClassSpec{
+		ControllerName: cfg.ControllerName, ParametersRef: &gatewayv1.ParametersReference{
+			Group: configv1alpha1.GroupName, Kind: configv1alpha1.GatewayClassConfigKind, Name: parameters.Name},
+	}}
+	first := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "first", Namespace: namespace}, Spec: gatewayv1.GatewaySpec{
+		GatewayClassName: gatewayv1.ObjectName(namespace), DefaultScope: gatewayv1.GatewayDefaultScopeAll,
+		Listeners: []gatewayv1.Listener{{Name: "frontend", Protocol: protocol, Port: 80, AllowedRoutes: &gatewayv1.AllowedRoutes{
+			Namespaces: &gatewayv1.RouteNamespaces{From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: maps.Clone(apps.Labels)}},
+		}}},
+	}}
+	second := first.DeepCopy()
+	second.Name = "second"
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), envtestWaitTimeout)
+		defer cancel()
+		for _, gw := range []*gatewayv1.Gateway{first, second} {
+			var remaining gatewayv1.Gateway
+			if err := c.Get(ctx, client.ObjectKeyFromObject(gw), &remaining); err != nil {
+				require.NoError(t, client.IgnoreNotFound(err))
+				continue
+			}
+			if remaining.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+				base := remaining.DeepCopy()
+				remaining.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+				require.NoError(t, c.Patch(ctx, &remaining, client.MergeFrom(base)))
+			}
+		}
+	})
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: apps.Name}, Spec: corev1.ServiceSpec{
+		Ports: []corev1.ServicePort{{Name: "http", Port: 80}},
+	}}
+	for _, object := range []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, apps, parameters, class, first, second, service} {
+		require.NoError(t, c.Create(t.Context(), object))
+	}
+	endpoints := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: apps.Name, Labels: map[string]string{discoveryv1.LabelServiceName: service.Name},
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(service, corev1.SchemeGroupVersion.WithKind("Service"))}},
+		AddressType: discoveryv1.AddressTypeIPv4, Ports: []discoveryv1.EndpointPort{{Name: ptr.To("http"), Port: ptr.To(int32(8080))}},
+		Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"192.0.2.11"}}},
+	}
+	require.NoError(t, c.Create(t.Context(), endpoints))
+	http := envtestHTTPRoute(apps.Name, "web", "", service.Name)
+	http.Spec.CommonRouteSpec = gatewayv1.CommonRouteSpec{UseDefaultGateways: gatewayv1.GatewayDefaultScopeAll}
+	var route client.Object = http
+	if protocol == gatewayv1.TCPProtocolType {
+		route = &gatewayv1.TCPRoute{ObjectMeta: http.ObjectMeta, Spec: gatewayv1.TCPRouteSpec{
+			CommonRouteSpec: http.Spec.CommonRouteSpec,
+			Rules:           []gatewayv1.TCPRouteRule{{BackendRefs: []gatewayv1.BackendRef{http.Spec.Rules[0].BackendRefs[0].BackendRef}}},
+		}}
+	}
+	require.NoError(t, c.Create(t.Context(), route))
+	check := func(want map[string]bool) {
+		t.Helper()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			live := route.DeepCopyObject().(client.Object)
+			if err := c.Get(ctx, client.ObjectKeyFromObject(route), live); err != nil {
+				return false, err
+			}
+			spec, parents := controller.RouteSpecAndParentStatuses(live)
+			if len(parents) != len(want) || len(spec.ParentRefs) != 0 || live.GetGeneration() != route.GetGeneration() {
+				return false, nil
+			}
+			for _, status := range parents {
+				admitted, known := want[string(status.ParentRef.Name)]
+				if !known || status.ControllerName != cfg.ControllerName || status.ParentRef.Namespace == nil || string(*status.ParentRef.Namespace) != namespace {
+					return false, nil
+				}
+				if !admitted {
+					accepted := meta.FindStatusCondition(status.Conditions, string(gatewayv1.RouteConditionAccepted))
+					if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonNotAllowedByListeners) || accepted.ObservedGeneration != live.GetGeneration() {
+						return false, nil
+					}
+					continue
+				}
+				for _, name := range []string{"Accepted", "ResolvedRefs", cfg.Domain() + "/Programmed"} {
+					condition := meta.FindStatusCondition(status.Conditions, name)
+					if condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != live.GetGeneration() {
+						return false, nil
+					}
+				}
+			}
+			for _, expected := range []*gatewayv1.Gateway{first, second} {
+				var gw gatewayv1.Gateway
+				if err := c.Get(ctx, client.ObjectKeyFromObject(expected), &gw); err != nil {
+					return false, err
+				}
+				var attached int32
+				if want[gw.Name] {
+					attached = 1
+				}
+				if len(gw.Status.Listeners) != 1 || gw.Status.Listeners[0].AttachedRoutes != attached {
+					return false, nil
+				}
+				condition := meta.FindStatusCondition(gw.Status.Conditions, "DefaultGateway")
+				if expected.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+					if condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != gw.Generation {
+						return false, nil
+					}
+				} else if condition != nil {
+					return false, nil
+				}
+			}
+			claims, err := controller.StoredRouteGatewayBindings(cfg, live)
+			active := 0
+			for _, admitted := range want {
+				if admitted {
+					active++
+				}
+			}
+			if err != nil || len(claims) != active {
+				return false, err
+			}
+			for _, claim := range claims {
+				if !want[claim.Identity.GatewayName] || claim.Lifecycle != controller.RouteAttached {
+					return false, nil
+				}
+			}
+			return true, nil
+		})
+	}
+	check(map[string]bool{first.Name: true, second.Name: true})
+	before := first.DeepCopy()
+	first.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+	require.NoError(t, c.Patch(t.Context(), first, client.MergeFrom(before)))
+	check(map[string]bool{second.Name: true})
+	beforeNS := apps.DeepCopy()
+	delete(apps.Labels, "default-gateway")
+	require.NoError(t, c.Patch(t.Context(), apps, client.MergeFrom(beforeNS)))
+	check(map[string]bool{second.Name: false})
+	beforeNS = apps.DeepCopy()
+	apps.Labels["default-gateway"] = namespace
+	require.NoError(t, c.Patch(t.Context(), apps, client.MergeFrom(beforeNS)))
+	check(map[string]bool{second.Name: true})
+	beforeRoute := route.DeepCopyObject().(client.Object)
+	spec, _ := controller.RouteSpecAndParentStatuses(route)
+	spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeNone
+	require.NoError(t, c.Patch(t.Context(), route, client.MergeFrom(beforeRoute)))
+	check(nil)
+	if protocol == gatewayv1.HTTPProtocolType {
+		// Other controllers may occupy all 32 status slots. Admission, listener
+		// counts, and the active binding still need to reflect the new parent.
+		require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(http), http))
+		condition := controller.Condition("Accepted", metav1.ConditionTrue, "Accepted", "Mesh attachment", http.Generation)
+		condition.LastTransitionTime = metav1.Now()
+		for i := range controller.RouteParentStatusLimit {
+			http.Status.Parents = append(http.Status.Parents, gatewayv1.RouteParentStatus{
+				ParentRef: gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("mesh-%d", i))}, ControllerName: "example.test/mesh",
+				Conditions: []metav1.Condition{condition},
+			})
+		}
+		require.NoError(t, c.Status().Update(t.Context(), http))
+		before := http.DeepCopy()
+		http.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+		require.NoError(t, c.Patch(t.Context(), http, client.MergeFrom(before)))
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			var current gatewayv1.HTTPRoute
+			if err := c.Get(ctx, client.ObjectKeyFromObject(http), &current); err != nil {
+				return false, err
+			}
+			if len(current.Status.Parents) != controller.RouteParentStatusLimit || slices.ContainsFunc(current.Status.Parents, func(p gatewayv1.RouteParentStatus) bool {
+				return p.ControllerName != "example.test/mesh"
+			}) {
+				return false, nil
+			}
+			bindings, err := controller.StoredRouteGatewayBindings(cfg, &current)
+			if err != nil || len(bindings) != 1 || bindings[0].Identity.GatewayUID != string(second.UID) || bindings[0].Lifecycle != controller.RouteAttached {
+				return false, err
+			}
+			var gw gatewayv1.Gateway
+			if err := c.Get(ctx, client.ObjectKeyFromObject(second), &gw); err != nil {
+				return false, err
+			}
+			return len(gw.Status.Listeners) == 1 && gw.Status.Listeners[0].AttachedRoutes == 1, nil
+		})
+	}
 }
 
 func testHTTPRouteReferenceIndexUpdates(t *testing.T, apiClient, cacheClient client.Client) {
