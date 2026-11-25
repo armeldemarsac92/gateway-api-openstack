@@ -62,6 +62,9 @@ type GatewayGraphNode struct {
 	// TCPTLSCertificateRef is the currently authorized certificate for the raw
 	// TCP termination profile. An empty reference requires the listener closed.
 	TCPTLSCertificateRef string `json:",omitempty"`
+	// RetainSNIAddress keeps the load balancer and its addresses while the
+	// TLS listener is removed for a same-port change between SNI profiles.
+	RetainSNIAddress bool `json:",omitempty"`
 	// TLSWithdrawalPorts restricts a known authorization change to these
 	// physical HTTPS ports. A nil list checks all TLS frontends.
 	TLSWithdrawalPorts []int `json:",omitempty"`
@@ -94,10 +97,11 @@ type BackendClientCertificate struct {
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.
 type TLSSNIRoute struct {
 	// Deny selects an empty pool so the hostname cannot fall through to a broader suffix.
-	Deny       bool `json:",omitempty"`
-	Identity   Identity
-	Hostname   string
-	ServiceUID string
+	Deny        bool `json:",omitempty"`
+	Passthrough bool `json:",omitempty"`
+	Identity    Identity
+	Hostname    string
+	ServiceUID  string
 	// ServicePort identifies the Service section independently of the selected
 	// SNI hostname, endpoints and their target port.
 	ServicePort             int `json:",omitempty"`

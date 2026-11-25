@@ -89,9 +89,10 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input := graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
 			Node: cloud.GatewayGraphNode{
-				Disposition:    cloud.GraphDelete,
-				Spec:           spec,
-				BackendCAOwned: controllerutil.ContainsFinalizer(request.Gateway, r.Config.BackendCAFinalizer()),
+				Disposition:      cloud.GraphDelete,
+				Spec:             spec,
+				RetainSNIAddress: snapshot.retainSNIAddress,
+				BackendCAOwned:   controllerutil.ContainsFinalizer(request.Gateway, r.Config.BackendCAFinalizer()),
 			},
 			Validate: func(ctx context.Context) error {
 				latest, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
@@ -107,7 +108,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 				return nil
 			},
 		}
-		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType || snapshot.boundListenerProtocol == cloud.ListenerProtocolTLSTerminate {
+		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType || cloud.IsTCPTLSListenerProtocol(string(snapshot.boundListenerProtocol)) {
 			input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
 				if providerErr != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.AddressIssue != "" {
 					return nil
@@ -133,7 +134,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
 			return r.tlsWithdrawalInput(ctx, binding, request.Identity)
 		}
-	} else if r.boundListenerProtocol(binding) == cloud.ListenerProtocolTLSTerminate {
+	} else if cloud.IsTCPTLSListenerProtocol(string(r.boundListenerProtocol(binding))) {
 		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
 			return r.rawTLSWithdrawalInput(ctx, binding, request.Identity)
 		}
@@ -211,13 +212,16 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
 		if terminatesTLS(snapshot.listener) {
 			input.Node.SNIPoliciesObserved = r.Config.BackendTLSPolicy
-			input.Node.TCPTLSCertificateRef = r.resolveCertificate(ctx, snapshot.gateway, snapshot.listener).tls.CertificateRef
+			input.Node.TCPTLSCertificateRef, _ = r.rawTLSCertificate(ctx, snapshot.gateway, snapshot.listeners)
 		}
 		observed, err := r.observeSNIRoutes(ctx, snapshot)
 		if err != nil {
 			return input, err
 		}
 		input.Node.TLSSNIRoutes = observed.targets()
+		if input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolTLSMixed {
+			input.Node.TLSSNIRoutes = appendMixedSNIListenerGuards(input.Node.Spec.Identity, snapshot.listeners, input.Node.TLSSNIRoutes)
+		}
 		validate := func(ctx context.Context) error {
 			latest, err := r.observeSNIRoutes(ctx, snapshot)
 			if err != nil {

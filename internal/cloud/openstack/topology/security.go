@@ -183,7 +183,7 @@ func (r *Resolver) ValidateGatewaySecurity(ctx context.Context, gateway cloud.Ga
 func allowsIngress(securityGroups []groups.SecGroup, listenerProtocol string, family, port int) bool {
 	var protocol, protocolNumber string
 	switch cloud.NormalizeListenerProtocol(listenerProtocol) {
-	case cloud.ListenerProtocolHTTP, cloud.ListenerProtocolTCP:
+	case cloud.ListenerProtocolHTTP, cloud.ListenerProtocolTCP, cloud.ListenerProtocolTLSMixed:
 		protocol, protocolNumber = "tcp", "6"
 	case cloud.ListenerProtocolUDP:
 		protocol, protocolNumber = "udp", "17"

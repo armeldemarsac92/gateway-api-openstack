@@ -1,0 +1,314 @@
+{
+  "case": "TLSRouteMixedTerminationSameNamespace",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": "e98465b9dbf9251af98fd917ca616744f7140894",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "e98465b9dbf9251af98fd917ca616744f7140894",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:972436b28afba5e9ad25de14a8d973cd0ff0b77dab762ec8ff0b69fd7da91753",
+    "configDigest": "sha256:46e2a6092cbe8033fa2ddbcaa05d238c4adfcd3f2269ec7affa2d5800706d1c6",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "768e850e13b7a911b6a714a255c44572ffb98a6e5d148486eb7e563cb685fa9d",
+    "managerSHA256": "25f895cbd188e865c1228f3dd56309fe110e58a441db827167a519b62e9e8d15",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "providerReleases": {
+    "octavia": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-mixed-tls-ffeed635ef22",
+    "octavia-lib": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-mixed-tls-4fe5ac72a508"
+  },
+  "channels": {
+    "standard": {
+      "registeredTestSHA256": "52bf55dbed966f0241a5e8b27d87c0efb34105f7c9e6d7480b32298acefc3bf5",
+      "registeredManifestSHA256": "0e081cc1f72e3785aab476be507b1caadc8a388d2ee1f26d5ac1823f96d32ee8",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "reportSHA256": "ceeec048da74b3799b74f61a44f7bf1aaf1ba2d96ae041032aac20f2e93e7915",
+      "caseAndTrafficSubtests": [
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteMixedTerminationSameNamespace (24.06s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteMixedTerminationSameNamespace/Simple_TLS_request_matching_TLSRoute_Passthrough_should_reach_infra-backend (0.02s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteMixedTerminationSameNamespace/Simple_TLS_request_matching_terminated_TLSRoute_should_reach_tcp-backend_unencrypted (0.04s)"
+      ],
+      "capabilityBefore": [
+        "fixed_http_responses_v1",
+        "https_listener_isolation_v1",
+        "tcp_tls_termination_v1",
+        "tls_sni_passthrough_v1",
+        "weighted_http_targets_v1"
+      ],
+      "capabilityAfter": [
+        "fixed_http_responses_v1",
+        "https_listener_isolation_v1",
+        "tcp_tls_mixed_mode_v1",
+        "tcp_tls_termination_v1",
+        "tls_sni_passthrough_v1",
+        "weighted_http_targets_v1"
+      ],
+      "octavia": {
+        "filesVerified": 650,
+        "revision": "ffeed635ef2268d686cc772765b1434043085489",
+        "sha256": "a3bfd675152395654a2804f3f71bfed7ed0c9993c5f741bb81613505f37ab66e",
+        "version": "19.0.1.dev46"
+      },
+      "octaviaLib": {
+        "filesVerified": 24,
+        "revision": "4fe5ac72a508a6649bb92cd44db674fa8a675d09",
+        "sha256": "6f2c8396ef87e62d7ea8bb22c0ed18e0b6f2d48238198b3b3de1239f48e4b464",
+        "version": "3.12.1.dev14"
+      },
+      "haproxySHA256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e",
+      "native": {
+        "defaultPool": false,
+        "initial": {
+          "abc.example.com": {
+            "backend": "tcp-backend-6fbfc875c7-bh88q",
+            "backendSNI": "abc.example.com",
+            "backendTLS": true,
+            "frontendCertificateSHA256": "7f5a2c357157080a1026bd516913d056199fda821098e4d69dd3f52f1b202ffc",
+            "frontendTLS": "TLSv1.3",
+            "reply": "PONG"
+          },
+          "tls.example.com": {
+            "backend": "tcp-backend-6fbfc875c7-bh88q",
+            "backendSNI": "",
+            "backendTLS": false,
+            "frontendCertificateSHA256": "ef62131fc7994400a04682c3e1fbd604a71db722b13f4a1e25e7a13ccaea9a2f",
+            "frontendTLS": "TLSv1.3",
+            "reply": "PONG"
+          }
+        },
+        "policies": {
+          "abc.example.com": {
+            "passthrough": true,
+            "pool": "11da9f8f-79a3-499d-a337-d0d489535c9d"
+          },
+          "tls.example.com": {
+            "passthrough": false,
+            "pool": "23a84513-2e17-48dc-ac72-b61929779370"
+          }
+        },
+        "port": 8883,
+        "transitions": {
+          "abc.example.com": {
+            "restored": {
+              "abc.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-ldtbz",
+                "backendSNI": "abc.example.com",
+                "backendTLS": true,
+                "frontendCertificateSHA256": "7f5a2c357157080a1026bd516913d056199fda821098e4d69dd3f52f1b202ffc",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              },
+              "tls.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-ldtbz",
+                "backendSNI": "",
+                "backendTLS": false,
+                "frontendCertificateSHA256": "ef62131fc7994400a04682c3e1fbd604a71db722b13f4a1e25e7a13ccaea9a2f",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              }
+            },
+            "withdrawn": {
+              "abc.example.com": {
+                "closed": true
+              },
+              "tls.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-ldtbz",
+                "backendSNI": "",
+                "backendTLS": false,
+                "frontendCertificateSHA256": "ef62131fc7994400a04682c3e1fbd604a71db722b13f4a1e25e7a13ccaea9a2f",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              }
+            }
+          },
+          "tls.example.com": {
+            "restored": {
+              "abc.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-ldtbz",
+                "backendSNI": "abc.example.com",
+                "backendTLS": true,
+                "frontendCertificateSHA256": "7f5a2c357157080a1026bd516913d056199fda821098e4d69dd3f52f1b202ffc",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              },
+              "tls.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-ldtbz",
+                "backendSNI": "",
+                "backendTLS": false,
+                "frontendCertificateSHA256": "ef62131fc7994400a04682c3e1fbd604a71db722b13f4a1e25e7a13ccaea9a2f",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              }
+            },
+            "withdrawn": {
+              "abc.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-ldtbz",
+                "backendSNI": "abc.example.com",
+                "backendTLS": true,
+                "frontendCertificateSHA256": "7f5a2c357157080a1026bd516913d056199fda821098e4d69dd3f52f1b202ffc",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              },
+              "tls.example.com": {
+                "closed": true
+              }
+            }
+          }
+        },
+        "vip": "192.0.2.34"
+      }
+    },
+    "experimental": {
+      "registeredTestSHA256": "52bf55dbed966f0241a5e8b27d87c0efb34105f7c9e6d7480b32298acefc3bf5",
+      "registeredManifestSHA256": "0e081cc1f72e3785aab476be507b1caadc8a388d2ee1f26d5ac1823f96d32ee8",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "reportSHA256": "3469ea478107e3a90b0dcf87c5ea485cc7a77ff8e0dd250d07bacf0a431c5872",
+      "caseAndTrafficSubtests": [
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteMixedTerminationSameNamespace (24.35s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteMixedTerminationSameNamespace/Simple_TLS_request_matching_terminated_TLSRoute_should_reach_tcp-backend_unencrypted (0.02s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteMixedTerminationSameNamespace/Simple_TLS_request_matching_TLSRoute_Passthrough_should_reach_infra-backend (0.02s)"
+      ],
+      "capabilityBefore": [
+        "fixed_http_responses_v1",
+        "https_listener_isolation_v1",
+        "tcp_tls_termination_v1",
+        "tls_sni_passthrough_v1",
+        "weighted_http_targets_v1"
+      ],
+      "capabilityAfter": [
+        "fixed_http_responses_v1",
+        "https_listener_isolation_v1",
+        "tcp_tls_mixed_mode_v1",
+        "tcp_tls_termination_v1",
+        "tls_sni_passthrough_v1",
+        "weighted_http_targets_v1"
+      ],
+      "octavia": {
+        "filesVerified": 650,
+        "revision": "ffeed635ef2268d686cc772765b1434043085489",
+        "sha256": "a3bfd675152395654a2804f3f71bfed7ed0c9993c5f741bb81613505f37ab66e",
+        "version": "19.0.1.dev46"
+      },
+      "octaviaLib": {
+        "filesVerified": 24,
+        "revision": "4fe5ac72a508a6649bb92cd44db674fa8a675d09",
+        "sha256": "6f2c8396ef87e62d7ea8bb22c0ed18e0b6f2d48238198b3b3de1239f48e4b464",
+        "version": "3.12.1.dev14"
+      },
+      "haproxySHA256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e",
+      "native": {
+        "defaultPool": false,
+        "initial": {
+          "abc.example.com": {
+            "backend": "tcp-backend-6fbfc875c7-9d6dg",
+            "backendSNI": "abc.example.com",
+            "backendTLS": true,
+            "frontendCertificateSHA256": "b4e1efcf1fd1ad1b155e23722d0d958f3dafda5e04b706202f238540d8a4b898",
+            "frontendTLS": "TLSv1.3",
+            "reply": "PONG"
+          },
+          "tls.example.com": {
+            "backend": "tcp-backend-6fbfc875c7-9d6dg",
+            "backendSNI": "",
+            "backendTLS": false,
+            "frontendCertificateSHA256": "3ee4976ea6be6d92646b05c04074a8acf4d8b56d5a1ed344ccddcf24ee7748d2",
+            "frontendTLS": "TLSv1.3",
+            "reply": "PONG"
+          }
+        },
+        "policies": {
+          "abc.example.com": {
+            "passthrough": true,
+            "pool": "4d0fab24-e24e-4a45-b719-31abbe4699b2"
+          },
+          "tls.example.com": {
+            "passthrough": false,
+            "pool": "b9b0c937-e844-49e5-b19a-8aa0c667d0af"
+          }
+        },
+        "port": 8883,
+        "transitions": {
+          "abc.example.com": {
+            "restored": {
+              "abc.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-9nt5c",
+                "backendSNI": "abc.example.com",
+                "backendTLS": true,
+                "frontendCertificateSHA256": "b4e1efcf1fd1ad1b155e23722d0d958f3dafda5e04b706202f238540d8a4b898",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              },
+              "tls.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-9nt5c",
+                "backendSNI": "",
+                "backendTLS": false,
+                "frontendCertificateSHA256": "3ee4976ea6be6d92646b05c04074a8acf4d8b56d5a1ed344ccddcf24ee7748d2",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              }
+            },
+            "withdrawn": {
+              "abc.example.com": {
+                "closed": true
+              },
+              "tls.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-9nt5c",
+                "backendSNI": "",
+                "backendTLS": false,
+                "frontendCertificateSHA256": "3ee4976ea6be6d92646b05c04074a8acf4d8b56d5a1ed344ccddcf24ee7748d2",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              }
+            }
+          },
+          "tls.example.com": {
+            "restored": {
+              "abc.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-9nt5c",
+                "backendSNI": "abc.example.com",
+                "backendTLS": true,
+                "frontendCertificateSHA256": "b4e1efcf1fd1ad1b155e23722d0d958f3dafda5e04b706202f238540d8a4b898",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              },
+              "tls.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-9nt5c",
+                "backendSNI": "",
+                "backendTLS": false,
+                "frontendCertificateSHA256": "3ee4976ea6be6d92646b05c04074a8acf4d8b56d5a1ed344ccddcf24ee7748d2",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              }
+            },
+            "withdrawn": {
+              "abc.example.com": {
+                "backend": "tcp-backend-6fbfc875c7-9nt5c",
+                "backendSNI": "abc.example.com",
+                "backendTLS": true,
+                "frontendCertificateSHA256": "b4e1efcf1fd1ad1b155e23722d0d958f3dafda5e04b706202f238540d8a4b898",
+                "frontendTLS": "TLSv1.3",
+                "reply": "PONG"
+              },
+              "tls.example.com": {
+                "closed": true
+              }
+            }
+          }
+        },
+        "vip": "192.0.2.34"
+      }
+    }
+  },
+  "real": [
+    "Kind Kubernetes API, TCP echo Pods and EndpointSlices",
+    "Octavia REST and storage, Barbican REST",
+    "Amphora rendering and native HAProxy TLS connections"
+  ],
+  "simulated": [
+    "Keystone catalog and identity, Neutron allocations",
+    "Octavia worker scheduling and Amphora agent transport",
+    "Host and guest network relays"
+  ]
+}

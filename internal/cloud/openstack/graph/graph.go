@@ -44,6 +44,7 @@ type desiredGatewayGraph struct {
 	protocol            string
 	sni                 []desiredSNIFragment
 	sniHeldClosed       map[sniFragmentKey]bool
+	sniPaused           map[sniFragmentKey]bool
 	sniBlockedRoutes    map[string]bool
 }
 
@@ -255,7 +256,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if err != nil {
 		pending := p.progressingOutcome("Waiting for the Gateway infrastructure")
-		if desired.protocol == cloud.ListenerProtocolTLSTerminate && actual.outcome.State == cloud.OutcomeProgressing {
+		if cloud.IsTCPTLSListenerProtocol(desired.protocol) && actual.outcome.State == cloud.OutcomeProgressing {
 			pending = actual.outcome
 		}
 		result.Gateway = observedGatewayResult(desired, actual, pending)
@@ -294,6 +295,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err := p.prepareSNIRouteBackendTLS(ctx, &desired, actual); err != nil {
 		return result, err
 	}
+	p.isolateUnavailableSNISuffix(ctx, &desired, actual)
 	if actual.addressReadError != nil {
 		if isSNIProtocol(desired.protocol) {
 			if actual.outcome.State == cloud.OutcomeProgressing {
@@ -763,7 +765,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	if !validGraphDisposition(spec.Gateway.Disposition) && !withdrawTLS {
 		return invalid("Gateway graph disposition is invalid")
 	}
-	rawTLS := spec.Gateway.Spec.ListenerProtocol == cloud.ListenerProtocolTLSTerminate
+	rawTLS := cloud.IsTCPTLSListenerProtocol(spec.Gateway.Spec.ListenerProtocol)
 	if withdrawTLS && (!rawTLS && (spec.Gateway.Spec.ListenerProtocol != cloud.ListenerProtocolHTTP || spec.Gateway.Spec.ScopedListeners == nil) ||
 		len(spec.Routes) != 0 || !sameGatewayIdentity(spec.Identity, spec.Gateway.Spec.Identity)) {
 		return invalid("TLS withdrawal requires the Gateway's TLS binding and no route models")
@@ -772,6 +774,10 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		return port < 1 || port > 65535
 	})) {
 		return invalid("targeted TLS withdrawal requires valid scoped HTTPS ports")
+	}
+	mixed := spec.Gateway.Spec.ListenerProtocol == cloud.ListenerProtocolTLSMixed
+	if spec.Gateway.RetainSNIAddress && (!isSNIProtocol(spec.Gateway.Spec.ListenerProtocol) || spec.Gateway.Disposition != cloud.GraphDelete) {
+		return invalid("retaining SNI addresses requires cleanup of a TLS SNI listener")
 	}
 	for port, hosts := range spec.Gateway.TLSWithdrawalPreviousHosts {
 		if len(hosts) == 0 || !slices.Contains(spec.Gateway.TLSWithdrawalPorts, port) {
@@ -801,7 +807,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 	}
 	if isSNIProtocol(protocol) {
-		ensure := spec.Gateway.Disposition == cloud.GraphEnsure && (rawTLS && p.tcpTLSTermination || !rawTLS && p.tlsSNIPassthrough)
+		ensure := spec.Gateway.Disposition == cloud.GraphEnsure && (rawTLS && p.tcpTLSTermination && (!mixed || p.tcpTLSMixedMode) || !rawTLS && p.tlsSNIPassthrough)
 		cleanup := (spec.Gateway.Disposition == cloud.GraphDelete || rawTLS && withdrawTLS) && len(spec.Gateway.TLSSNIRoutes) == 0
 		if !ensure && !cleanup || spec.Gateway.Spec.ScopedListeners != nil || len(spec.Routes) != 0 ||
 			spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
@@ -814,6 +820,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool { return route.BackendTLS != nil }) {
 			return invalid("Backend TLS requires a TCP TLS termination profile")
+		}
+		if slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool {
+			return route.Passthrough && (!mixed || route.BackendTLS != nil)
+		}) {
+			return invalid("An explicit passthrough target requires mixed TLS and cannot originate backend TLS")
 		}
 		targets, err := buildSNITargets(spec.Identity, spec.Gateway.TLSSNIRoutes)
 		if err != nil {
@@ -1257,7 +1268,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 			return actual, nil
 		}
-		if desired.protocol == cloud.ListenerProtocolTLSTerminate && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
+		if cloud.IsTCPTLSListenerProtocol(desired.protocol) && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
 			desired.spec.Gateway.TCPTLSCertificateRef == "" {
 			actual.outcome = p.progressingOutcome("Waiting for an authorized TCP TLS certificate")
 			return actual, nil
@@ -1303,7 +1314,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	// TLS authorization is decided using only public LB/frontend readbacks.
 	// In particular, an unrelated pool or Neutron failure cannot hold it.
 	var inventory octavia.ListenerInventory
-	rawTLS := desired.protocol == cloud.ListenerProtocolTLSTerminate
+	rawTLS := cloud.IsTCPTLSListenerProtocol(desired.protocol)
 	listed := actual.protocol == cloud.ListenerProtocolHTTP || rawTLS || desired.spec.Gateway.Disposition == cloud.GraphDelete
 	if listed {
 		inventory, err = p.observeGatewayListenerInventory(ctx, desired, &actual)
@@ -1385,9 +1396,14 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 	}
 	if isSNIProtocol(desired.protocol) {
-		return p.observeSNIGraph(ctx, desired, actual, inventory)
+		observed, err := p.observeSNIGraph(ctx, desired, actual, inventory)
+		if err != nil && desired.protocol == cloud.ListenerProtocolTLSMixed && actual.listener != nil &&
+			actual.rawTLSVerified && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+			p.closeUnverifiedMixedSNI(&observed)
+		}
+		return observed, err
 	}
-	if slices.Contains(lb.Tags, sniProfileTag) || slices.Contains(lb.Tags, tcpTLSProfileTag) {
+	if hasSNIProfile(lb.Tags) {
 		return actual, fmt.Errorf("%w: a TLS SNI load balancer cannot be adopted by another profile", cloud.ErrOwnershipConflict)
 	}
 	if err := validateRawTLSDefault(inventory); err != nil {

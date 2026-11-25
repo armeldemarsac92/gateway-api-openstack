@@ -21,9 +21,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -37,6 +39,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
@@ -59,7 +62,10 @@ func terminatesTLS(listener *gatewayv1.Listener) bool {
 		(listener.TLS.Mode == nil || *listener.TLS.Mode == gatewayv1.TLSModeTerminate)
 }
 
-func listenerBindingProtocol(listener *gatewayv1.Listener) gatewayv1.ProtocolType {
+func listenerBindingProtocol(config controller.Config, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) gatewayv1.ProtocolType {
+	if listener.Protocol == gatewayv1.TLSProtocolType && mixedTLSBinding(config, gateway, listener.Port) {
+		return cloud.ListenerProtocolTLSMixed
+	}
 	if terminatesTLS(listener) {
 		return cloud.ListenerProtocolTLSTerminate
 	}
@@ -76,6 +82,28 @@ func tlsListenerModeEnabled(config controller.Config, listener *gatewayv1.Listen
 
 func allowsSNISuffix(config controller.Config, listener *gatewayv1.Listener) bool {
 	return terminatesTLS(listener) || config.TLSSNISuffix
+}
+
+func mixedTLSBinding(config controller.Config, gateway *gatewayv1.Gateway, port gatewayv1.PortNumber) bool {
+	if !config.TCPTLSMixedMode {
+		return false
+	}
+	var terminate, passthrough bool
+	for _, listener := range gateway.Spec.Listeners {
+		if listener.Port != port || listener.Protocol != gatewayv1.TLSProtocolType {
+			continue
+		}
+		if terminatesTLS(&listener) {
+			terminate = true
+		} else {
+			passthrough = true
+		}
+	}
+	boundMixed := gateway.Annotations[config.GatewayListenerProtocolAnnotation()] == cloud.ListenerProtocolTLSMixed &&
+		gateway.Annotations[config.GatewayListenerPortAnnotation()] == strconv.Itoa(int(port))
+	// A single remaining section can use its own profile. Several
+	// terminating sections can still share their existing mixed frontend.
+	return terminate && (passthrough || boundMixed && len(gateway.Spec.Listeners) > 1)
 }
 
 func mixedTLSModes(listeners []gatewayv1.Listener, listener gatewayv1.Listener) bool {
@@ -104,6 +132,7 @@ func (r *Reconciler) validateBoundSNITopology(gateway *gatewayv1.Gateway, listen
 
 type sniRouteStatus struct {
 	route           *gatewayv1.TLSRoute
+	listener        *gatewayv1.Listener
 	parents         []gatewayv1.ParentReference
 	hostnames       []string
 	acceptedReason  gatewayv1.RouteConditionReason
@@ -162,8 +191,9 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 	if err != nil {
 		return nil, err
 	}
+	mixed := snapshot.listener != nil && mixedTLSBinding(r.Config, snapshot.gateway, snapshot.listener.Port)
 	var tls *graph.BackendTLSObserver
-	if snapshot.listener != nil && terminatesTLS(snapshot.listener) && r.Config.BackendTLSPolicy {
+	if snapshot.listener != nil {
 		tls = graph.NewBackendTLSObserver(r.APIReader)
 	}
 	owners := observation.hostnameOwners()
@@ -173,12 +203,12 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 			continue
 		}
 		entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != i })
-		if err := r.resolveSNIBackend(ctx, snapshot, entry, tls); err != nil {
+		if err := r.resolveSNIBackend(ctx, snapshot, entry, tls, mixed); err != nil {
 			return nil, err
 		}
-		if allowsSNISuffix(r.Config, snapshot.listener) && len(entry.targets) == 0 {
+		if (mixed || allowsSNISuffix(r.Config, entry.listener)) && len(entry.targets) == 0 {
 			for _, hostname := range entry.hostnames {
-				needsDenial := terminatesTLS(snapshot.listener)
+				needsDenial := mixed || terminatesTLS(entry.listener)
 				for broader := range owners {
 					if needsDenial || amphora.SNISuffixCovers(broader, hostname) {
 						needsDenial = true
@@ -188,7 +218,7 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 				if needsDenial {
 					entry.denied = append(entry.denied, cloud.TLSSNIRoute{
 						Identity: controller.RouteIdentity(r.Config, snapshot.gateway, entry.route),
-						Hostname: hostname, Deny: true,
+						Hostname: hostname, Deny: true, Passthrough: mixed && !terminatesTLS(entry.listener),
 					})
 				}
 			}
@@ -197,7 +227,51 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 	return observation, nil
 }
 
+// Reserve the Hostname of each logical listener even when its selected
+// routes only cover a subset, or when the listener has no matching routes.
+func appendMixedSNIListenerGuards(identity cloud.Identity, listeners []*gatewayv1.Listener, targets []cloud.TLSSNIRoute) []cloud.TLSSNIRoute {
+	for _, listener := range listeners {
+		hostname := string(*listener.Hostname)
+		if slices.ContainsFunc(targets, func(target cloud.TLSSNIRoute) bool { return target.Hostname == hostname }) {
+			continue
+		}
+		guard := identity
+		guard.RouteNamespace = identity.GatewayNamespace
+		guard.RouteName = string(listener.Name)
+		guard.RouteUID = identity.GatewayUID + "/listener/" + string(listener.Name)
+		targets = append(targets, cloud.TLSSNIRoute{Identity: guard, Hostname: hostname, Deny: true, Passthrough: !terminatesTLS(listener)})
+	}
+	return targets
+}
+
 func (r *Reconciler) admitSNIRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, routes []gatewayv1.TLSRoute) (sniRouteObservation, error) {
+	if len(snapshot.listeners) < 2 {
+		return r.admitSNIRoutesForListener(ctx, snapshot, routes)
+	}
+	var admitted sniRouteObservation
+	for _, listener := range snapshot.listeners {
+		section := *snapshot
+		section.listener = listener
+		observation, err := r.admitSNIRoutesForListener(ctx, &section, routes)
+		if err != nil {
+			return nil, err
+		}
+		for i := range observation {
+			entry := &observation[i]
+			entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool {
+				return slices.ContainsFunc(snapshot.listeners, func(peer *gatewayv1.Listener) bool {
+					selector := string(*peer.Hostname)
+					return model.CompareHostnameSpecificity(selector, string(*listener.Hostname)) < 0 &&
+						(selector == hostname || amphora.SNISuffixCovers(selector, hostname))
+				})
+			})
+		}
+		admitted = append(admitted, observation...)
+	}
+	return admitted, nil
+}
+
+func (r *Reconciler) admitSNIRoutesForListener(ctx context.Context, snapshot *gatewayMutationSnapshot, routes []gatewayv1.TLSRoute) (sniRouteObservation, error) {
 	var observation sniRouteObservation
 	for i := range routes {
 		route := &routes[i]
@@ -213,7 +287,7 @@ func (r *Reconciler) admitSNIRoutes(ctx context.Context, snapshot *gatewayMutati
 		if len(parents) == 0 && !ownsStatus {
 			continue
 		}
-		entry := sniRouteStatus{route: route, parents: parents}
+		entry := sniRouteStatus{route: route, listener: snapshot.listener, parents: parents}
 		if len(parents) > 0 {
 			if err := r.admitSNIRoute(ctx, snapshot, &entry); err != nil {
 				return nil, err
@@ -363,11 +437,11 @@ func (r *Reconciler) observeSNIService(ctx context.Context, entry *sniRouteStatu
 	return &service, port, nil
 }
 
-func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, tls *graph.BackendTLSObserver) error {
+func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, tls *graph.BackendTLSObserver, mixed bool) error {
 	route := entry.route
 	service, port, err := r.observeSNIService(ctx, entry)
 	if err != nil {
-		if !terminatesTLS(snapshot.listener) {
+		if tls == nil && !terminatesTLS(entry.listener) {
 			return err
 		}
 		return sniBackendReadPending(ctx, entry, "Waiting for a live Service and ReferenceGrant inventory")
@@ -376,17 +450,26 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 		return nil
 	}
 	var validation *cloud.BackendTLSValidation
-	if tls != nil && len(entry.hostnames) != 0 {
+	if tls != nil && len(entry.hostnames) != 0 && (!terminatesTLS(entry.listener) || !r.Config.BackendTLSPolicy) {
+		applies, err := tls.HasPolicy(ctx, service, port)
+		if err != nil {
+			return sniBackendReadPending(ctx, entry, "Waiting for a live BackendTLSPolicy inventory")
+		}
+		if applies {
+			entry.resolvedReason = gatewayv1.RouteReasonUnsupportedProtocol
+			entry.resolvedMessage = "The passthrough listener cannot authenticate the Service using BackendTLSPolicy"
+			if terminatesTLS(entry.listener) {
+				entry.resolvedMessage = "TCP backend authentication requires the BackendTLSPolicy controller option"
+			}
+			return nil
+		}
+	} else if tls != nil && len(entry.hostnames) != 0 {
 		ancestor := &backendtls.GatewayAncestor{
 			Key: client.ObjectKeyFromObject(snapshot.gateway), ControllerName: r.Config.ControllerName,
 		}
 		selection, err := tls.Observe(ctx, service, port, ancestor)
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonPending, "Waiting for a live BackendTLSPolicy inventory"
-			return nil
+			return sniBackendReadPending(ctx, entry, "Waiting for a live BackendTLSPolicy inventory")
 		}
 		if winner := selection.Winner; winner != nil {
 			switch {
@@ -411,13 +494,13 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 	}
 	var endpoints discoveryv1.EndpointSliceList
 	if err := r.APIReader.List(ctx, &endpoints, client.InNamespace(service.Namespace), client.MatchingLabels{discoveryv1.LabelServiceName: service.Name}); err != nil {
-		if !terminatesTLS(snapshot.listener) {
+		if tls == nil && !terminatesTLS(entry.listener) {
 			return err
 		}
 		return sniBackendReadPending(ctx, entry, "Waiting for a complete backend EndpointSlice inventory")
 	}
 	if endpoints.Continue != "" {
-		if !terminatesTLS(snapshot.listener) {
+		if tls == nil && !terminatesTLS(entry.listener) {
 			return fmt.Errorf("incomplete TLSRoute EndpointSlice inventory")
 		}
 		return sniBackendReadPending(ctx, entry, "Waiting for a complete backend EndpointSlice inventory")
@@ -438,9 +521,10 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 		ServiceUID: string(service.UID), BackendSubnetID: topology.MemberSubnetID,
 		BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs, Members: members, BackendTLS: validation,
 	}
-	if terminatesTLS(snapshot.listener) {
+	if mixed || terminatesTLS(entry.listener) {
 		target.ServicePort = int(port.Port)
 	}
+	target.Passthrough = mixed && !terminatesTLS(entry.listener)
 	for _, hostname := range entry.hostnames {
 		target.Hostname = hostname
 		entry.targets = append(entry.targets, target)
@@ -465,9 +549,11 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 			outcomes[route.Identity.RouteUID] = route.Result
 		}
 	}
+	var missing *octavia.MissingGatewayCapability
+	mixedUnavailable := errors.As(providerErr, &missing) && missing.Capability == octavia.GatewayCapabilityTCPTLSMixedMode
 	programmedType := r.Config.Domain() + "/Programmed"
 	targetType := r.Config.Domain() + "/ForwardingTarget"
-	for _, entry := range observation {
+	for _, entry := range observation.parentResults() {
 		base := entry.route
 		target := base.DeepCopy()
 		fingerprint, err := sniForwardingFingerprint(snapshot.gateway, entry.targets)
@@ -476,8 +562,8 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 		}
 		outcome := outcomes[string(base.UID)]
 		r.updateSNIRouteParents(target, snapshot.gateway, func(status *gatewayv1.RouteParentStatus) bool {
-			if snapshot.listener != nil && !sniParentSelectsListener(status.ParentRef, *snapshot.listener) {
-				r.setRejectedSNIParent(status, gatewayv1.RouteReasonNoMatchingParent, sniParentNoMatchingListenerMessage, base.Generation)
+			if mixedUnavailable && entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+				r.setRejectedSNIParent(status, gatewayv1.RouteReasonUnsupportedValue, "Octavia does not advertise same-port mixed TLS in this region", base.Generation)
 				return true
 			}
 			accepted, resolved, programmed := metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionFalse
@@ -530,6 +616,40 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 		}
 	}
 	return nil
+}
+
+// One Gateway parent status represents all logical sections selected on its
+// shared port. The accepted attachment and every effective target contribute.
+func (observation sniRouteObservation) parentResults() sniRouteObservation {
+	var results sniRouteObservation
+	byRoute := make(map[client.ObjectKey]int)
+	for _, entry := range observation {
+		key := client.ObjectKeyFromObject(entry.route)
+		i, exists := byRoute[key]
+		if !exists {
+			byRoute[key] = len(results)
+			results = append(results, entry)
+			continue
+		}
+		current := &results[i]
+		if current.acceptedReason != gatewayv1.RouteReasonAccepted {
+			if entry.acceptedReason == gatewayv1.RouteReasonAccepted ||
+				current.acceptedReason == gatewayv1.RouteReasonNoMatchingParent {
+				*current = entry
+			}
+			continue
+		}
+		if entry.acceptedReason != gatewayv1.RouteReasonAccepted {
+			continue
+		}
+		current.hostnames = append(slices.Clone(current.hostnames), entry.hostnames...)
+		current.targets = append(slices.Clone(current.targets), entry.targets...)
+		if current.resolvedReason == "" ||
+			current.resolvedReason == gatewayv1.RouteReasonResolvedRefs && entry.resolvedReason != "" {
+			current.resolvedReason, current.resolvedMessage = entry.resolvedReason, entry.resolvedMessage
+		}
+	}
+	return results
 }
 
 func sniForwardingFingerprint(gateway *gatewayv1.Gateway, targets []cloud.TLSSNIRoute) (string, error) {

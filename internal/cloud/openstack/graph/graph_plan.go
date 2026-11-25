@@ -1069,8 +1069,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 				opts.Tags = append(opts.Tags, frontendFallbackTag)
 			}
 		}
-		if desired.protocol == cloud.ListenerProtocolTLSTerminate {
-			_, err = p.octavia.CreateTCPTLSListener(ctx, opts)
+		if cloud.IsTCPTLSListenerProtocol(desired.protocol) {
+			_, err = p.octavia.CreateTCPTLSListener(ctx, opts, desired.protocol == cloud.ListenerProtocolTLSMixed)
 			step.redactTLSError = true
 		} else if protocol == terminatedHTTPS {
 			hosts := httpsVirtualHosts(step.scopedListener)
@@ -1091,6 +1091,11 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			ref = step.scopedListener.TLS.CertificateRef
 		}
 		opts := listeners.UpdateOpts{DefaultTlsContainerRef: &ref}
+		if desired.protocol == cloud.ListenerProtocolTLSMixed {
+			// An older graph could have enrolled additional SNI references.
+			// Replace the authorized set atomically while the frontend is closed.
+			opts.SniContainerRefs = new([]string{})
+		}
 		if step.updateClientAuth {
 			validation := step.scopedListener.TLS.ClientValidation
 			fallback := validation != nil && validation.InsecureFallback
@@ -1145,7 +1150,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		err = p.executeSNIMutation(ctx, desired, actual, step.sni)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
-		step.redactTLSError = step.redactTLSError || desired.protocol == cloud.ListenerProtocolTLSTerminate
+		step.redactTLSError = step.redactTLSError || cloud.IsTCPTLSListenerProtocol(desired.protocol)
 		if step.withdrawClientCA && slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
 			return listener.ID == listenerID && listener.ProvisioningStatus == "ERROR" &&
 				actual.adminObserved[listener.ID] && !listener.AdminStateUp

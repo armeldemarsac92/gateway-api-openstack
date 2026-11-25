@@ -82,7 +82,7 @@ func (r *Reconciler) Reconcile(
 	logger.V(4).Info("Reconciling Gateway")
 
 	scope, responsible, err := r.newGatewayScope(ctx, req)
-	if r.Config.TLSRoutesEnabled() || scope != nil && r.boundListenerProtocol(scope.gateway) == cloud.ListenerProtocolTLSTerminate {
+	if r.Config.TLSRoutesEnabled() || scope != nil && cloud.IsTCPTLSListenerProtocol(string(r.boundListenerProtocol(scope.gateway))) {
 		// Route rejection and status cleanup do not gate Gateway graph mutations.
 		defer func() {
 			var versionBlocked *gatewayv1.Gateway
@@ -363,7 +363,15 @@ func (r *Reconciler) reconcileGatewayGraph(
 	}
 	if terminatesTLS(decision.listener) {
 		defer func() {
-			r.applyRawTLSListenerStatus(ctx, scope.gateway, decision.listener, changedTLS != nil)
+			listeners, err := SupportedListenersForConfig(r.Config, scope.gateway)
+			if err == nil {
+				_, issues := r.rawTLSCertificate(ctx, scope.gateway, listeners)
+				for _, listener := range listeners {
+					if terminatesTLS(listener) {
+						r.applyRawTLSListenerStatus(scope.gateway, listener, issues[listener.Name], changedTLS != nil)
+					}
+				}
+			}
 		}()
 	}
 	if ports := graphResult.Gateway.ScopedListenerDeferredPorts; len(ports) != 0 {

@@ -115,6 +115,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 			return ctrl.Result{}, r.patchGatewayMetadata(ctx, scope)
 		}
 		delete(scope.gateway.Annotations, r.Config.GatewayHTTPSIsolatedPortsAnnotation())
+		delete(scope.gateway.Annotations, r.Config.GatewaySNISelectorsAnnotation())
 		scope.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = snapshot.listenerPort
 		scope.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listenerProtocol)
 		controller.SetGatewayListenerScope(r.Config, scope.gateway, "")
@@ -127,6 +128,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.BackendCAFinalizer())
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.GatewayFinalizer())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerPortAnnotation())
+	delete(scope.gateway.Annotations, r.Config.GatewaySNISelectorsAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType))

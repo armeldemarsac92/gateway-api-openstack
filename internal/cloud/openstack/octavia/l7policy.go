@@ -170,6 +170,7 @@ type L7PolicyObservation struct {
 	HTTPSListenerHostname       string
 	Target                      *L7PolicyTarget
 	ExtendedTargetFields        bool
+	TCPTLSPassthrough           *bool
 	ActivationOptions           string
 	TargetRequestFiltersPresent bool
 	RedirectRequest             *RequestRedirect
@@ -230,6 +231,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		HTTPSListenerHostname    json.RawMessage `json:"https_listener_hostname"`
 		AdminState               *bool           `json:"admin_state_up"`
 		PoolReference            json.RawMessage `json:"redirect_pool_id"`
+		TCPTLSPassthrough        json.RawMessage `json:"tcp_tls_passthrough"`
 		Targets                  json.RawMessage `json:"targets"`
 		FixedResponse            json.RawMessage `json:"fixed_response"`
 		RedirectRequest          json.RawMessage `json:"redirect_request"`
@@ -245,6 +247,12 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		return L7PolicyObservation{}, fmt.Errorf("L7 policy row does not report an ID")
 	}
 	observation := L7PolicyObservation{Policy: row.L7Policy, PoolReference: row.PoolReference, AdminState: row.AdminState}
+	switch string(row.TCPTLSPassthrough) {
+	case "false":
+		observation.TCPTLSPassthrough = new(false)
+	case "true":
+		observation.TCPTLSPassthrough = new(true)
+	}
 	if len(row.HTTPSListenerHostname) != 0 {
 		// A string is the only positive section proof. Keep the owning policy
 		// identifiable even when the endpoint cannot report a valid scope.
@@ -359,6 +367,7 @@ func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targe
 type PolicyCreateOpts struct {
 	l7policies.CreateOpts
 	HTTPSListenerHostname    string
+	TCPTLSPassthrough        *bool
 	RequestHeaderOperations  []cloud.HTTPHeaderOperation
 	ResponseHeaderOperations []cloud.HTTPHeaderOperation
 	WeightedTargets          []WeightedHTTPTarget
@@ -391,6 +400,12 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 		return nil, err
 	}
 	policy := body["l7policy"].(map[string]any)
+	if opts.TCPTLSPassthrough != nil {
+		if opts.Action != l7policies.ActionRedirectToPool || opts.RedirectPoolID == "" || opts.AdminStateUp == nil || *opts.AdminStateUp {
+			return nil, fmt.Errorf("TCP TLS policy mode requires a disabled redirect-to-pool policy")
+		}
+		policy["tcp_tls_passthrough"] = *opts.TCPTLSPassthrough
+	}
 	if len(opts.InitialRules) != 0 {
 		if opts.AdminStateUp == nil || *opts.AdminStateUp {
 			return nil, fmt.Errorf("initial L7 rules require an explicitly disabled policy")

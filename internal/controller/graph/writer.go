@@ -387,13 +387,13 @@ func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway
 }
 
 func hasTLSListeners(input GatewayInput) bool {
-	return input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolTLSTerminate || slices.ContainsFunc(input.Node.Spec.ScopedListeners, func(listener cloud.ScopedListener) bool {
+	return cloud.IsTCPTLSListenerProtocol(input.Node.Spec.ListenerProtocol) || slices.ContainsFunc(input.Node.Spec.ScopedListeners, func(listener cloud.ScopedListener) bool {
 		return listener.TLS != nil
 	})
 }
 
 func changedTLSListeners(observed, current GatewayInput) []int {
-	if observed.Node.Spec.ListenerProtocol == cloud.ListenerProtocolTLSTerminate {
+	if cloud.IsTCPTLSListenerProtocol(observed.Node.Spec.ListenerProtocol) {
 		if observed.Node.TCPTLSCertificateRef != current.Node.TCPTLSCertificateRef {
 			return []int{observed.Node.Spec.ListenerPort}
 		}
@@ -416,7 +416,7 @@ func changedTLSListeners(observed, current GatewayInput) []int {
 }
 
 func (w *Writer) withdrawTLS(ctx context.Context, identity cloud.Identity, input GatewayInput, authority *cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
-	if input.Node.Disposition != cloud.GraphWithdrawTLS || (input.Node.Spec.ScopedListeners == nil && input.Node.Spec.ListenerProtocol != cloud.ListenerProtocolTLSTerminate) || input.Validate == nil {
+	if input.Node.Disposition != cloud.GraphWithdrawTLS || (input.Node.Spec.ScopedListeners == nil && !cloud.IsTCPTLSListenerProtocol(input.Node.Spec.ListenerProtocol)) || input.Validate == nil {
 		return cloud.GatewayGraphResult{}, errors.New("invalid TLS-only withdrawal authority")
 	}
 	if err := input.Validate(ctx); err != nil {
