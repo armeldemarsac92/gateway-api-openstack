@@ -26,42 +26,37 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-type xBackendCookieAvailability func(bool) (bool, error)
+type xBackendCookieAvailability func(cloud.HTTPSessionCookieRequirements) (bool, error)
 
 func (r *Reconciler) xBackendCookieCapability(ctx context.Context) xBackendCookieAvailability {
-	discover := func(withDeadline bool) func() (bool, error) {
+	discover := func(requirements cloud.HTTPSessionCookieRequirements) func() (bool, error) {
 		return sync.OnceValues(func() (bool, error) {
 			if r.XBackendCookieAvailable == nil {
 				return false, errXBackendCookieDiscovery
 			}
-			return r.XBackendCookieAvailable(ctx, withDeadline)
+			return r.XBackendCookieAvailable(ctx, requirements)
 		})
 	}
-	named, timed := discover(false), discover(true)
-	return func(withDeadline bool) (bool, error) {
-		if withDeadline {
+	named := discover(cloud.HTTPSessionCookieNamed)
+	timed := discover(cloud.HTTPSessionCookieTimed)
+	permanent := discover(cloud.HTTPSessionCookiePermanent)
+	return func(requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+		switch requirements {
+		case cloud.HTTPSessionCookiePermanent:
+			return permanent()
+		case cloud.HTTPSessionCookieTimed:
 			return timed()
+		default:
+			return named()
 		}
-		return named()
 	}
 }
 
 var errXBackendCookieDiscovery = errors.New("regional Octavia HTTP cookie capability discovery is unavailable")
 
-func (observe xBackendCookieAvailability) apply(status metav1.ConditionStatus, reason, message string, withDeadline bool) (metav1.ConditionStatus, string, string) {
-	available, err := observe(withDeadline)
-	switch {
-	case err != nil && withDeadline:
-		return xBackendCookieCondition(status, reason, message, cloud.SessionPersistenceDeadlineUnverified)
-	case err != nil:
-		return xBackendCookieCondition(status, reason, message, cloud.SessionPersistenceUnverified)
-	case !available && withDeadline:
-		return xBackendCookieCondition(status, reason, message, cloud.SessionPersistenceDeadlineUnsupported)
-	case !available:
-		return xBackendCookieCondition(status, reason, message, cloud.SessionPersistenceUnsupported)
-	default:
-		return status, reason, message
-	}
+func (observe xBackendCookieAvailability) apply(status metav1.ConditionStatus, reason, message string, requirements cloud.HTTPSessionCookieRequirements) (metav1.ConditionStatus, string, string) {
+	available, err := observe(requirements)
+	return xBackendCookieCondition(status, reason, message, requirements.DiscoveryIssue(available, err))
 }
 
 func xBackendCookieCondition(status metav1.ConditionStatus, reason, message string, issue cloud.SessionPersistenceIssue) (metav1.ConditionStatus, string, string) {
@@ -72,10 +67,16 @@ func xBackendCookieCondition(status metav1.ConditionStatus, reason, message stri
 		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend HTTP session cookie absoluteTimeout could not be verified"
 	case cloud.SessionPersistenceDeadlineReadbackUnverified:
 		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed an ACTIVE pool with the requested XBackend HTTP session cookie absoluteTimeout and scope"
+	case cloud.SessionPersistencePermanentUnverified:
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend Permanent cookies could not be verified"
+	case cloud.SessionPersistencePermanentReadbackUnverified:
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested Permanent cookie settings on all pools for this XBackend"
 	case cloud.SessionPersistenceUnsupported:
 		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "The regional Octavia provider does not advertise http_cookie_name_v1"
 	case cloud.SessionPersistenceDeadlineUnsupported:
 		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend session cookie absoluteTimeout requires both http_cookie_name_v1 and http_cookie_absolute_timeout_v1 from the regional Octavia provider"
+	case cloud.SessionPersistencePermanentUnsupported:
+		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend Permanent cookies require http_cookie_name_v1, http_cookie_absolute_timeout_v1 and http_cookie_permanent_v1 from the regional Octavia provider"
 	default:
 		return status, reason, message
 	}

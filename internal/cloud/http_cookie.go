@@ -29,6 +29,26 @@ var httpSessionCookieScope = regexp.MustCompile(`^[a-f0-9]{64}$`)
 type HTTPSessionCookieDeadline struct {
 	TimeoutMS int64  `json:"cookie_absolute_timeout_ms"`
 	Scope     string `json:"cookie_scope"`
+	Permanent bool   `json:"cookie_permanent,omitempty"`
+}
+
+type HTTPSessionCookieRequirements uint8
+
+const (
+	HTTPSessionCookieNamed HTTPSessionCookieRequirements = iota
+	HTTPSessionCookieTimed
+	HTTPSessionCookiePermanent
+)
+
+func (deadline *HTTPSessionCookieDeadline) Requirements() HTTPSessionCookieRequirements {
+	switch {
+	case deadline == nil:
+		return HTTPSessionCookieNamed
+	case deadline.Permanent:
+		return HTTPSessionCookiePermanent
+	default:
+		return HTTPSessionCookieTimed
+	}
 }
 
 func (deadline HTTPSessionCookieDeadline) Valid() bool {

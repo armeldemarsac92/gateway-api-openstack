@@ -436,13 +436,15 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 			}},
 			Protocol: ptr.To(gatewayx.BackendProtocolHTTP11),
 			SessionPersistence: &gatewayv1.SessionPersistence{
-				Cookie: &gatewayv1.CookieConfig{}, AbsoluteTimeout: ptr.To(gatewayv1.Duration("1m23ms")),
+				Cookie:          &gatewayv1.CookieConfig{LifetimeType: ptr.To(gatewayv1.PermanentCookieLifetimeType)},
+				AbsoluteTimeout: ptr.To(gatewayv1.Duration("1s500ms")),
 			},
 		},
 	}
 	other := backend.DeepCopy()
 	other.Name, other.UID = "other", "other-opaque-uid"
 	other.Spec.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("0s"))
+	other.Spec.SessionPersistence.Cookie.LifetimeType = nil
 	other.Spec.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("other_session"))
 	f.create(t, backend, other)
 	makeRule := func(path string, backend *gatewayx.XBackend) gatewayv1.HTTPRouteRule {
@@ -466,7 +468,7 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 			if pool.Name == backend.Name {
 				cookieNames = append(cookieNames, pool.SessionCookieName)
 				require.Equal(t, &cloud.HTTPSessionCookieDeadline{
-					TimeoutMS: 60023, Scope: fmt.Sprintf("%x", sha256.Sum256([]byte(backend.UID))),
+					TimeoutMS: 1500, Scope: fmt.Sprintf("%x", sha256.Sum256([]byte(backend.UID))), Permanent: true,
 				}, pool.SessionCookieDeadline)
 			} else {
 				otherName = pool.SessionCookieName
@@ -488,12 +490,12 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 		reason    string
 		err       error
 	}{
-		{cloud.SessionPersistenceDeadlineUnsupported, metav1.ConditionFalse, "UnsupportedValue", nil},
-		{cloud.SessionPersistenceDeadlineUnverified, metav1.ConditionUnknown, "Pending", errors.New("API timed out")},
+		{cloud.SessionPersistencePermanentUnsupported, metav1.ConditionFalse, "UnsupportedValue", nil},
+		{cloud.SessionPersistencePermanentUnverified, metav1.ConditionUnknown, "Pending", errors.New("API timed out")},
 		{cloud.SessionPersistenceAvailable, metav1.ConditionTrue, "", nil},
 	} {
-		f.reconciler.XBackendCookieAvailable = func(_ context.Context, withDeadline bool) (bool, error) {
-			require.True(t, withDeadline)
+		f.reconciler.XBackendCookieAvailable = func(_ context.Context, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+			require.Equal(t, cloud.HTTPSessionCookiePermanent, requirements)
 			return phase.issue == cloud.SessionPersistenceAvailable, phase.err
 		}
 		backendKey := client.ObjectKeyFromObject(backend)
@@ -556,6 +558,10 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 	timed.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("reports_session"))
 	timed.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("99999h99999h99999h99999h"))
 	require.Nil(t, model.ValidateXBackend(*timed, profile))
+	permanent := backend.DeepCopy()
+	permanent.SessionPersistence.Cookie.LifetimeType = ptr.To(gatewayv1.PermanentCookieLifetimeType)
+	permanent.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("0s"))
+	require.Nil(t, model.ValidateXBackend(*permanent, profile))
 	missingUID := &gatewayx.XBackend{Spec: *timed}
 	require.Equal(t, metav1.ConditionFalse, xBackendAcceptedCondition(missingUID, profile).Status)
 	observation := model.XBackendObservation{Spec: *timed}
@@ -573,8 +579,11 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 		{"invalid absolute timeout", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("0.5s"))
 		}},
-		{"permanent cookie", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+		{"permanent without absolute timeout", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.Cookie.LifetimeType = ptr.To(gatewayv1.PermanentCookieLifetimeType)
+		}},
+		{"unknown cookie lifetime", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.LifetimeType = ptr.To(gatewayv1.CookieLifetimeType("Unknown"))
 		}},
 		{"path", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.Cookie.Path = ptr.To("/reports")

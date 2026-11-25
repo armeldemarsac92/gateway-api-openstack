@@ -185,8 +185,9 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 func decodePoolCookieDeadline(raw json.RawMessage) (pools.SessionPersistence, PoolCookieDeadline, error) {
 	var persistence struct {
 		pools.SessionPersistence
-		Timeout json.RawMessage `json:"cookie_absolute_timeout_ms"`
-		Scope   json.RawMessage `json:"cookie_scope"`
+		Timeout   json.RawMessage `json:"cookie_absolute_timeout_ms"`
+		Scope     json.RawMessage `json:"cookie_scope"`
+		Permanent json.RawMessage `json:"cookie_permanent"`
 	}
 	if len(raw) == 0 {
 		return persistence.SessionPersistence, PoolCookieDeadline{}, nil
@@ -194,8 +195,12 @@ func decodePoolCookieDeadline(raw json.RawMessage) (pools.SessionPersistence, Po
 	if err := json.Unmarshal(raw, &persistence); err != nil {
 		return persistence.SessionPersistence, PoolCookieDeadline{}, err
 	}
-	if len(persistence.Timeout) == 0 && len(persistence.Scope) == 0 ||
-		bytes.Equal(persistence.Timeout, []byte("null")) && bytes.Equal(persistence.Scope, []byte("null")) {
+	var permanent *bool
+	if len(persistence.Permanent) != 0 && (json.Unmarshal(persistence.Permanent, &permanent) != nil || permanent == nil) {
+		return persistence.SessionPersistence, PoolCookieDeadline{Invalid: true}, nil
+	}
+	if permanent == nil && (len(persistence.Timeout) == 0 && len(persistence.Scope) == 0 ||
+		bytes.Equal(persistence.Timeout, []byte("null")) && bytes.Equal(persistence.Scope, []byte("null"))) {
 		return persistence.SessionPersistence, PoolCookieDeadline{}, nil
 	}
 	var timeout *int64
@@ -203,7 +208,7 @@ func decodePoolCookieDeadline(raw json.RawMessage) (pools.SessionPersistence, Po
 	if json.Unmarshal(persistence.Timeout, &timeout) != nil || timeout == nil || json.Unmarshal(persistence.Scope, &scope) != nil {
 		return persistence.SessionPersistence, PoolCookieDeadline{Invalid: true}, nil
 	}
-	deadline := cloud.HTTPSessionCookieDeadline{TimeoutMS: *timeout, Scope: scope}
+	deadline := cloud.HTTPSessionCookieDeadline{TimeoutMS: *timeout, Scope: scope, Permanent: permanent != nil && *permanent}
 	if !deadline.Valid() {
 		return persistence.SessionPersistence, PoolCookieDeadline{Invalid: true}, nil
 	}
@@ -312,7 +317,7 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 	}
 	pool := body["pool"].(map[string]any)
 	if opts.CookieDeadline != nil {
-		pool["session_persistence"], err = cookieDeadlinePersistence(opts.Persistence, opts.CookieDeadline)
+		pool["session_persistence"], err = cookieDeadlinePersistence(opts.Persistence, opts.CookieDeadline, false)
 		if err != nil {
 			return nil, err
 		}
@@ -338,12 +343,13 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 // UpdatePoolOpts adds optional backend transport to a stock pool update request.
 type UpdatePoolOpts struct {
 	pools.UpdateOpts
-	CookieDeadline      *cloud.HTTPSessionCookieDeadline
-	ClearCookieDeadline bool
-	BackendRetryBudget  *BackendRetryBudgetUpdate
-	BackendH2C          *bool
-	BackendTLS          *BackendTLSSettings
-	ClearTLSClientRef   bool
+	CookieDeadline *cloud.HTTPSessionCookieDeadline
+	// ClearCookiePermanent explicitly restores a session cookie while retaining its deadline.
+	ClearCookiePermanent bool
+	BackendRetryBudget   *BackendRetryBudgetUpdate
+	BackendH2C           *bool
+	BackendTLS           *BackendTLSSettings
+	ClearTLSClientRef    bool
 }
 
 // BackendTLSSettings changes hostname authentication, trust and client identity in one write.
@@ -365,8 +371,10 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		return nil, err
 	}
 	pool := body["pool"].(map[string]any)
-	if opts.CookieDeadline != nil || opts.ClearCookieDeadline {
-		pool["session_persistence"], err = cookieDeadlinePersistence(opts.Persistence, opts.CookieDeadline)
+	if opts.ClearCookiePermanent && opts.Persistence == nil && opts.CookieDeadline == nil {
+		pool["session_persistence"] = map[string]any{"cookie_permanent": false}
+	} else if opts.CookieDeadline != nil || opts.ClearCookiePermanent {
+		pool["session_persistence"], err = cookieDeadlinePersistence(opts.Persistence, opts.CookieDeadline, opts.ClearCookiePermanent)
 		if err != nil {
 			return nil, err
 		}
@@ -400,20 +408,19 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 	return body, nil
 }
 
-func cookieDeadlinePersistence(persistence *pools.SessionPersistence, deadline *cloud.HTTPSessionCookieDeadline) (map[string]any, error) {
+func cookieDeadlinePersistence(persistence *pools.SessionPersistence, deadline *cloud.HTTPSessionCookieDeadline, clearPermanent bool) (map[string]any, error) {
 	if persistence == nil || persistence.Type != "HTTP_COOKIE" || !cloud.ValidHTTPSessionCookieName(persistence.CookieName) ||
-		deadline != nil && !deadline.Valid() {
+		deadline == nil || !deadline.Valid() || clearPermanent && deadline.Permanent {
 		return nil, fmt.Errorf("absolute timeout requires a named HTTP cookie and a valid deadline when set")
 	}
 	fields := map[string]any{
 		"type":                       persistence.Type,
 		"cookie_name":                persistence.CookieName,
-		"cookie_absolute_timeout_ms": nil,
-		"cookie_scope":               nil,
+		"cookie_absolute_timeout_ms": deadline.TimeoutMS,
+		"cookie_scope":               deadline.Scope,
 	}
-	if deadline != nil {
-		fields["cookie_absolute_timeout_ms"] = deadline.TimeoutMS
-		fields["cookie_scope"] = deadline.Scope
+	if deadline.Permanent || clearPermanent {
+		fields["cookie_permanent"] = deadline.Permanent
 	}
 	return fields, nil
 }

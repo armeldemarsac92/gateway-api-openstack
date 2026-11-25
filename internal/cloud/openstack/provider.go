@@ -72,9 +72,9 @@ func (p *Provider) UDPPacketDropAvailable(ctx context.Context) (bool, error) {
 	return p.graph.UDPPacketDropAvailable(ctx)
 }
 
-// XBackendCookieAvailable discovers regional Amphora named HTTP cookie support.
-func (p *Provider) XBackendCookieAvailable(ctx context.Context, withDeadline bool) (bool, error) {
-	return p.graph.XBackendCookieAvailable(ctx, withDeadline)
+// XBackendCookieAvailable discovers regional Amphora support for the requested HTTP cookie.
+func (p *Provider) XBackendCookieAvailable(ctx context.Context, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+	return p.graph.XBackendCookieAvailable(ctx, requirements)
 }
 
 // BackendTLSAvailable discovers the fixed backend hostname capability in the configured region.
