@@ -85,7 +85,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			if err != nil {
 				return invalid(err)
 			}
-			if _, _, err := httpPathPolicies(match, true); err != nil {
+			if _, _, err := p.httpPathPolicies(match, true); err != nil {
 				return invalid(err)
 			}
 			request, err := compileRequestRedirect(redirect.Request, match)
@@ -107,7 +107,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			matches[key] = selected
 			part := desiredRoute{identity: route.identity, spec: route.spec, backendKey: redirectPartKey(key), redirect: true}
 			part.spec.HTTPSListenerHostname = match.HTTPSListenerHostname
-			cells, err := redirectCells(match, forwards)
+			cells, err := p.redirectCells(match, forwards)
 			if p.httpRequestRedirect && (errors.Is(err, errHTTPMethodRedirectPrecedence) || errors.Is(err, errExactHeaderRedirectPrecedence)) {
 				// Amphora evaluates REDIRECT_REQUEST in the same position-ordered
 				// backend list as forwarding, including method and header matches.

@@ -115,7 +115,7 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 			return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonHostnameConflict, "Same-port HTTP sections require distinct hostnames"}
 		}
 		if host := listenerHostname(listener); host != "" {
-			if _, err := amphora.HostnameRuleValue(host); err != nil {
+			if _, err := amphora.HostnameRuleValue(host, config.LongHTTPHostnames || retainsLongHTTPListenerHostnames(config, gateway)); err != nil {
 				return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Shared HTTP listener hostname is unsupported")
 			}
 		}
@@ -174,7 +174,7 @@ func httpRouteKindsIssue(config controller.Config, listener *gatewayv1.Listener)
 // authorization controls frontend programming independently of route attachment.
 func HTTPRouteListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if !usesHTTPSProfile(config, gateway) {
-		return HTTPListeners(gateway)
+		return HTTPListeners(config, gateway)
 	}
 	listeners, err := SupportedListenersForConfig(config, gateway)
 	if err != nil {
@@ -204,11 +204,11 @@ func listenerFamily(listener *gatewayv1.Listener) gatewayv1.ProtocolType {
 // RequiresHTTPListenerScope identifies HTTP-family configurations that require
 // the frozen per-port ownership checkpoint before any route can program.
 func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gateway) bool {
-	if usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(gateway) ||
+	if usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(config, gateway) ||
 		config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(gateway) {
 		return true
 	}
-	listeners, err := HTTPListeners(gateway)
+	listeners, err := HTTPListeners(config, gateway)
 	return err == nil && len(listeners) == len(gateway.Spec.Listeners) && !model.GatewayDisallowsListenerSets(gateway)
 }
 

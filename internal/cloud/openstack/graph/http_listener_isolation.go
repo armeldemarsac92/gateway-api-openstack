@@ -46,7 +46,7 @@ const maxOctaviaL7RulesPerPolicy = 50
 
 var errPlainHTTPRuleLimit = errors.New("plaintext hostname isolation exceeds the Octavia limit of 50 L7 rules per policy")
 
-func addPlainHTTPExclusions(hosts []string, policy *desiredPolicy, scalarHostname string) error {
+func addPlainHTTPExclusions(hosts []string, policy *desiredPolicy, scalarHostname string, allowLongHostnames bool) error {
 	section := policy.httpListenerHostname
 	if err := validatePlainHTTPMatch(hosts, section, policy.hostname); err != nil || section == "" {
 		return err
@@ -68,7 +68,7 @@ func addPlainHTTPExclusions(hosts []string, policy *desiredPolicy, scalarHostnam
 		if slices.ContainsFunc(children, func(other string) bool { return other != host && hostContains(other, host) }) {
 			continue
 		}
-		value, err := amphora.HostnameRuleValue(host)
+		value, err := amphora.HostnameRuleValue(host, allowLongHostnames)
 		if err != nil {
 			return err
 		}

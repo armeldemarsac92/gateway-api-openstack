@@ -780,7 +780,7 @@ func usesHTTPPathPredicate(match cloud.HTTPPathMatch) bool {
 const impossibleHTTPPathPattern = "(^$)."
 
 func (p *Provider) httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
-	policies, hostname, err := httpPathPolicies(match, grouped)
+	policies, hostname, err := httpPathPolicies(match, grouped, p.longHTTPHostnames)
 	if err == nil && p.httpMethodMatch && match.Method == "" && match.PathType == cloud.PathMatchPrefix && strings.TrimRight(match.PathValue, "/") == "" {
 		policies[0].path = impossibleHTTPPathPattern
 		policies[0].compareType = l7policies.CompareTypeRegex
@@ -789,7 +789,7 @@ func (p *Provider) httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]
 	return policies, hostname, err
 }
 
-func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
+func httpPathPolicies(match cloud.HTTPPathMatch, grouped, allowLongHostnames bool) ([]desiredPolicy, string, error) {
 	if match.PathType != cloud.PathMatchExact && match.PathType != cloud.PathMatchPrefix {
 		return nil, "", fmt.Errorf("unsupported path match type %q", match.PathType)
 	}
@@ -799,7 +799,7 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 	}
 	var hostnameRuleValue string
 	if match.Hostname != "" {
-		hostnameRuleValue, err = amphora.HostnameRuleValue(match.Hostname)
+		hostnameRuleValue, err = amphora.HostnameRuleValue(match.Hostname, allowLongHostnames)
 		if err != nil {
 			return nil, "", err
 		}

@@ -60,6 +60,9 @@ type GatewaySpec struct {
 	// HTTPListenerHostnames lists all sections on plaintext ports that need hostname isolation.
 	// "*" denotes the section with no hostname.
 	HTTPListenerHostnames map[int][]string `json:",omitempty"`
+	// RetainLongHTTPListenerHostnames carries an existing Gateway binding
+	// through controller opt-out. Ports needing long rules must stay closed.
+	RetainLongHTTPListenerHostnames bool `json:",omitempty"`
 	// RequestFilterSections describes ordered pre-routing filters by physical port.
 	RequestFilterSections map[int][]ListenerRequestFilterSection `json:",omitempty"`
 	VIPSecurityGroupIDs   []string

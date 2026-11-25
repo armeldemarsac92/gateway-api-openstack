@@ -76,6 +76,7 @@ type ProviderConfig struct {
 	TCPConnectionRejection bool
 	UDPPacketDrop          bool
 	FixedHTTPResponses     bool
+	LongHTTPHostnames      bool
 	HTTPHeaderExact        bool
 	HTTPQueryParamExact    bool
 	HTTPRequestRedirect    bool
@@ -119,6 +120,7 @@ type Provider struct {
 	transportReplayMu      sync.Mutex
 	transportReplayAfter   map[string]time.Time
 	fixedHTTPResponses     bool
+	longHTTPHostnames      bool
 	httpHeaderExact        bool
 	httpQueryParamExact    bool
 	httpRequestRedirect    bool
@@ -173,6 +175,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		tcpConnectionRejection: cfg.TCPConnectionRejection,
 		udpPacketDrop:          cfg.UDPPacketDrop,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
+		longHTTPHostnames:      cfg.LongHTTPHostnames,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
 		httpRequestURLRewrite:  cfg.HTTPRequestURLRewrite,

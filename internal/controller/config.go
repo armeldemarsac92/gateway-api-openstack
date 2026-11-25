@@ -49,6 +49,8 @@ type Config struct {
 	ClusterGatewayAddresses bool
 	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
 	HTTPHeaderExact bool
+	// LongHTTPHostnames allows host match expressions above the stock Octavia limit.
+	LongHTTPHostnames bool
 	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.
 	HTTPQueryParamExact bool
 

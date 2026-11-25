@@ -26,6 +26,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -64,6 +65,17 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 		return usesHTTPSProfile(r.Config, gateway) && httpsProfileIssue(r.Config, gateway, section) != nil
 	})
 	spec.HTTPListenerHostnames = HTTPListenerHostnames(admitted)
+	if len(spec.HTTPListenerHostnames) != 0 && retainsLongHTTPListenerHostnames(r.Config, gateway) {
+		for _, hosts := range spec.HTTPListenerHostnames {
+			if slices.ContainsFunc(hosts, func(host string) bool {
+				value, err := amphora.HostnameRuleValue(host, true)
+				return err == nil && amphora.IsLongHostnameRuleValue(value)
+			}) {
+				spec.RetainLongHTTPListenerHostnames = true
+				break
+			}
+		}
+	}
 	r.setGatewayAddressRequest(&spec, gateway)
 	if controller.GatewayListenerScope(r.Config, gateway) != "" {
 		// Snapshot validation already verified the frozen listener port and topology.
