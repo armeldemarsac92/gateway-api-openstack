@@ -63,6 +63,35 @@ The controller still sends `validation.hostname` as SNI. To allow that hostname 
 
 In a region that lacks SAN support, the affected pool stays closed and the policy ancestor reports `Accepted=False` with reason `UnsupportedProvider`. Failed capability discovery reports `Accepted=Unknown` with reason `Pending`. A malformed list reports `Accepted=False` with reason `Invalid`. Other backends in the route keep their configured behavior and weights.
 
+## Protect an Experimental XBackend
+
+The local kind ServerOnly qualification served HTTP 200 with the configured SNI and negotiated ALPN `http/1.1`. Removing the selected Pod backend's CA ConfigMap produced three HTTP 503 responses and zero additional application requests. Restoring the CA resumed traffic. For an ExternalHostname, changing DNS to an origin presenting a different DNS identity produced three HTTP 503 responses. The same-named ordinary Service remained available in all phases. [Pool settings, conditions and traffic](qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json)
+
+Install the Experimental Gateway API bundle and enable the regional backend TLS capability described above. Render `config/octavia-xbackend-server-only` for a standalone installation or `integrations/magnum-capi-helm/workload-octavia-xbackend-server-only` for Magnum. These overlays enable the Experimental controller profile and `--octavia-backend-tls-policy`, and select `--octavia-microversion=2.24`, the first Octavia API version with pool ALPN. In a custom installation, configure one microversion argument at 2.24 or newer. If you compose Kustomize components, put `config/components/octavia-pool-alpn-microversion` after the backend TLS and any frontend client validation components. [Octavia pool API](https://docs.openstack.org/api-ref/load-balancer/v2/#show-pool-details)
+
+Use an Endpoint member topology with Unmanaged backend security. For `EndpointSelector`, add the following to an XBackend with a Pod selector and a literal `spec.port.number`. The HTTPRoute references the XBackend by group, kind and name in its own namespace, omitting `backendRef.port`.
+
+```yaml
+spec:
+  protocol: HTTP11
+  tls:
+    mode: ServerOnly
+    validation:
+      hostname: catalog.internal.example
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: catalog-ca
+```
+
+Put one PEM CA certificate in `ca.crt` in the XBackend namespace. You can also use a single [ClusterTrustBundle](operator-cluster-trust-bundle.md) with the same operator opt-in, or specify explicit DNS or URI SANs where the regional capability is available. `validation.hostname` is required and supplies SNI. The certificate must match that DNS name unless you explicitly configure SANs.
+
+`ServerOnly` supports `HTTP` and `HTTP11`. It uses HTTP when you omit `protocol` and offers HTTP/1.1 over ALPN. It also works with an operator-authorized `ExternalHostname` backend. DNS determines the permitted IPv4 destinations according to the existing GatewayClass and CIDR configuration. `validation.hostname` supplies the TLS identity independently of `externalHostname.hostname`. The Gateway-wide Service client certificate is outside the XBackend's `ServerOnly` configuration.
+
+Check the XBackend's current-generation `Accepted` condition under the Gateway in `status.ancestors` and the HTTPRoute's `ResolvedRefs` condition. A missing or invalid CA reports a reference error. A microversion below 2.24 reports `UnsupportedProvider` for ServerOnly. An unconfirmed trust or provider dependency reports `Pending`. An authenticated pool in Octavia `ERROR` is disabled through a pool update before member removal. The controller waits for an `ACTIVE` readback, drains the pool, then verifies the current trust settings and pool ALPN before restoring members. Test both an accepted backend certificate and a rejected identity through the Gateway. The local trial recorded the configured API version, pool ALPN writes and HTTP responses. [Local results](qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json)
+
+`None` is the default TLS mode. `ClientAndServer`, the `System` trust store and HTTP/2 with `ServerOnly` are unsupported.
+
 ## Verify and rotate trust
 
 Read `status.ancestors` on the policy for the managed Gateway and current generation. `Accepted=True` and `ResolvedRefs=True` describe the accepted policy and resolved CA. Send traffic through the Gateway to verify the backend certificate. A server presenting the wrong DNS identity or a certificate from an untrusted CA must receive no HTTP request. The matching client request receives a 5xx response.

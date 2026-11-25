@@ -48,14 +48,21 @@ func AppliesToServicePort(policy *gatewayv1.BackendTLSPolicy, service *corev1.Se
 
 // CAKey identifies one supported CA reference and its scope.
 func CAKey(policy *gatewayv1.BackendTLSPolicy, bundlesEnabled bool) (types.NamespacedName, bool) {
-	validation := policy.Spec.Validation
-	if len(policy.Spec.TargetRefs) != 1 || len(validation.CACertificateRefs) != 1 || validation.WellKnownCACertificates != nil {
+	if len(policy.Spec.TargetRefs) != 1 {
+		return types.NamespacedName{}, false
+	}
+	return ValidationCAKey(policy.Namespace, policy.Spec.Validation, bundlesEnabled)
+}
+
+// ValidationCAKey identifies the trust dependency of a TLS validation config.
+func ValidationCAKey(namespace string, validation gatewayv1.BackendTLSPolicyValidation, bundlesEnabled bool) (types.NamespacedName, bool) {
+	if len(validation.CACertificateRefs) != 1 || validation.WellKnownCACertificates != nil {
 		return types.NamespacedName{}, false
 	}
 	ref := validation.CACertificateRefs[0]
 	switch {
 	case ref.Group == "" && ref.Kind == "ConfigMap" && ref.Name != "":
-		return types.NamespacedName{Namespace: policy.Namespace, Name: string(ref.Name)}, true
+		return types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}, true
 	case bundlesEnabled && IsClusterTrustBundle(ref.Group, ref.Kind) && ValidClusterTrustBundleName(string(ref.Name)):
 		return types.NamespacedName{Name: string(ref.Name)}, true
 	default:

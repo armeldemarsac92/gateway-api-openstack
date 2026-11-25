@@ -82,6 +82,11 @@ func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (
 	return p.graph.BackendTLSSANAvailable(ctx, requireH2)
 }
 
+// XBackendTLSAvailable discovers ServerOnly support, including the pool ALPN API.
+func (p *Provider) XBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
+	return p.graph.XBackendTLSAvailable(ctx, requireSAN)
+}
+
 // GRPCBackendTLSAvailable discovers hostname validation and mandatory h2 negotiation.
 func (p *Provider) GRPCBackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.GRPCBackendTLSAvailable(ctx)

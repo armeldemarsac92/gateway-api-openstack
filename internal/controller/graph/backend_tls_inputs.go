@@ -22,6 +22,7 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -34,6 +35,12 @@ import (
 // caller uses an uncached reader both for planning and just before mutation.
 // A namespaced policy list finds concurrent winners that indexed lookups could miss.
 func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input, ancestor *backendtls.GatewayAncestor, bundles *backendtls.ClusterTrustBundles) error {
+	return NewBackendTLSObserver(reader, bundles).CollectServiceInputs(ctx, input, ancestor)
+}
+
+// CollectServiceInputs reuses the observer's CA inventory for authorized Service
+// ports when the same snapshot also contains XBackends.
+func (o *BackendTLSObserver) CollectServiceInputs(ctx context.Context, input *model.Input, ancestor *backendtls.GatewayAncestor) error {
 	input.BackendTLSPolicies = make(map[model.ServicePortKey]backendtls.Selection)
 	services := make(map[types.NamespacedName]*corev1.Service, len(input.Services))
 	for i := range input.Services {
@@ -42,7 +49,6 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 			services[client.ObjectKeyFromObject(service)] = service
 		}
 	}
-	observer := NewBackendTLSObserver(reader, bundles)
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		kind := model.HTTPProfileRouteKind(route)
@@ -64,7 +70,7 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 				selection, observed := input.BackendTLSPolicies[target]
 				if !observed {
 					var err error
-					selection, err = observer.Observe(ctx, service, port, ancestor)
+					selection, err = o.Observe(ctx, service, port, ancestor)
 					if err != nil {
 						return err
 					}
@@ -78,16 +84,18 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 
 // BackendTLSObserver shares a live policy and CA inventory across resolved Service ports.
 type BackendTLSObserver struct {
-	reader   client.Reader
-	policies map[string][]gatewayv1.BackendTLSPolicy
-	bundles  *backendtls.ClusterTrustBundles
-	cas      backendtls.CAInputs
+	reader               client.Reader
+	policies             map[string][]gatewayv1.BackendTLSPolicy
+	bundles              *backendtls.ClusterTrustBundles
+	cas                  backendtls.CAInputs
+	configMapUnavailable map[types.NamespacedName]bool
 }
 
 func NewBackendTLSObserver(reader client.Reader, bundles *backendtls.ClusterTrustBundles) *BackendTLSObserver {
 	observer := &BackendTLSObserver{
 		reader: reader, bundles: bundles, policies: map[string][]gatewayv1.BackendTLSPolicy{},
-		cas: backendtls.CAInputs{ConfigMaps: map[types.NamespacedName]*corev1.ConfigMap{}},
+		cas:                  backendtls.CAInputs{ConfigMaps: map[types.NamespacedName]*corev1.ConfigMap{}},
+		configMapUnavailable: make(map[types.NamespacedName]bool),
 	}
 	if bundles != nil {
 		observer.cas.ClusterTrustBundles = make(map[string]backendtls.CAObservation)
@@ -135,34 +143,10 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 			continue
 		}
 		key, supported := backendtls.CAKey(policy, o.bundles != nil)
-		if !supported {
-			continue
-		}
-		if key.Namespace == "" {
-			if _, observed := o.cas.ClusterTrustBundles[key.Name]; !observed {
-				bundle, err := o.bundles.Read(ctx, key.Name)
-				if err := ctx.Err(); err != nil {
-					return backendtls.Selection{}, err
-				}
-				bundle.Unavailable = err
-				o.cas.ClusterTrustBundles[key.Name] = bundle
+		if supported {
+			if err := o.observeCA(ctx, key); err != nil {
+				return backendtls.Selection{}, err
 			}
-			continue
-		}
-		if _, observed := o.cas.ConfigMaps[key]; observed {
-			continue
-		}
-		var configMap corev1.ConfigMap
-		if err := o.reader.Get(ctx, key, &configMap); err != nil {
-			if ctx.Err() != nil {
-				return backendtls.Selection{}, ctx.Err()
-			}
-			// A known policy still governs this port when its CA cannot be
-			// read. The mutation fence repeats the read, and later watches
-			// and resyncs can restore this backend independently of its peers.
-			o.cas.ConfigMaps[key] = nil
-		} else {
-			o.cas.ConfigMaps[key] = &configMap
 		}
 	}
 	selection := backendtls.Evaluate(service, port, items, o.cas)
@@ -185,4 +169,49 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 		break
 	}
 	return selection, nil
+}
+
+// ObserveValidation evaluates inline backend TLS without looking up Service policies.
+func (o *BackendTLSObserver) ObserveValidation(ctx context.Context, namespace string, validation gatewayv1.BackendTLSPolicyValidation) (backendtls.ValidationResult, error) {
+	if key, supported := backendtls.ValidationCAKey(namespace, validation, o.bundles != nil); supported {
+		if err := o.observeCA(ctx, key); err != nil {
+			return backendtls.ValidationResult{}, err
+		}
+		if o.configMapUnavailable[key] {
+			return backendtls.ValidationResult{Pending: true, Reason: "Pending", Message: fmt.Sprintf("Waiting to read the referenced CA ConfigMap %s", key)}, nil
+		}
+	}
+	return backendtls.EvaluateValidation(namespace, validation, o.cas), nil
+}
+
+func (o *BackendTLSObserver) observeCA(ctx context.Context, key types.NamespacedName) error {
+	if key.Namespace == "" {
+		if _, observed := o.cas.ClusterTrustBundles[key.Name]; !observed {
+			bundle, err := o.bundles.Read(ctx, key.Name)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			bundle.Unavailable = err
+			o.cas.ClusterTrustBundles[key.Name] = bundle
+		}
+		return nil
+	}
+	if _, observed := o.cas.ConfigMaps[key]; observed {
+		return nil
+	}
+	var configMap corev1.ConfigMap
+	if err := o.reader.Get(ctx, key, &configMap); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// A known TLS requirement still governs this backend when its CA
+		// cannot be read. Watches and resyncs can restore it independently.
+		o.cas.ConfigMaps[key] = nil
+		if !apierrors.IsNotFound(err) {
+			o.configMapUnavailable[key] = true
+		}
+	} else {
+		o.cas.ConfigMaps[key] = &configMap
+	}
+	return nil
 }

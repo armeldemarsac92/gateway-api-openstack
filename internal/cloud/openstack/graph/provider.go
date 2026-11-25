@@ -103,6 +103,7 @@ type ProviderConfig struct {
 type Provider struct {
 	backendCA              *backendca.Store
 	backendTLSPolicy       bool
+	poolALPN               bool
 	backendRetryBudget     bool
 	fixedHTTPResponses     bool
 	httpHeaderExact        bool
@@ -148,6 +149,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 	return &Provider{
 		backendCA:              cfg.BackendCA,
 		backendTLSPolicy:       cfg.BackendTLSPolicy,
+		poolALPN:               serviceClients.LoadBalancer != nil && clients.SupportsPoolALPN(serviceClients.LoadBalancer.Microversion),
 		backendRetryBudget:     cfg.BackendRetryBudget,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
@@ -198,6 +200,14 @@ func (p *Provider) GRPCBackendTLSAvailable(ctx context.Context) (bool, error) {
 // selected transport on the regional Amphora endpoint.
 func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (bool, error) {
 	return p.backendTLSAvailable(ctx, requireH2, true)
+}
+
+// XBackendTLSAvailable also requires the configured pool ALPN API.
+func (p *Provider) XBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
+	if !p.poolALPN {
+		return false, nil
+	}
+	return p.backendTLSAvailable(ctx, false, requireSAN)
 }
 
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {

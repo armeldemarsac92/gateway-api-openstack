@@ -64,6 +64,7 @@ type PoolBackendTLS struct {
 	ClientRefObserved       bool
 	RequireH2               bool
 	RequireH2Observed       bool
+	ALPNObserved            bool
 	EnabledObserved         bool
 	H2CObserved             bool
 	AdminObserved           bool
@@ -95,6 +96,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				CA                 json.RawMessage `json:"ca_tls_container_ref"`
 				ClientRef          json.RawMessage `json:"tls_container_ref"`
 				RequireH2          *bool           `json:"backend_tls_require_h2"`
+				ALPNProtocols      json.RawMessage `json:"alpn_protocols"`
 				Enabled            *bool           `json:"tls_enabled"`
 				Admin              *bool           `json:"admin_state_up"`
 			} `json:"pools"`
@@ -113,6 +115,8 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				RequireH2Observed: pool.RequireH2 != nil, EnabledObserved: pool.Enabled != nil, AdminObserved: pool.Admin != nil,
 				H2CObserved: pool.BackendH2C != nil}
 			tls.RequireH2 = pool.RequireH2 != nil && *pool.RequireH2
+			// Unavailable ALPN readback must hold only the target pool.
+			tls.ALPNObserved = len(pool.ALPNProtocols) != 0 && json.Unmarshal(pool.ALPNProtocols, &pool.Pool.ALPNProtocols) == nil
 			if tls.HostnameObserved && json.Unmarshal(pool.Hostname, &tls.Hostname) != nil ||
 				tls.CAObserved && json.Unmarshal(pool.CA, &pool.CATLSContainerRef) != nil ||
 				tls.ClientRefObserved && json.Unmarshal(pool.ClientRef, &pool.TLSContainerRef) != nil {

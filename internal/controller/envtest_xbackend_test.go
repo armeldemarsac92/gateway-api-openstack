@@ -23,11 +23,13 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -95,6 +97,7 @@ func testXBackendEndpointSelector(t *testing.T, c client.Client, cfg controller.
 		}
 	}()
 	wantMembers := []cloud.Member{{Address: "10.1.2.8", Port: 8087}}
+	var expectedTLS *cloud.BackendTLSValidation
 	waitForBackend := func(members []cloud.Member, reason gatewayv1.RouteConditionReason) {
 		t.Helper()
 		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
@@ -114,24 +117,32 @@ func testXBackendEndpointSelector(t *testing.T, c client.Client, cfg controller.
 				for _, node := range observation.Routes {
 					if node.Spec.Identity.RouteUID == string(route.UID) && node.Disposition == cloud.GraphEnsure && len(node.Spec.HTTPBackends) == 1 {
 						target := node.Spec.HTTPBackends[0]
-						return target.Kind == cloud.HTTPBackendKindXBackend && slices.Equal(target.Members, members), nil
+						matchesTLS := target.BackendTLS == nil && expectedTLS == nil ||
+							target.BackendTLS != nil && expectedTLS != nil && target.BackendTLS.Denied == expectedTLS.Denied &&
+								target.BackendTLS.Hostname == expectedTLS.Hostname && target.BackendTLS.CAConfigMapUID == expectedTLS.CAConfigMapUID
+						return target.Kind == cloud.HTTPBackendKindXBackend && slices.Equal(target.Members, members) && matchesTLS, nil
 					}
 				}
 			}
 			return false, nil
 		})
 	}
+	waitForAccepted := func(status metav1.ConditionStatus, reason string) {
+		t.Helper()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, backendKey, backend); err != nil {
+				return false, err
+			}
+			if len(backend.Status.Ancestors) != 1 || backend.Status.Ancestors[0].ControllerName != cfg.ControllerName ||
+				backend.Status.Ancestors[0].AncestorRef.Name != gatewayv1.ObjectName(gateway.Name) {
+				return false, nil
+			}
+			accepted := meta.FindStatusCondition(backend.Status.Ancestors[0].Conditions, "Accepted")
+			return accepted != nil && accepted.Status == status && accepted.Reason == reason && accepted.ObservedGeneration == backend.Generation, nil
+		})
+	}
 	waitForBackend(nil, gatewayv1.RouteReasonResolvedRefs)
-	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
-		if err := c.Get(ctx, backendKey, backend); err != nil {
-			return false, err
-		}
-		if len(backend.Status.Ancestors) != 1 || backend.Status.Ancestors[0].ControllerName != cfg.ControllerName || backend.Status.Ancestors[0].AncestorRef.Name != gatewayv1.ObjectName(gateway.Name) {
-			return false, nil
-		}
-		accepted := meta.FindStatusCondition(backend.Status.Ancestors[0].Conditions, "Accepted")
-		return accepted != nil && accepted.Status == metav1.ConditionTrue && accepted.ObservedGeneration == backend.Generation, nil
-	})
+	waitForAccepted(metav1.ConditionTrue, "Accepted")
 
 	pod.Status.PodIP = wantMembers[0].Address
 	pod.Status.PodIPs = []corev1.PodIP{{IP: pod.Status.PodIP}}
@@ -156,31 +167,68 @@ func testXBackendEndpointSelector(t *testing.T, c client.Client, cfg controller.
 		t.Fatal(err)
 	}
 	waitForBackend(nil, gatewayv1.RouteReasonUnsupportedProtocol)
-	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
-		if err := c.Get(ctx, backendKey, backend); err != nil {
-			return false, err
-		}
-		if len(backend.Status.Ancestors) != 1 {
-			return false, nil
-		}
-		accepted := meta.FindStatusCondition(backend.Status.Ancestors[0].Conditions, "Accepted")
-		return accepted != nil && accepted.Status == metav1.ConditionFalse && accepted.Reason == "UnsupportedProtocol" && accepted.ObservedGeneration == backend.Generation, nil
-	})
+	waitForAccepted(metav1.ConditionFalse, "UnsupportedProtocol")
 	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP11)
 	if err := c.Update(ctx, backend); err != nil {
 		t.Fatal(err)
 	}
 	waitForBackend(wantMembers, gatewayv1.RouteReasonResolvedRefs)
-	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
-		if err := c.Get(ctx, backendKey, backend); err != nil {
-			return false, err
-		}
-		if len(backend.Status.Ancestors) != 1 {
-			return false, nil
-		}
-		accepted := meta.FindStatusCondition(backend.Status.Ancestors[0].Conditions, "Accepted")
-		return accepted != nil && accepted.Status == metav1.ConditionTrue && accepted.ObservedGeneration == backend.Generation, nil
-	})
+	waitForAccepted(metav1.ConditionTrue, "Accepted")
+
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "backend-ca"}, Data: map[string]string{"ca.crt": backendTLSTestCA(t)}}
+	require.NoError(t, c.Create(ctx, ca))
+	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{
+		Hostname: "backend.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+	}}
+	require.NoError(t, c.Update(ctx, backend))
+	expectedTLS = &cloud.BackendTLSValidation{Hostname: "backend.example.test", CAConfigMapUID: string(ca.UID)}
+	waitForBackend(wantMembers, gatewayv1.RouteReasonResolvedRefs)
+	waitForAccepted(metav1.ConditionTrue, "Accepted")
+
+	backend.Spec.TLS.Validation.Hostname = "rotated.example.test"
+	require.NoError(t, c.Update(ctx, backend))
+	expectedTLS.Hostname = "rotated.example.test"
+	waitForBackend(wantMembers, gatewayv1.RouteReasonResolvedRefs)
+	waitForAccepted(metav1.ConditionTrue, "Accepted")
+
+	require.NoError(t, c.Delete(ctx, ca))
+	expectedTLS = &cloud.BackendTLSValidation{Denied: true}
+	waitForBackend(nil, gatewayv1.RouteConditionReason(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef))
+	waitForAccepted(metav1.ConditionFalse, string(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate))
+
+	ca.ObjectMeta = metav1.ObjectMeta{Namespace: namespace, Name: ca.Name}
+	require.NoError(t, c.Create(ctx, ca))
+	expectedTLS = &cloud.BackendTLSValidation{Hostname: "rotated.example.test", CAConfigMapUID: string(ca.UID)}
+	waitForBackend(wantMembers, gatewayv1.RouteReasonResolvedRefs)
+	waitForAccepted(metav1.ConditionTrue, "Accepted")
+
+	if cfg.ClusterTrustBundles != nil {
+		bundle := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "certificates.k8s.io/v1beta1",
+			"kind":       "ClusterTrustBundle",
+			"metadata":   map[string]any{"name": "xbackend-ca"},
+			"spec":       map[string]any{"trustBundle": ca.Data["ca.crt"]},
+		}}
+		require.NoError(t, c.Create(ctx, bundle))
+		backend.Spec.TLS.Validation.CACertificateRefs = []gatewayv1.LocalObjectReference{{
+			Group: "certificates.k8s.io", Kind: "ClusterTrustBundle", Name: gatewayv1.ObjectName(bundle.GetName()),
+		}}
+		require.NoError(t, c.Update(ctx, backend))
+		expectedTLS = &cloud.BackendTLSValidation{Hostname: "rotated.example.test", CAConfigMapUID: string(bundle.GetUID())}
+		waitForBackend(wantMembers, gatewayv1.RouteReasonResolvedRefs)
+		waitForAccepted(metav1.ConditionTrue, "Accepted")
+
+		require.NoError(t, c.Delete(ctx, bundle))
+		expectedTLS = &cloud.BackendTLSValidation{Denied: true}
+		waitForBackend(nil, gatewayv1.RouteConditionReason(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef))
+		waitForAccepted(metav1.ConditionFalse, string(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate))
+	}
+
+	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeNone}
+	require.NoError(t, c.Update(ctx, backend))
+	expectedTLS = nil
+	waitForBackend(wantMembers, gatewayv1.RouteReasonResolvedRefs)
+	waitForAccepted(metav1.ConditionTrue, "Accepted")
 
 	foreign := gatewayx.BackendAncestorStatus{
 		ControllerName: "example.net/other-controller", AncestorRef: gatewayv1.ParentReference{Name: "external"},

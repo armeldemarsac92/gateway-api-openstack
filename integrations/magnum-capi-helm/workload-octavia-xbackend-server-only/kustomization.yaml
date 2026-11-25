@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../workload
+components:
+  - ../../../config/components/experimental
+  - ../../../config/components/octavia-backend-tls-policy
+  - ../../../config/components/octavia-pool-alpn-microversion

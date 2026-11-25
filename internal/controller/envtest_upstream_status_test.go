@@ -88,6 +88,7 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	route := writer.Routes.(*httproute.Reconciler)
 	if cfg.BackendTLSPolicy {
 		route.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
+		route.XBackendTLSAvailable = func(context.Context, bool) (bool, error) { return true, nil }
 	}
 	tcp := &l4route.Reconciler{Protocol: gatewayv1.TCPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
 	udp := &l4route.Reconciler{Protocol: gatewayv1.UDPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}

@@ -52,6 +52,8 @@ const (
 	IndexHTTPRouteByXBackend = "spec.xBackend"
 	// IndexXBackendByPodLabel indexes each matchLabels pair in an EndpointSelector.
 	IndexXBackendByPodLabel = "spec.podLabel"
+	// IndexXBackendByCA indexes the scoped trust reference in inline TLS validation.
+	IndexXBackendByCA = "spec.tls.caCertificateRef"
 	// IndexBackendTLSPolicyByService indexes local core Service targets.
 	IndexBackendTLSPolicyByService = "spec.targetService"
 	// IndexBackendTLSPolicyByCA indexes supported CA references by scoped object key.
@@ -309,6 +311,14 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				return sortedIndexKeys(keys)
 			}},
 		)
+		if config.BackendTLSPolicy {
+			indexes = append(indexes, controllerFieldIndex{object: &gatewayx.XBackend{}, field: IndexXBackendByCA, extract: func(object client.Object) []string {
+				if key, supported := model.XBackendTLSCAKey(object.(*gatewayx.XBackend), config.ClusterTrustBundles != nil); supported {
+					return []string{ObjectKeyString(key)}
+				}
+				return nil
+			}})
+		}
 	}
 	if config.TLSRoutesEnabled() {
 		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.TLSRoute{}, field: IndexTLSRouteByGateway, extract: func(object client.Object) []string {

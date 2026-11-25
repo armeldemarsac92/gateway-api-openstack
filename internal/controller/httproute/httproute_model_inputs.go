@@ -267,7 +267,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 		return nil, err
 	}
 	if inputs.backendTLSAncestor != nil {
-		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, routes, inputs.input.BackendTLSPolicies)
+		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, routes, inputs.input)
 	}
 	if r.retryBudgetPolicyServed && r.Config.BackendRetryBudgetEnabled() {
 		inputs.retryBudgetAncestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
@@ -306,6 +306,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.HTTPCORS = r.Config.HTTPCORS
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
+	tlsObserver := graph.NewBackendTLSObserver(reader, r.Config.ClusterTrustBundles)
 	input.EnableXBackend = r.Config.XBackendEnabled()
 	if input.EnableXBackend {
 		profile, err := r.xBackendProfile(gateway)
@@ -313,7 +314,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 			return nil, err
 		}
 		input.XBackendProfile = profile
-		if err := graph.CollectXBackendInputs(ctx, reader, &input); err != nil {
+		if err := graph.CollectXBackendInputs(ctx, reader, &input, tlsObserver); err != nil {
 			return nil, err
 		}
 	}
@@ -342,7 +343,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor, r.Config.ClusterTrustBundles); err != nil {
+		if err := tlsObserver.CollectServiceInputs(ctx, &input, ancestor); err != nil {
 			return nil, err
 		}
 	}
@@ -359,6 +360,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackendProfile, error) {
 	profile := model.XBackendProfile{
 		H2C:               r.Config.BackendH2C,
+		ServerTLS:         r.Config.BackendTLSPolicy,
 		ExternalHostname:  r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
 		ServiceDNSDomains: r.Config.XBackendServiceDNSDomains,
 	}
@@ -377,7 +379,8 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	}
 	current.EnableXBackend = inputs.input.EnableXBackend
 	current.XBackendProfile = inputs.input.XBackendProfile
-	if err := graph.CollectXBackendInputs(ctx, reader, &current); err != nil {
+	tlsObserver := graph.NewBackendTLSObserver(reader, inputs.clusterTrustBundles)
+	if err := graph.CollectXBackendInputs(ctx, reader, &current, tlsObserver); err != nil {
 		return err
 	}
 	for _, route := range inputs.input.Routes {
@@ -392,7 +395,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if inputs.input.BackendTLSPolicies != nil {
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor, inputs.clusterTrustBundles); err != nil {
+		if err := tlsObserver.CollectServiceInputs(ctx, &current, inputs.backendTLSAncestor); err != nil {
 			return err
 		}
 	}
