@@ -56,3 +56,34 @@ func TestNormalizeHTTPRequestPolicy(t *testing.T) {
 	require.Nil(t, diagnostic)
 	require.Nil(t, got)
 }
+
+func TestNormalizeHTTPRetryBackoff(t *testing.T) {
+	rule := gatewayv1.HTTPRouteRule{
+		BackendRefs: []gatewayv1.HTTPBackendRef{{}},
+		Retry:       &gatewayv1.HTTPRouteRetry{Attempts: ptr.To(0)},
+	}
+	for _, tc := range []struct {
+		value        gatewayv1.Duration
+		milliseconds int64
+	}{
+		{"0ms", 0},
+		{"2m3s75ms", 123075},
+		{"99999h99999h99999h99999h", 1439985600000},
+	} {
+		rule.Retry.Backoff = &tc.value
+		policy, diagnostic := NormalizeHTTPRequestPolicy(rule, true)
+		require.Nil(t, diagnostic)
+		require.Equal(t, tc.milliseconds, *policy.Retry.BackoffMS)
+		require.Zero(t, *policy.Retry.Attempts)
+	}
+
+	rule.Retry.Backoff = nil
+	policy, diagnostic := NormalizeHTTPRequestPolicy(rule, true)
+	require.Nil(t, diagnostic)
+	require.Nil(t, policy.Retry.BackoffMS)
+
+	rule.Retry.Backoff = ptr.To(gatewayv1.Duration("0.5s"))
+	policy, diagnostic = NormalizeHTTPRequestPolicy(rule, true)
+	require.Nil(t, policy)
+	require.Contains(t, diagnostic.Message, "retry.backoff")
+}

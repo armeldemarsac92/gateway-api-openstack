@@ -378,5 +378,8 @@ const RequestCORSPolicyTag = "gw-api-request-cors"
 // Octavia endpoint omits its field from policy readback.
 const HTTPRequestPolicyTag = "gw-api-http-request-policy"
 
+// HTTPRetryBackoffTag identifies explicit backoff when the API hides the field.
+const HTTPRetryBackoffTag = "gw-api-http-retry-backoff"
+
 // HTTPRequestMirrorTag identifies policies requiring mirror readback.
 const HTTPRequestMirrorTag = "gw-api-http-request-mirror"

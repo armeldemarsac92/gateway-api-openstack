@@ -1,13 +1,13 @@
 {
   "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
-  "sourceRevision": "52eae75209ad7bf2b2cbc1fbecf203f23f0e463a",
+  "sourceRevision": "8cd580f6914d5919544c6c3a7c6b1233cf46061c",
   "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
-  "manifestDigest": "sha256:672b4989121bec286a3b992d194392e10fc7d212feebaf60e54a563bd7b4c823",
-  "configDigest": "sha256:a4e085a9df11d736f7ad5e74a9b7eac37ca74ef2cbbb3210e84e1ea5428903f3",
+  "manifestDigest": "sha256:62d89ff078df0948b50c8755f9749d23a674855037e988611a5dd6f1e11ed118",
+  "configDigest": "sha256:179dde7d11c38ae995816a96fee69b2ab9c35bfaf466d7b3f4a45d22478363e0",
   "platform": "linux/amd64",
   "entrypoint": "/openstack-gateway-controller",
   "user": "65532:65532",
-  "ociArchiveSHA256": "6a81ecd5767b58097c88d91574dedd194c63a14ee8d32cc1274bc9a3f4542966",
-  "managerSHA256": "68999402f897c2457742035b390240d44723e12ca73965e5b0777acee5402ecb",
+  "ociArchiveSHA256": "9e724a49e94abd67699b0888720e1b2e29dba66a6243ea684093676a5f99557a",
+  "managerSHA256": "44b1b5519d92a214d32f4cebfc028932e8eb19553798940c6679e8e0e54983da",
   "normalAndNoCacheBuildsMatch": true
 }

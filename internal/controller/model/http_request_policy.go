@@ -41,9 +41,6 @@ func NormalizeHTTPRequestPolicy(rule gatewayv1.HTTPRouteRule, enabled bool) (*cl
 	if !enabled {
 		return nil, unsupported("HTTPRoute timeouts and retries require --octavia-http-request-policy", ScopeRoute)
 	}
-	if rule.Retry != nil && rule.Retry.Backoff != nil {
-		return nil, unsupported("HTTPRoute retry.backoff is unsupported", ScopeRoute)
-	}
 	if len(rule.BackendRefs) == 0 || slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
 		return filter.Type == gatewayv1.HTTPRouteFilterRequestRedirect
 	}) {
@@ -62,7 +59,11 @@ func NormalizeHTTPRequestPolicy(rule gatewayv1.HTTPRouteRule, enabled bool) (*cl
 		}
 	}
 	if rule.Retry != nil {
-		policy.Retry = &cloud.HTTPRetry{Attempts: ptr.To(ptr.Deref(rule.Retry.Attempts, 1))}
+		backoff, ok := durationMilliseconds(rule.Retry.Backoff)
+		if !ok {
+			return nil, unsupported("HTTPRoute retry.backoff is not a valid Gateway API duration", ScopeRoute)
+		}
+		policy.Retry = &cloud.HTTPRetry{Attempts: ptr.To(ptr.Deref(rule.Retry.Attempts, 1)), BackoffMS: backoff}
 		for _, code := range rule.Retry.Codes {
 			policy.Retry.Codes = append(policy.Retry.Codes, int(code))
 		}

@@ -36,10 +36,16 @@ type HTTPRequestPolicy struct {
 }
 
 // HTTPRetry holds additional attempts. A nil count defaults to one and an
-// empty code set retries eligible connection failures only.
+// empty code set retries eligible connection failures only. A nil backoff
+// uses the provider default; zero explicitly requests no delay.
 type HTTPRetry struct {
-	Attempts *int  `json:"attempts,omitempty"`
-	Codes    []int `json:"codes,omitempty"`
+	Attempts  *int   `json:"attempts,omitempty"`
+	Codes     []int  `json:"codes,omitempty"`
+	BackoffMS *int64 `json:"backoff_ms,omitempty"`
+}
+
+func (p *HTTPRequestPolicy) HasRetryBackoff() bool {
+	return p != nil && p.Retry != nil && p.Retry.BackoffMS != nil
 }
 
 func (p HTTPRequestPolicy) Validate() error {
@@ -55,6 +61,9 @@ func (p HTTPRequestPolicy) Validate() error {
 	}
 	if attempts := ptr.Deref(p.Retry.Attempts, 1); attempts < 0 || attempts > math.MaxInt32 {
 		return fmt.Errorf("HTTPRoute retry.attempts must be between 0 and %d", math.MaxInt32)
+	}
+	if ptr.Deref(p.Retry.BackoffMS, 0) < 0 {
+		return errors.New("HTTPRoute retry.backoff must be nonnegative")
 	}
 	var seen map[int]bool
 	if len(p.Retry.Codes) != 0 {
@@ -86,5 +95,6 @@ func (p *HTTPRetry) equal(other *HTTPRetry) bool {
 	if p == nil || other == nil {
 		return p == other
 	}
-	return ptr.Deref(p.Attempts, 1) == ptr.Deref(other.Attempts, 1) && slices.Equal(p.Codes, other.Codes)
+	return ptr.Deref(p.Attempts, 1) == ptr.Deref(other.Attempts, 1) && slices.Equal(p.Codes, other.Codes) &&
+		ptr.Equal(p.BackoffMS, other.BackoffMS)
 }
