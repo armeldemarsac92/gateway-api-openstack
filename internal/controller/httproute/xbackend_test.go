@@ -829,6 +829,18 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 	require.Contains(t, model.CheckXBackendObservation(types.NamespacedName{}, &observation, profile).Message, "UID")
 	observation.Spec.SessionPersistence.AbsoluteTimeout = nil
 	require.Nil(t, model.CheckXBackendObservation(types.NamespacedName{}, &observation, profile))
+	authenticated := backend.DeepCopy()
+	authenticated.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	authenticated.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("reports_session"))
+	authenticated.TLS = &gatewayx.BackendTLS{
+		Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{Hostname: "reports.example.test"},
+	}
+	authenticatedProfile := profile
+	authenticatedProfile.ServerTLS, authenticatedProfile.ClientTLS = true, true
+	require.Nil(t, model.ValidateXBackend(*authenticated, authenticatedProfile))
+	authenticated.TLS.Mode = gatewayx.BackendTLSModeClientAndServer
+	authenticated.TLS.ClientCertificateRef = &gatewayv1.SecretObjectReference{Name: "reports-client"}
+	require.Nil(t, model.ValidateXBackend(*authenticated, authenticatedProfile))
 	for _, tc := range []struct {
 		name string
 		edit func(*gatewayx.BackendSpec, *model.XBackendProfile)
@@ -871,9 +883,8 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 			b.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
 			p.H2C = false
 		}},
-		{"HTTP2 with TLS", func(b *gatewayx.BackendSpec, p *model.XBackendProfile) {
+		{"HTTP2 without TLS", func(b *gatewayx.BackendSpec, p *model.XBackendProfile) {
 			b.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
-			b.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{Hostname: "reports.example.test"}}
 			p.ServerTLS = true
 		}},
 	} {

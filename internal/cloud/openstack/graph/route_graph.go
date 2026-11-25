@@ -1186,17 +1186,26 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 	// Reconcile the exact policy against an independently observed empty
 	// pool. Keep its existing transport while waiting for persistence
 	// readback to admit members or resume authenticated transport.
-	desired.members, desired.healthMonitor = nil, cloud.HealthMonitorConfig{}
-	desired.sessionCookieName, desired.sessionHeader, desired.backendTLS = "", nil, backendTLSPlan{}
-	desired.spec.BackendH2C = actual.backendH2C
+	var steps []routeMutation
+	var state cloud.RouteState
+	var fallbackErr error
 	if !actual.pool.AdminStateUp && (hasBackendTLSSettings(*actual.pool, actual.backendTLS) || hasObservedBackendTLS(*actual.pool, actual.backendTLS)) {
-		return nil, routeStateFromObservation(actual), err
-	}
-	poolOnly := actual
-	poolOnly.monitor = nil
-	steps, state, fallbackErr := buildRouteEnsureBackendPlan(desired, poolOnly, batchActivations)
-	if actual.monitor != nil {
-		state.MonitorID = actual.monitor.ID
+		state = routeStateFromObservation(actual)
+		if desired.authenticatedH2Cookie() && actual.pool.Protocol == cloud.ListenerProtocolHTTP &&
+			(slices.Contains(actual.pool.Tags, backendTLSManagedTag) || actual.backendTLS.Hostname != "") {
+			// Amphora keeps the HTTP predicate for a closed protected pool.
+			steps, state, fallbackErr = buildRouteEnsurePolicyPlan(desired, actual.policies, state.PoolID, state, nil, batchActivations)
+		}
+	} else {
+		desired.members, desired.healthMonitor = nil, cloud.HealthMonitorConfig{}
+		desired.sessionCookieName, desired.sessionHeader, desired.backendTLS = "", nil, backendTLSPlan{}
+		desired.spec.BackendH2C = actual.backendH2C
+		poolOnly := actual
+		poolOnly.monitor = nil
+		steps, state, fallbackErr = buildRouteEnsureBackendPlan(desired, poolOnly, batchActivations)
+		if actual.monitor != nil {
+			state.MonitorID = actual.monitor.ID
+		}
 	}
 	if len(steps) != 0 || fallbackErr != nil {
 		return steps, state, fallbackErr
@@ -1407,7 +1416,11 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 		}
 	}
 
-	policyPlan, disablePlan, policyState := buildRoutePolicyPlan(desired, actual.policies, poolID)
+	return buildRouteEnsurePolicyPlan(desired, actual.policies, poolID, state, nonPolicyPlan, batchActivations)
+}
+
+func buildRouteEnsurePolicyPlan(desired desiredRoute, policies []observedRoutePolicy, poolID string, state cloud.RouteState, nonPolicyPlan []routeMutation, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
+	policyPlan, disablePlan, policyState := buildRoutePolicyPlan(desired, policies, poolID)
 	state.L7PolicyIDs = policyState.L7PolicyIDs
 	state.L7RuleIDs = policyState.L7RuleIDs
 	plan := append(disablePlan, nonPolicyPlan...)
@@ -1415,14 +1428,14 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 	if len(plan) != 0 {
 		return plan, state, nil
 	}
-	if slices.ContainsFunc(actual.policies, func(policy observedRoutePolicy) bool { return policy.initialRulesPartial }) {
+	if slices.ContainsFunc(policies, func(policy observedRoutePolicy) bool { return policy.initialRulesPartial }) {
 		return nil, state, errInitialL7RulesUnverified
 	}
 	for _, wantedPolicy := range desired.policies {
 		if wantedPolicy.targetsPending() {
 			continue
 		}
-		for _, policy := range actual.policies {
+		for _, policy := range policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp &&
 				(wantedPolicy.requestCORS == nil || requestCORSPolicy.settled(wantedPolicy, policy)) &&
 				wantedPolicy.requestPolicyMatches(policy) && wantedPolicy.requestMirrorsMatch(policy) && wantedPolicy.externalAuthMatches(policy) {
@@ -1456,7 +1469,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 	if len(plan) == 0 {
 		for _, wanted := range desired.policies {
 			if len(wanted.resolvedRequestMirrors) != 0 || wanted.weightedPlan != nil && weightedTargetHasMirrors(wanted.weightedPlan.targets) {
-				if !slices.ContainsFunc(actual.policies, func(observed observedRoutePolicy) bool {
+				if !slices.ContainsFunc(policies, func(observed observedRoutePolicy) bool {
 					return observed.role == wanted.role && observed.policy.AdminStateUp &&
 						observedForwardPolicySettled(observed) && wanted.requestMirrorsMatch(observed)
 				}) {
@@ -1466,7 +1479,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 			if wanted.requestPolicy == nil || wanted.targetsPending() {
 				continue
 			}
-			if !slices.ContainsFunc(actual.policies, func(observed observedRoutePolicy) bool {
+			if !slices.ContainsFunc(policies, func(observed observedRoutePolicy) bool {
 				return observed.role == wanted.role && observed.policy.AdminStateUp &&
 					observedForwardPolicySettled(observed) && wanted.requestPolicyMatches(observed)
 			}) {

@@ -881,6 +881,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	}
 	var required []string
 	var mirrorCapabilities []string
+	var reopensAuthenticatedH2Cookie bool
 	fixed := desired.fixedHTTPResponses
 	switch step.kind {
 	case graphCreateLoadBalancer:
@@ -896,6 +897,13 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	case graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
+		reopensAuthenticatedH2Cookie = part.authenticatedH2Cookie() && !part.backendTLS.denies() &&
+			step.route.kind == routeMutationSetBackendTLS && step.route.poolAdmin != nil && *step.route.poolAdmin
+		if reopensAuthenticatedH2Cookie {
+			// Octavia reauthorizes TLS on reopen. Recheck the cookie
+			// capabilities as the PUT leaves persistence unchanged.
+			required = append(required, poolSessionCookieCapabilities(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))...)
+		}
 		if step.route.policy.externalAuth != nil && (step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
 			if step.route.policy.resolvedExternalAuth == nil {
 				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for the HTTPRoute authorization pool"))
@@ -982,6 +990,14 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		verify = p.verifyGatewayHTTPURLCapabilities
 	}
 	err := verify(ctx, desired, actual, required)
+	if err != nil && reopensAuthenticatedH2Cookie {
+		var missing *octavia.MissingGatewayCapability
+		capability := octavia.GatewayCapabilityHTTPCookieName
+		if errors.As(err, &missing) {
+			capability = missing.Capability
+		}
+		return step, &unavailableRouteCapability{error: err, capability: capability}
+	}
 	if err != nil && len(mirrorCapabilities) != 0 {
 		var missingMirror *octavia.MissingGatewayCapability
 		capability := mirrorCapabilities[len(mirrorCapabilities)-1]
