@@ -157,7 +157,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 				return nil, err
 			}
 		}
-		if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
+		if listenerHasRequestFilters(listener) && (!config.GatewayListenerFiltersEnabled() || listener.Protocol != gatewayv1.HTTPProtocolType) {
 			return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora %s profile", listener.Protocol)
 		}
 		kind := listenerRouteKind(listener.Protocol)

@@ -84,6 +84,9 @@ type GatewayInput struct {
 	ReportRoutes func(context.Context, cloud.GatewayGraphResult, error) error
 	// ObserveTLS rebuilds withdrawal authority even if ordinary graph input is incomplete.
 	ObserveTLS func(context.Context) (GatewayInput, error)
+	// ObserveListenerFilterWithdrawal rebuilds confirmed denial authority
+	// independently of the route and backend trust inventory.
+	ObserveListenerFilterWithdrawal func(context.Context) (GatewayInput, error)
 }
 
 // TLSAuthorizationChanged identifies ports whose observed authorization became stale.
@@ -265,7 +268,10 @@ func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gatewa
 	if gateway.Object == nil {
 		gateway.Object = request.Gateway
 	}
-	var backendErr error
+	var filterErr, backendErr error
+	if request.Action == Ensure && errors.Is(graphErr, backendtls.ErrClusterTrustBundleUnavailable) && gateway.ObserveListenerFilterWithdrawal != nil {
+		filterErr = w.withdrawListenerFilters(ctx, request.Identity, gateway.ObserveListenerFilterWithdrawal)
+	}
 	if request.Action == Ensure && gateway.Node.BackendCAOwned &&
 		cloud.NormalizeListenerProtocol(gateway.Node.Spec.ListenerProtocol) == cloud.ListenerProtocolHTTP {
 		request.Action = WithdrawBackendClientCertificate
@@ -277,10 +283,28 @@ func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gatewa
 		backendErr = err
 	}
 	result, err := w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
-	if backendErr != nil {
-		err = errors.Join(err, backendErr)
+	if filterErr != nil || backendErr != nil {
+		err = errors.Join(err, filterErr, backendErr)
 	}
 	return result, err
+}
+
+func (w *Writer) withdrawListenerFilters(ctx context.Context, identity cloud.Identity, observe func(context.Context) (GatewayInput, error)) error {
+	input, err := observe(ctx)
+	if err != nil || len(input.Node.Spec.RequestFilterSections) == 0 {
+		return err
+	}
+	if input.Node.Disposition != cloud.GraphWithdrawListenerFilters || input.Validate == nil {
+		return errors.New("invalid listener filter withdrawal authority")
+	}
+	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
+	result, err := w.Provider.ReconcileGatewayGraph(ctx, cloud.GatewayGraphSpec{
+		Identity: identity, Gateway: input.Node, ValidateMutation: input.Validate,
+	})
+	if err == nil {
+		err = result.Outcome.Validate()
+	}
+	return err
 }
 
 func (w *Writer) withdrawBackendClientCertificate(ctx context.Context, identity cloud.Identity, input GatewayInput) (cloud.GatewayGraphResult, error) {

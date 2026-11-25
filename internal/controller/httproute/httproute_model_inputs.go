@@ -307,6 +307,15 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			}
 		}
 	}
+	if r.Config.GatewayListenerFiltersEnabled() {
+		input.GatewayListenerRequestFilters = make(map[gatewayv1.SectionName]bool)
+		for i := range input.Gateway.Spec.Listeners {
+			listener := &input.Gateway.Spec.Listeners[i]
+			if gatewaycontroller.GatewayOwnsListenerRequestFilters(r.Config, input.Gateway.Namespace, listener) {
+				input.GatewayListenerRequestFilters[listener.Name] = true
+			}
+		}
+	}
 	var availability map[backendTLSRequirements]backendTLSAvailability
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {

@@ -180,6 +180,20 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			}
 		}
 	}
+	filters, err := r.observeListenerFilters(ctx, snapshot.gateway, snapshot.listeners, sets, snapshot.topology)
+	if err != nil {
+		return input, err
+	}
+	input.Node.Spec.RequestFilterSections = filters.ports
+	if input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolHTTP && input.Node.Spec.ScopedListeners != nil && len(filters.ports) != 0 {
+		spec := cloud.GatewaySpec{
+			Identity: input.Node.Spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP,
+			ListenerPort: input.Node.Spec.ListenerPort, ScopedListeners: []cloud.ScopedListener{},
+		}
+		input.ObserveListenerFilterWithdrawal = func(ctx context.Context) (graph.GatewayInput, error) {
+			return r.listenerFilterWithdrawalInput(ctx, snapshot, spec)
+		}
+	}
 	if (r.Config.BackendTLSPolicy || r.Config.FrontendClientValidation) && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
 			desired := snapshot.gateway.DeepCopy()
@@ -197,6 +211,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		}
 		if !sets.sameInputs(current) {
 			return errGatewayChanged
+		}
+		if err := r.validateListenerFilterInputs(ctx, snapshot, current, filters); err != nil {
+			return err
 		}
 		if !backendIdentity.Denied {
 			latest, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)

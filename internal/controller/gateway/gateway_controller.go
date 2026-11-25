@@ -303,24 +303,48 @@ func (r *Reconciler) reconcileGatewayGraph(
 		return ctrl.Result{Requeue: true}, nil
 	}
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
-	if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
-		var changed *graph.TLSAuthorizationChanged
-		if errors.As(err, &changed) {
+	trustUnavailable := errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable)
+	var changedTLS *graph.TLSAuthorizationChanged
+	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue
+	defer func() {
+		r.reportFrontendCAWithdrawal(scope.gateway, tlsIssues, graphResult.Gateway.ScopedTLSClosedPorts)
+	}()
+	if r.Config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(scope.gateway) &&
+		!errors.Is(err, errGatewayChanged) && !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+		topology, topologyErr := controller.StoredGatewayTopology(r.Config, scope.gateway)
+		listeners, listenerErr := SupportedListenersForConfig(r.Config, scope.gateway)
+		if topologyErr == nil && listenerErr == nil {
+			filters, filterErr := r.observeListenerFilters(ctx, scope.gateway, listeners, sets, topology)
+			if filterErr != nil && !trustUnavailable {
+				return ctrl.Result{}, filterErr
+			}
+			if filterErr != nil {
+				err = errors.Join(err, filterErr)
+			}
+			if trustUnavailable {
+				filters = filters.confirmedRejections(listeners)
+			}
+			defer func() {
+				r.applyListenerFilterStatus(scope.gateway, scope.original.Status, filters, graphResult.Gateway, changedTLS)
+			}()
+		}
+	}
+	if trustUnavailable {
+		if errors.As(err, &changedTLS) {
 			current, readErr := r.ObserveListenerSets(ctx, r.APIReader, scope.gateway)
 			if readErr != nil {
 				return ctrl.Result{}, errors.Join(err, readErr)
 			}
 			if len(current.sets) != 0 {
-				if reportErr := r.reportListenerSets(ctx, scope.gateway, current, graphResult, changed.Ports...); reportErr != nil {
+				if reportErr := r.reportListenerSets(ctx, scope.gateway, current, graphResult, changedTLS.Ports...); reportErr != nil {
 					return ctrl.Result{}, errors.Join(err, reportErr)
 				}
 			}
-			issues, readErr := r.listenerTLSIssues(ctx, scope.gateway, current, nil)
+			tlsIssues, readErr = r.listenerTLSIssues(ctx, scope.gateway, current, nil)
 			if readErr != nil {
 				return ctrl.Result{}, errors.Join(err, readErr)
 			}
-			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, issues, changed, true)
-			r.reportFrontendCAWithdrawal(scope.gateway, issues, graphResult.Gateway.ScopedTLSClosedPorts)
+			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, true)
 		}
 		return ctrl.Result{}, err
 	}
@@ -365,7 +389,6 @@ func (r *Reconciler) reconcileGatewayGraph(
 		// Address readback is independent of listener and route readiness.
 		r.observeAddressAssignment(scope.gateway, graphResult.Gateway, cluster)
 	}
-	var changedTLS *graph.TLSAuthorizationChanged
 	if !model.GatewayDisallowsListenerSets(scope.gateway) && !errors.Is(err, errGatewayChanged) {
 		statusResult := graphResult
 		var authorizationChange *graph.TLSAuthorizationChanged
@@ -378,7 +401,6 @@ func (r *Reconciler) reconcileGatewayGraph(
 			return ctrl.Result{}, err
 		}
 	}
-	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue
 	var keepGatewayProgrammed bool
 	if usesHTTPSProfile(r.Config, scope.gateway) {
 		var readErr error
@@ -388,7 +410,6 @@ func (r *Reconciler) reconcileGatewayGraph(
 		}
 		defer func() {
 			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, keepGatewayProgrammed)
-			r.reportFrontendCAWithdrawal(scope.gateway, tlsIssues, graphResult.Gateway.ScopedTLSClosedPorts)
 		}()
 	}
 	if terminatesTLS(decision.listener) {

@@ -123,7 +123,7 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	if listener.Hostname != nil && amphora.ValidateHostname(string(*listener.Hostname)) != nil {
 		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Listener hostname is unsupported")
 	}
-	if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
+	if listenerHasRequestFilters(listener) && !config.GatewayListenerFiltersEnabled() {
 		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Listener request filters are unsupported")
 	}
 	if err := validateRouteNamespacePolicy(listener); err != nil {
@@ -204,7 +204,8 @@ func listenerFamily(listener *gatewayv1.Listener) gatewayv1.ProtocolType {
 // RequiresHTTPListenerScope identifies HTTP-family configurations that require
 // the frozen per-port ownership checkpoint before any route can program.
 func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gateway) bool {
-	if usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(gateway) {
+	if usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(gateway) ||
+		config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(gateway) {
 		return true
 	}
 	listeners, err := HTTPListeners(gateway)

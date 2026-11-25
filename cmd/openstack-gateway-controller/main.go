@@ -119,7 +119,7 @@ func run(ctx context.Context) error {
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy bool
 	var httpRequestMirror bool
-	var httpCORS bool
+	var httpCORS, listenerFilters bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
 	var httpBackendRequestFilters bool
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination, tcpTLSMixedMode bool
@@ -151,6 +151,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
 	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia L7 HTTP request mirroring capability")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
+	flag.BoolVar(&listenerFilters, "octavia-listener-request-filters", false, "serve Experimental Gateway listener request filters via the Octavia listener_request_filters_v1 capability")
 	flag.BoolVar(&httpCORS, "octavia-request-cors", false, "serve rule-level HTTPRoute CORS via the Octavia request_cors_v1 capability")
 	flag.BoolVar(&responseHeaderModifier, "octavia-response-header-modifier", false, "use the advertised Octavia L7 response header operations capability")
 	flag.BoolVar(&grpcContentType, "octavia-grpc-content-type", false, "use the advertised Octavia native gRPC Content-Type rule for GRPCRoutes")
@@ -216,6 +217,7 @@ func run(ctx context.Context) error {
 		HTTPRequestPolicy:             httpRequestPolicy,
 		HTTPRequestMirror:             httpRequestMirror,
 		HTTPCORS:                      httpCORS,
+		GatewayListenerFilters:        listenerFilters,
 		BackendRequestFilters:         httpBackendRequestFilters,
 		HTTPRequestRedirect:           httpRequestRedirect,
 		HTTPMethodMatch:               httpMethodMatch,

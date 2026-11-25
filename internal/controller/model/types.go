@@ -51,11 +51,14 @@ type Input struct {
 	XBackends              []XBackendObservation
 	Gateway                *gatewayv1.Gateway
 	ListenerSetSections    map[types.NamespacedName][]gatewayv1.Listener `json:"-"`
-	Routes                 []gatewayv1.HTTPRoute
-	Namespaces             []corev1.Namespace
-	Services               []corev1.Service
-	EndpointSlices         []discoveryv1.EndpointSlice
-	ReferenceGrants        []gatewayv1.ReferenceGrant
+	// GatewayListenerRequestFilters records native Gateway sections whose filters
+	// are enforced by the caller's Gateway profile.
+	GatewayListenerRequestFilters map[gatewayv1.SectionName]bool `json:"-"`
+	Routes                        []gatewayv1.HTTPRoute
+	Namespaces                    []corev1.Namespace
+	Services                      []corev1.Service
+	EndpointSlices                []discoveryv1.EndpointSlice
+	ReferenceGrants               []gatewayv1.ReferenceGrant
 }
 
 // Source identifies the exact Kubernetes revision that contributed a model.

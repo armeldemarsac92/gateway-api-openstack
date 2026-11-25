@@ -365,6 +365,52 @@ func TestClusterTrustBundleAPIErrorPreservesProgrammedGraph(t *testing.T) {
 	}
 }
 
+func TestClusterTrustBundleBackendReadFailureWithdrawsOnlyConfirmedListenerFilters(t *testing.T) {
+	w := writerFixture()
+	request := writerRequest()
+	rejections := map[int][]cloud.ListenerRequestFilterSection{443: {{Hostname: "protected.example.test", Reject: true}}}
+	confirmed := false
+	stale := errors.New("listener authorization changed")
+	observe := w.Gateway
+	w.Gateway = gatewaySourceFunc(func(ctx context.Context, req Request) (GatewayInput, error) {
+		input, err := observe.ObserveGatewayGraph(ctx, req)
+		input.ObserveListenerFilterWithdrawal = func(context.Context) (GatewayInput, error) {
+			if !confirmed {
+				return GatewayInput{}, nil
+			}
+			return GatewayInput{
+				Node: cloud.GatewayGraphNode{
+					Disposition: cloud.GraphWithdrawListenerFilters,
+					Spec:        cloud.GatewaySpec{Identity: request.Identity, RequestFilterSections: rejections},
+				},
+				Validate: func(context.Context) error { return stale },
+			}, nil
+		}
+		return input, err
+	})
+	w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
+		return RouteInputs{}, backendtls.ErrClusterTrustBundleUnavailable
+	})
+	calls := 0
+	w.Provider = graphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+		calls++
+		if spec.Identity != request.Identity || spec.Gateway.Disposition != cloud.GraphWithdrawListenerFilters ||
+			len(spec.Routes) != 0 || spec.HTTPSPolicyAuthority != nil || !reflect.DeepEqual(spec.Gateway.Spec.RequestFilterSections, rejections) {
+			t.Fatalf("unexpected listener filter withdrawal authority: %#v", spec)
+		}
+		return cloud.GatewayGraphResult{}, spec.ValidateMutation(ctx)
+	})
+	_, err := w.ReconcileGraph(t.Context(), request)
+	if calls != 0 || !errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		t.Fatalf("unconfirmed denial reached the provider: calls %d, error %v", calls, err)
+	}
+	confirmed = true
+	_, err = w.ReconcileGraph(t.Context(), request)
+	if calls != 1 || !errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) || !errors.Is(err, stale) {
+		t.Fatalf("withdrawing a listener denial lost the retry or fence: calls %d, error %v", calls, err)
+	}
+}
+
 func TestClusterTrustBundleBackendReadFailureAllowsConfirmedHTTPSWithdrawal(t *testing.T) {
 	w := writerFixture()
 	w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
