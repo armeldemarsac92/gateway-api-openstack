@@ -96,7 +96,8 @@ type GatewayTelemetry struct {
 	ServicePort             int
 	ServiceName             string
 	SpanName                string
-	Sampling                *TelemetrySampling `json:",omitempty"`
+	Sampling                *TelemetrySampling   `json:",omitempty"`
+	Attributes              []TelemetryAttribute `json:",omitempty"`
 	Members                 []Member
 	MemberSubnetID          string
 	BackendSecurityGroupIDs []string

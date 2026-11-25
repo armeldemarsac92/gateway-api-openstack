@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -29,15 +30,17 @@ import (
 )
 
 const (
-	GatewayCapabilityListenerOTLPTracing  = "listener_otlp_tracing_v1"
-	GatewayCapabilityListenerOTLPSampling = "listener_otlp_sampling_v1"
+	GatewayCapabilityListenerOTLPTracing        = "listener_otlp_tracing_v1"
+	GatewayCapabilityListenerOTLPSampling       = "listener_otlp_sampling_v1"
+	GatewayCapabilityListenerOTLPSpanAttributes = "listener_otlp_span_attributes_v1"
 )
 
 type ListenerOTLPTracing struct {
-	CollectorPoolID string                   `json:"collector_pool_id"`
-	ServiceName     string                   `json:"service_name"`
-	SpanName        string                   `json:"span_name"`
-	Sampling        *cloud.TelemetrySampling `json:"sampling,omitempty"`
+	CollectorPoolID string                     `json:"collector_pool_id"`
+	ServiceName     string                     `json:"service_name"`
+	SpanName        string                     `json:"span_name"`
+	Sampling        *cloud.TelemetrySampling   `json:"sampling,omitempty"`
+	Attributes      []cloud.TelemetryAttribute `json:"attributes,omitempty"`
 }
 
 type ListenerOTLPTracingObservation struct {
@@ -56,11 +59,11 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 	if len(raw) == 0 {
 		return observed
 	}
-	// Decode sampling separately so an unreadable rate cannot hide the
-	// collector identity needed to withdraw an owned export.
+	// A malformed extension must leave the collector identity available for withdrawal.
 	var wire *struct {
 		ListenerOTLPTracing
-		RawSampling json.RawMessage `json:"sampling"`
+		RawSampling   json.RawMessage `json:"sampling"`
+		RawAttributes json.RawMessage `json:"attributes"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -74,6 +77,13 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 			return observed
 		}
 		observed.Value = value
+		if len(wire.RawAttributes) != 0 {
+			var valid bool
+			value.Attributes, valid = decodeTelemetryAttributes(wire.RawAttributes)
+			if !valid {
+				return observed
+			}
+		}
 		if len(wire.RawSampling) != 0 {
 			var sampling struct {
 				Base   cloud.TelemetryRate `json:"base"`
@@ -97,6 +107,23 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 	}
 	observed.Readable = true
 	return observed
+}
+
+func decodeTelemetryAttributes(raw json.RawMessage) ([]cloud.TelemetryAttribute, bool) {
+	var rows []map[string]string
+	if err := jsonv2.Unmarshal(raw, &rows); err != nil || rows == nil {
+		return nil, false
+	}
+	attrs := make([]cloud.TelemetryAttribute, 0, len(rows))
+	for _, row := range rows {
+		// Each entry must contain the name, the discriminator and just its chosen value.
+		if len(row) != 3 {
+			return nil, false
+		}
+		attrs = append(attrs, cloud.TelemetryAttribute{Name: row["name"], SourceType: row["source_type"],
+			LiteralValue: row["literal_value"], HeaderName: row["header_name"], AttributeKey: row["attribute_key"]})
+	}
+	return cloud.CanonicalTelemetryAttributes(attrs)
 }
 
 type listenerOTLPTracingUpdate struct {
