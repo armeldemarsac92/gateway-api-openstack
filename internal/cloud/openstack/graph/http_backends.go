@@ -107,7 +107,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 				policy := &backend.policies[i]
 				if auth := policy.externalAuth; auth != nil {
 					port := httpURLPolicyRoutePort(desired, backend)
-					if id := actual.routeAuthPools[listenerAuthPoolName(port, *auth)]; id != "" {
+					if id := actual.routeAuthPools[routeAuthorizerPoolName(port, *auth, desired.spec.Gateway.BackendClientCertificate.Reference)]; id != "" {
 						policy.resolvedExternalAuth = policyAuthorizer(id, *auth)
 					}
 				}

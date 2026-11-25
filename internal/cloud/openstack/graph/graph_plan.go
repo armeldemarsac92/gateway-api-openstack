@@ -895,6 +895,13 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			required = append(required, octavia.GatewayCapabilityHTTPSListenerIsolation)
 		}
 	case graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
+	case graphListenerFiltersMutation:
+		auth := step.listenerFilters.grpcAuth
+		if auth == nil {
+			return step, nil
+		}
+		fixed = false
+		required = append(required, grpcAuthorizerCapabilities(auth.BackendTLS)...)
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
 		reopensAuthenticatedH2Cookie = part.authenticatedH2Cookie() && !part.backendTLS.denies() &&
@@ -908,9 +915,12 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			if step.route.policy.resolvedExternalAuth == nil {
 				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for the HTTPRoute authorization pool"))
 			}
-			required = append(required, octavia.GatewayCapabilityPolicyExternalAuth)
+			required = append(required, routeAuthorizerCapabilities(*step.route.policy.externalAuth, step.route.policy.weighted)...)
 		}
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
+		if fixed && (part.weightedTargets != nil || step.route.weightedTargets != nil) {
+			required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets)
+		}
 		if requestMirrorWriteRequiresCapability(step.route) {
 			mirrorCapabilities = requestMirrorCapabilities(part.spec.GRPC)
 			required = append(required, mirrorCapabilities...)
@@ -974,9 +984,6 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	}
 	if fixed {
 		required = append(required, octavia.GatewayCapabilityFixedHTTPResponses)
-		if p.weightedHTTPTargets {
-			required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets)
-		}
 	}
 	if len(required) == 0 {
 		return p.preparePolicyCreation(ctx, actual, desired, step)
@@ -1194,7 +1201,11 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		}
 		return nil
 	case graphListenerFiltersMutation:
-		return p.executeListenerFilterMutation(ctx, desired, actual, step)
+		err = p.executeListenerFilterMutation(ctx, desired, actual, step)
+		if auth := step.listenerFilters.grpcAuth; auth == nil || auth.BackendTLS == nil || step.listenerFilters.claimCA {
+			return err
+		}
+		step.redactTLSError = true
 	case graphCreateListener:
 		tags, tagErr := desired.identity.GatewayTags(roleListener)
 		if tagErr != nil {

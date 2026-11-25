@@ -143,6 +143,25 @@ func routeBackendTLSServices(route *gatewayv1.HTTPRoute) map[types.NamespacedNam
 	return keys
 }
 
+func (r *Reconciler) backendTLSPolicyServices(route *gatewayv1.HTTPRoute) map[types.NamespacedName]struct{} {
+	keys := routeBackendTLSServices(route)
+	for _, rule := range route.Spec.Rules {
+		if auth := r.grpcAuthorizerForRule(route, rule); auth != nil {
+			key, _ := model.BackendServiceReference(route.Namespace, auth.BackendRef)
+			keys[key] = struct{}{}
+		}
+	}
+	return keys
+}
+
+func (r *Reconciler) grpcAuthorizerForRule(route *gatewayv1.HTTPRoute, rule gatewayv1.HTTPRouteRule) *model.HTTPExternalAuth {
+	if !r.Config.RouteExternalAuthGRPCEnabled() || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || !model.HasHTTPRouteExternalAuth(rule) {
+		return nil
+	}
+	auth, _ := model.NormalizeHTTPRouteExternalAuth(rule, false, true, r.Config.WeightedHTTPTargets)
+	return auth
+}
+
 func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager) error {
 	status := &backendTLSPolicyStatusReconciler{routes: r}
 	policySpec := builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())
@@ -161,7 +180,7 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 		var services map[types.NamespacedName]struct{}
 		switch route := object.(type) {
 		case *gatewayv1.HTTPRoute:
-			services = routeBackendTLSServices(route)
+			services = r.backendTLSPolicyServices(route)
 		case *gatewayv1.GRPCRoute:
 			services = routeBackendTLSServices(model.ProjectGRPCRoute(route))
 		}
@@ -251,7 +270,7 @@ func (r *Reconciler) policyRequestsForRoutes(ctx context.Context, requests []rec
 			}
 			continue
 		}
-		for key := range routeBackendTLSServices(&route) {
+		for key := range r.backendTLSPolicyServices(&route) {
 			services[key] = struct{}{}
 		}
 	}

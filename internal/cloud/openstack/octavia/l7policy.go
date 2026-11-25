@@ -238,7 +238,7 @@ type L7PolicyObservation struct {
 	HTTPRequestPolicy            *cloud.HTTPRequestPolicy
 	HTTPRequestPolicyReported    bool
 	HTTPRequestPolicyPresent     bool
-	ExternalAuth                 *ListenerHTTPExternalAuth
+	ExternalAuth                 *PolicyExternalAuth
 	ExternalAuthReported         bool
 	ExternalAuthPresent          bool
 	TargetRequestFiltersPresent  bool
@@ -505,7 +505,7 @@ type PolicyCreateOpts struct {
 	InitialRules             []l7policies.CreateRuleOpts
 	RequestCORS              *cloud.HTTPCORS
 	HTTPRequestPolicy        *cloud.HTTPRequestPolicy
-	ExternalAuth             *ListenerHTTPExternalAuth
+	ExternalAuth             *PolicyExternalAuth
 	RequestMirrors           []HTTPRequestMirror
 }
 

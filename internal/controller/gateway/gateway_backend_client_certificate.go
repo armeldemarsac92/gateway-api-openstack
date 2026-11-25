@@ -155,6 +155,12 @@ func (r *Reconciler) observeBackendClientCertificateWithdrawal(ctx context.Conte
 	}, nil
 }
 
+// BackendClientCertificateForGateway observes the same authorized client identity used by the Gateway writer.
+func (r *Reconciler) BackendClientCertificateForGateway(ctx context.Context, gateway *gatewayv1.Gateway) cloud.BackendClientCertificate {
+	certificate, _, _ := r.observeBackendClientCertificate(ctx, gateway)
+	return certificate
+}
+
 func (r *Reconciler) observeBackendClientCertificate(ctx context.Context, gateway *gatewayv1.Gateway) (cloud.BackendClientCertificate, gatewayv1.GatewayConditionReason, string) {
 	if BackendClientCertificateRef(gateway) == nil {
 		return cloud.BackendClientCertificate{}, "", ""

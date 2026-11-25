@@ -860,7 +860,7 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 			seenAuth := make(map[string]bool)
 			for _, policy := range backend.policies {
 				if auth := policy.externalAuth; auth != nil && !deniedPorts[port] {
-					name := listenerAuthPoolName(port, *auth)
+					name := routeAuthorizerPoolName(port, *auth, desired.spec.Gateway.BackendClientCertificate.Reference)
 					if !seenAuth[name] {
 						routes = append(routes, cloud.RouteSpec{Identity: route.spec.Identity, Members: auth.Members, MemberSubnetID: auth.MemberSubnetID,
 							BackendSecurityGroupIDs: auth.BackendSecurityGroups, ScopedListenerPorts: []int{port}})
@@ -1462,7 +1462,7 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 		owners[index].expectsHTTPParts = len(route.httpParts) != 0
 		recordHTTPFilterPorts := func(part desiredRoute) {
 			port := httpURLPolicyRoutePort(d, part)
-			if slices.ContainsFunc(part.policies, routeExternalAuthPolicy.required) && !slices.Contains(owners[index].routeExternalAuthPorts, port) {
+			if slices.ContainsFunc(part.policies, func(policy desiredPolicy) bool { return policy.externalAuth != nil }) && !slices.Contains(owners[index].routeExternalAuthPorts, port) {
 				owners[index].routeExternalAuthPorts = append(owners[index].routeExternalAuthPorts, port)
 			}
 			if slices.ContainsFunc(part.policies, requestCORSPolicy.required) && !slices.Contains(owners[index].requestCORSPorts, port) {

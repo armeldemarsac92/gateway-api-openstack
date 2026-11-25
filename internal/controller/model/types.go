@@ -44,6 +44,7 @@ type Input struct {
 	HTTPRequestPolicy      bool
 	HTTPRequestMirror      bool
 	RouteExternalAuth      bool
+	RouteExternalAuthGRPC  bool
 	CheckRouteExternalAuth bool
 	WeightedHTTPTargets    bool
 	HTTPCORS               bool

@@ -49,7 +49,7 @@ type observedRoutePolicy struct {
 	requestRedirectPresent   bool
 	requestURLRewrite        *octavia.RequestURLRewrite
 	requestPolicy            *cloud.HTTPRequestPolicy
-	externalAuth             *octavia.ListenerHTTPExternalAuth
+	externalAuth             *octavia.PolicyExternalAuth
 	externalAuthPresent      bool
 	externalAuthReported     bool
 	externalAuthTagged       bool

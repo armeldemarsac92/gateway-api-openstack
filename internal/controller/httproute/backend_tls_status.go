@@ -94,7 +94,7 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	gateways := map[types.NamespacedName]*gatewayv1.Gateway{}
 	for i := range routes {
 		route := &routes[i]
-		services := routeBackendTLSServices(route)
+		services := r.routes.backendTLSPolicyServices(route)
 		if !route.DeletionTimestamp.IsZero() || !slices.ContainsFunc(targets, func(key types.NamespacedName) bool {
 			_, used := services[key]
 			return used
@@ -149,10 +149,14 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		if consumer.selection == nil {
 			continue
 		}
-		requirements := backendTLSRequirements{requireH2: consumer.requiresHTTP2, requireSAN: requireSAN, systemCA: systemCA}
+		requirements := backendTLSRequirements{requireH2: consumer.requiresHTTP2, requireSAN: requireSAN, systemCA: systemCA, grpcAuthorizer: consumer.grpcAuthorizer}
 		if _, checked := availability[requirements]; !checked &&
 			consumer.selection.Accepted.Status == metav1.ConditionTrue && consumer.supportedProtocol {
-			availability[requirements] = r.routes.backendTLSAvailability(ctx, requirements)
+			if requirements.grpcAuthorizer {
+				availability[requirements] = r.grpcAuthorizerTLSAvailability(ctx, consumer.selection.Validation)
+			} else {
+				availability[requirements] = r.routes.backendTLSAvailability(ctx, requirements)
+			}
 		}
 		ancestors[key] = backendTLSPolicyConditions{
 			accepted:     availability[requirements].apply(consumer.selection.Accepted, consumer.supportedProtocol, requireSAN, systemCA),
@@ -241,6 +245,16 @@ func (r *backendTLSPolicyStatusReconciler) tcpBackendTLSAvailability(ctx context
 	}
 }
 
+func (r *backendTLSPolicyStatusReconciler) grpcAuthorizerTLSAvailability(ctx context.Context, validation *backendtls.Validation) backendTLSAvailability {
+	probe := r.routes.RouteExternalAuthGRPCAvailable
+	if probe == nil || validation == nil {
+		return backendTLSUnknown
+	}
+	tls := validation.CloudValidation()
+	tls.RequireH2 = true
+	return discoverBackendTLSAvailability(ctx, func(ctx context.Context) (bool, error) { return probe(ctx, tls, false) })
+}
+
 func mergeBackendTLSConsumer(ancestors map[types.NamespacedName]backendTLSPolicyConditions, key types.NamespacedName, conditions backendTLSPolicyConditions) {
 	if prior, exists := ancestors[key]; exists {
 		conditions.accepted = backendtls.LeastSatisfiedCondition(prior.accepted, conditions.accepted)
@@ -253,6 +267,7 @@ type backendTLSConsumer struct {
 	selection         *backendtls.PolicyResult
 	supportedProtocol bool
 	requiresHTTP2     bool
+	grpcAuthorizer    bool
 }
 
 func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Context, policy *gatewayv1.BackendTLSPolicy, gateway *gatewayv1.Gateway, targets []types.NamespacedName, peers []gatewayv1.HTTPRoute) (backendTLSConsumer, error) {
@@ -272,7 +287,7 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 		if _, eligible := admission.eligible[routeKey(route)]; !eligible {
 			continue
 		}
-		services := routeBackendTLSServices(route)
+		services := r.routes.backendTLSPolicyServices(route)
 		usesTarget := false
 		for _, key := range targets {
 			if _, used := services[key]; !used {
@@ -295,6 +310,7 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 			return backendTLSConsumer{}, err
 		}
 	}
+	services := make(map[types.NamespacedName]*corev1.Service, len(consumers))
 	for key, sources := range consumers {
 		authorized := false
 		for consumer := range sources {
@@ -314,14 +330,36 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 			continue
 		}
 		input.Services = append(input.Services, service)
+		services[key] = &service
 	}
-	if err := graph.CollectBackendTLSInputs(ctx, r.routes.APIReader, &input, nil, r.routes.Config.ClusterTrustBundles); err != nil {
+	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
+	if err := tlsObserver.CollectServiceInputs(ctx, &input, nil); err != nil {
 		return backendTLSConsumer{}, err
 	}
 	result := backendTLSConsumer{supportedProtocol: true}
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		for _, rule := range route.Spec.Rules {
+			if auth := r.routes.grpcAuthorizerForRule(route, rule); auth != nil {
+				key, _ := model.BackendServiceReference(route.Namespace, auth.BackendRef)
+				service := services[key]
+				if service != nil && service.DeletionTimestamp.IsZero() &&
+					model.BackendReferenceAllowedFor(model.HTTPRouteKind, route.Namespace, key, input.ReferenceGrants) {
+					port, diagnostic := model.ResolveTCPServicePort(service, auth.BackendRef.Port)
+					if diagnostic == nil {
+						selection, err := tlsObserver.Observe(ctx, service, port, nil)
+						if err != nil {
+							return backendTLSConsumer{}, err
+						}
+						for _, selection := range selection.Policies {
+							if selection.UID == policy.UID && selection.Generation == policy.Generation {
+								result.selection = &selection
+								result.requiresHTTP2, result.grpcAuthorizer = true, true
+							}
+						}
+					}
+				}
+			}
 			for _, backend := range model.ResolveBackendsAndMirrors(route, rule, input) {
 				if backend.Weight == 0 {
 					continue

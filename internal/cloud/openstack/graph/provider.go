@@ -83,6 +83,7 @@ type ProviderConfig struct {
 	HTTPRequestPolicy      bool
 	HTTPRequestMirror      bool
 	RouteExternalAuth      bool
+	RouteExternalAuthGRPC  bool
 	HTTPCORS               bool
 	BackendRequestFilters  bool
 	HTTPMethodMatch        bool
@@ -125,6 +126,7 @@ type Provider struct {
 	httpRequestPolicy      bool
 	httpRequestMirror      bool
 	routeExternalAuth      bool
+	routeExternalAuthGRPC  bool
 	httpCORS               bool
 	backendRequestFilters  bool
 	httpMethodMatch        bool
@@ -177,6 +179,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		httpRequestPolicy:      cfg.HTTPRequestPolicy,
 		httpRequestMirror:      cfg.HTTPRequestMirror,
 		routeExternalAuth:      cfg.RouteExternalAuth,
+		routeExternalAuthGRPC:  cfg.RouteExternalAuthGRPC,
 		httpCORS:               cfg.HTTPCORS,
 		backendRequestFilters:  cfg.BackendRequestFilters,
 		httpRequestRedirect:    cfg.HTTPRequestRedirect,
@@ -244,11 +247,20 @@ func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
 
 // RouteExternalAuthAvailable reports whether the regional policy API can
 // authorize a request on its selected HTTP route before forwarding it.
-func (p *Provider) RouteExternalAuthAvailable(ctx context.Context) (bool, error) {
+func (p *Provider) RouteExternalAuthAvailable(ctx context.Context, weighted bool) (bool, error) {
 	if !p.routeExternalAuth || !p.fixedHTTPResponses {
 		return false, nil
 	}
-	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityPolicyExternalAuth)
+	return p.amphoraCapabilityAvailable(ctx, routeAuthorizerCapabilities(cloud.ListenerExternalAuth{}, weighted)...)
+}
+
+// RouteExternalAuthGRPCAvailable verifies the selected authorizer transport.
+func (p *Provider) RouteExternalAuthGRPCAvailable(ctx context.Context, tls *cloud.BackendTLSValidation, weighted bool) (bool, error) {
+	if !p.routeExternalAuthGRPC || !p.fixedHTTPResponses ||
+		tls != nil && (!p.backendTLSPolicy || !p.poolALPN || tls.Trust == cloud.BackendTLSTrustReference && p.backendCA == nil) {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, routeAuthorizerCapabilities(cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC, BackendTLS: tls}, weighted)...)
 }
 
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {

@@ -101,8 +101,12 @@ type Reconciler struct {
 	XBackendTLSAvailable func(context.Context, bool, bool) (bool, error)
 	// BackendH2CAvailable checks regional support for an XBackend using h2c.
 	BackendH2CAvailable func(context.Context) (bool, error)
+	// BackendClientCertificateForGateway resolves the Gateway identity required by TLS authorizers.
+	BackendClientCertificateForGateway func(context.Context, *gatewayv1.Gateway) cloud.BackendClientCertificate
 	// RouteExternalAuthAvailable checks regional HTTP L7 policy authorization support.
-	RouteExternalAuthAvailable func(context.Context) (bool, error)
+	RouteExternalAuthAvailable func(context.Context, bool) (bool, error)
+	// RouteExternalAuthGRPCAvailable checks regional gRPC authorization and its selected transport.
+	RouteExternalAuthGRPCAvailable func(context.Context, *cloud.BackendTLSValidation, bool) (bool, error)
 	// XBackendClientCertificates resolves identities from the operator's XBackend enrollment.
 	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.

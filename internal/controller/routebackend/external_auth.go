@@ -41,7 +41,12 @@ func ResolveHTTPExternalAuth(ctx context.Context, reader client.Reader, kind gat
 	if diagnostic != nil || err != nil {
 		return auth, diagnostic, err
 	}
-	members, diagnostic, err := TransportMembers(ctx, reader, service, filter.BackendRef.Port, corev1.ProtocolTCP, topology, nil, false)
+	return ResolveExternalAuthMembers(ctx, reader, service, port, auth, topology)
+}
+
+// ResolveExternalAuthMembers uses an already authorized Service and TCP port.
+func ResolveExternalAuthMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *corev1.ServicePort, auth cloud.ListenerExternalAuth, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *model.Diagnostic, error) {
+	members, diagnostic, err := TransportMembers(ctx, reader, service, new(gatewayv1.PortNumber(port.Port)), corev1.ProtocolTCP, topology, nil, false)
 	if err != nil {
 		return auth, nil, err
 	}
@@ -55,8 +60,8 @@ func ResolveHTTPExternalAuth(ctx context.Context, reader client.Reader, kind gat
 	return auth, nil, nil
 }
 
-// ObserveHTTPExternalAuthService resolves the Service and cleartext HTTP port
-// without requiring the Gateway's member topology or ready EndpointSlices.
+// ObserveHTTPExternalAuthService resolves the Service and port without
+// requiring the Gateway's member topology or ready EndpointSlices.
 func ObserveHTTPExternalAuthService(ctx context.Context, reader client.Reader, kind gatewayv1.Kind, namespace string, filter model.HTTPExternalAuth) (*corev1.Service, *corev1.ServicePort, *model.Diagnostic, error) {
 	key, _ := model.BackendServiceReference(namespace, filter.BackendRef)
 	if key.Namespace != namespace {
@@ -77,6 +82,13 @@ func ObserveHTTPExternalAuthService(ctx context.Context, reader client.Reader, k
 	}
 	if !service.DeletionTimestamp.IsZero() || service.UID == "" {
 		return nil, nil, externalAuthReferenceIssue("Invalid", fmt.Sprintf("ExternalAuth backend Service %s has no live identity", key)), nil
+	}
+	if filter.Config.Protocol == cloud.ExternalAuthProtocolGRPC {
+		port, diagnostic := model.ResolveTCPServicePort(&service, filter.BackendRef.Port)
+		if diagnostic != nil {
+			return nil, nil, externalAuthReferenceIssue(gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message), nil
+		}
+		return &service, port, nil, nil
 	}
 	port, diagnostic := model.ResolveServicePort(&service, filter.BackendRef.Port, false)
 	if diagnostic != nil {

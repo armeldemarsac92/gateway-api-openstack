@@ -122,14 +122,25 @@ Enable the `octavia-http-request-mirror` controller component after the regional
 
 Enable `--octavia-http-route-external-auth` with `--gateway-api-channel=experimental` and
 `--octavia-fixed-http-responses`. The regional Amphora provider must advertise
-`l7policy_http_external_auth_v1` to program the filter. The HTTPRoute rule
-must use an HTTP authorization Service and omit request body forwarding.
+`l7policy_http_external_auth_v1` to program the filter. This flag uses a
+cleartext HTTP authorization Service and requires body forwarding to be disabled.
 An authorization response of HTTP 200 allows the request to reach the origin.
 The rule can specify an authorization path prefix and request and response header allowlists.
 
+For an Envoy v3 gRPC authorization Service, enable
+`--octavia-http-route-external-auth-grpc` with the same Experimental and
+fixed-response flags. Amphora must advertise `l7policy_grpc_external_auth_v1`.
+Cleartext authorizers require regional `backend_h2c_v1` support. To use an
+authorizer with BackendTLSPolicy, enable `--octavia-backend-tls-policy` and use
+Octavia API microversion 2.24 or later with regional hostname validation and
+mandatory h2 ALPN. The rule uses the policy's trust and hostname, and the
+Gateway backend client certificate when configured. An empty gRPC
+request header allowlist sends all request headers. A populated list sends only
+its entries. Omit `forwardBody` or set `maxSize` to zero.
+
 Use ExternalAuth as the only filter on the rule, with unfiltered Service
 backendRefs. More than one origin backend also requires
-`--octavia-weighted-http-targets`. The authorization Service uses cleartext HTTP.
+`--octavia-weighted-http-targets`.
 Grant a cross-namespace authorization Service reference from the HTTPRoute's
 namespace with `from.kind: HTTPRoute` in a ReferenceGrant in the Service namespace.
 

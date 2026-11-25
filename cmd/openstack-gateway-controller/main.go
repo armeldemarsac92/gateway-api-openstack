@@ -126,7 +126,7 @@ func run(ctx context.Context) error {
 	var xBackendSessionPersistence bool
 	var routeSessionPersistence bool
 	var httpRequestMirror bool
-	var routeExternalAuth bool
+	var routeExternalAuth, routeExternalAuthGRPC bool
 	var httpCORS, listenerFilters bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
 	var httpBackendRequestFilters bool
@@ -182,6 +182,7 @@ func run(ctx context.Context) error {
 		return nil
 	})
 	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
+	flag.BoolVar(&routeExternalAuthGRPC, "octavia-http-route-external-auth-grpc", false, "use the advertised Octavia HTTPRoute Envoy gRPC external authorization capability")
 	flag.BoolVar(&routeExternalAuth, "octavia-http-route-external-auth", false, "use the advertised Octavia HTTPRoute HTTP external authorization capability")
 	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia HTTPRoute and GRPCRoute request mirroring capabilities")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
@@ -252,6 +253,7 @@ func run(ctx context.Context) error {
 		HTTPRequestPolicy:             httpRequestPolicy,
 		HTTPRequestMirror:             httpRequestMirror,
 		RouteExternalAuth:             routeExternalAuth,
+		RouteExternalAuthGRPC:         routeExternalAuthGRPC,
 		HTTPCORS:                      httpCORS,
 		GatewayListenerFilters:        listenerFilters,
 		BackendRequestFilters:         httpBackendRequestFilters,
@@ -334,6 +336,7 @@ func run(ctx context.Context) error {
 		HTTPRequestPolicy:      httpRequestPolicy,
 		HTTPRequestMirror:      httpRequestMirror,
 		RouteExternalAuth:      controllerConfig.RouteExternalAuthEnabled(),
+		RouteExternalAuthGRPC:  controllerConfig.RouteExternalAuthGRPCEnabled(),
 		HTTPCORS:               httpCORS,
 		BackendRequestFilters:  httpBackendRequestFilters,
 		HTTPRequestRedirect:    httpRequestRedirect,
@@ -403,26 +406,28 @@ func run(ctx context.Context) error {
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
-		ListenerSetObserver:            gatewayReconciler.ObserveListenerSets,
-		BackendTLSAvailable:            openStackProvider.BackendTLSAvailable,
-		BackendTLSSystemCAAvailable:    openStackProvider.BackendTLSSystemCAAvailable,
-		TCPBackendTLSSystemCAAvailable: openStackProvider.TCPBackendTLSSystemCAAvailable,
-		TelemetryBackendTLSAvailable:   openStackProvider.TelemetryBackendTLSAvailable,
-		BackendRetryBudgetAvailable:    openStackProvider.BackendRetryBudgetAvailable,
-		XBackendCookieAvailable:        openStackProvider.XBackendCookieAvailable,
-		XBackendHeaderAvailable:        openStackProvider.XBackendHeaderAvailable,
-		TCPBackendTLSAvailable:         openStackProvider.TCPBackendTLSAvailable,
-		TCPWeightedBackendTLSAvailable: openStackProvider.TCPWeightedBackendTLSAvailable,
-		GRPCBackendTLSAvailable:        openStackProvider.GRPCBackendTLSAvailable,
-		BackendTLSSANAvailable:         openStackProvider.BackendTLSSANAvailable,
-		XBackendTLSAvailable:           openStackProvider.XBackendTLSAvailable,
-		BackendH2CAvailable:            openStackProvider.BackendH2CAvailable,
-		RouteExternalAuthAvailable:     openStackProvider.RouteExternalAuthAvailable,
-		Client:                         manager.GetClient(),
-		Coordinator:                    graphCoordinator,
-		APIReader:                      manager.GetAPIReader(),
-		Recorder:                       eventRecorder,
-		Config:                         controllerConfig,
+		ListenerSetObserver:                gatewayReconciler.ObserveListenerSets,
+		BackendTLSAvailable:                openStackProvider.BackendTLSAvailable,
+		BackendTLSSystemCAAvailable:        openStackProvider.BackendTLSSystemCAAvailable,
+		TCPBackendTLSSystemCAAvailable:     openStackProvider.TCPBackendTLSSystemCAAvailable,
+		TelemetryBackendTLSAvailable:       openStackProvider.TelemetryBackendTLSAvailable,
+		BackendRetryBudgetAvailable:        openStackProvider.BackendRetryBudgetAvailable,
+		XBackendCookieAvailable:            openStackProvider.XBackendCookieAvailable,
+		XBackendHeaderAvailable:            openStackProvider.XBackendHeaderAvailable,
+		TCPBackendTLSAvailable:             openStackProvider.TCPBackendTLSAvailable,
+		TCPWeightedBackendTLSAvailable:     openStackProvider.TCPWeightedBackendTLSAvailable,
+		GRPCBackendTLSAvailable:            openStackProvider.GRPCBackendTLSAvailable,
+		BackendTLSSANAvailable:             openStackProvider.BackendTLSSANAvailable,
+		XBackendTLSAvailable:               openStackProvider.XBackendTLSAvailable,
+		BackendH2CAvailable:                openStackProvider.BackendH2CAvailable,
+		BackendClientCertificateForGateway: gatewayReconciler.BackendClientCertificateForGateway,
+		RouteExternalAuthAvailable:         openStackProvider.RouteExternalAuthAvailable,
+		RouteExternalAuthGRPCAvailable:     openStackProvider.RouteExternalAuthGRPCAvailable,
+		Client:                             manager.GetClient(),
+		Coordinator:                        graphCoordinator,
+		APIReader:                          manager.GetAPIReader(),
+		Recorder:                           eventRecorder,
+		Config:                             controllerConfig,
 	}
 	gatewayReconciler.AdmitsHTTPRouteListener = routeReconciler.AdmitsListener
 	if controllerConfig.XBackendClientCertificate {

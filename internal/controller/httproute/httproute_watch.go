@@ -226,7 +226,7 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 		if !managed {
 			continue
 		}
-		if r.Config.RouteExternalAuthEnabled() {
+		if r.Config.RouteExternalAuthEnabled() || r.Config.RouteExternalAuthGRPCEnabled() {
 			for _, rule := range route.Spec.Rules {
 				backends = append(backends, model.HTTPRouteExternalAuthReferences(rule)...)
 			}
@@ -345,7 +345,7 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	if r.retryBudgetPolicyServed && (r.Config.BackendRetryBudgetEnabled() || r.Config.XBackendSessionPersistenceEnabled()) {
 		setup.Watches(&gatewayx.XBackendTrafficPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForRetryBudget), builder.WithPredicates(r.retryBudgetRoutePredicate()))
 	}
-	if r.Config.BackendTLSPolicy || r.Config.RouteExternalAuthEnabled() && r.kind() == model.HTTPRouteKind {
+	if r.Config.BackendTLSPolicy || (r.Config.RouteExternalAuthEnabled() || r.Config.RouteExternalAuthGRPCEnabled()) && r.kind() == model.HTTPRouteKind {
 		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(r.backendTLSRoutePredicate()))
 	}
 	if r.Config.BackendTLSPolicy {

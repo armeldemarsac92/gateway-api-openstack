@@ -84,9 +84,14 @@ type ListenerRequestFilterSection struct {
 	Requests []ListenerExternalAuth
 }
 
-// ListenerExternalAuth describes an HTTP authorization Service resolved from
+const ExternalAuthProtocolGRPC = "GRPC"
+
+// ListenerExternalAuth describes an authorization Service resolved from
 // the referring Gateway or HTTPRoute.
 type ListenerExternalAuth struct {
+	// Protocol is empty for HTTP. Only HTTPRoute rules can select GRPC.
+	Protocol               string
+	BackendTLS             *BackendTLSValidation
 	ServiceUID             string
 	ServicePort            int
 	MemberSubnetID         string

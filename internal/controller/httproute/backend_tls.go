@@ -36,10 +36,11 @@ const (
 )
 
 type backendTLSRequirements struct {
-	requireH2  bool
-	requireSAN bool
-	xBackend   bool
-	systemCA   bool
+	requireH2      bool
+	requireSAN     bool
+	xBackend       bool
+	systemCA       bool
+	grpcAuthorizer bool
 }
 
 func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements backendTLSRequirements) backendTLSAvailability {
@@ -69,6 +70,10 @@ func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements ba
 	case requirements.requireH2:
 		discover = r.GRPCBackendTLSAvailable
 	}
+	return discoverBackendTLSAvailability(ctx, discover)
+}
+
+func discoverBackendTLSAvailability(ctx context.Context, discover func(context.Context) (bool, error)) backendTLSAvailability {
 	if discover == nil {
 		return backendTLSUnknown
 	}

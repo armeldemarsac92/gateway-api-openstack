@@ -20,15 +20,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/stretchr/testify/require"
 )
 
 func TestListenerFiltersValidateOctaviaHeaderSelection(t *testing.T) {
-	require.True(t, validAuthHeaders([]string{strings.Repeat("x", 256), "X-Identity", "Host", ":authority"}))
-	require.False(t, validAuthHeaders([]string{strings.Repeat("x", 257)}))
-	require.False(t, validAuthHeaders([]string{"X Identity"}))
-	require.False(t, validAuthHeaders([]string{"X-K"}))
-	require.Nil(t, normalizeAuthHeaders(nil))
-	require.Equal(t, []string{"host"}, normalizeAuthHeaders([]string{":authority", "Host"}))
-	require.Equal(t, []string{"authority", "host", "x-identity"}, normalizeAuthHeaders([]string{"X-Identity", "Host", "Authority"}))
+	require.True(t, cloud.ValidExternalAuthHeaders([]string{strings.Repeat("x", 256), "X-Identity", "Host", ":authority"}, true))
+	require.False(t, cloud.ValidExternalAuthHeaders([]string{strings.Repeat("x", 257)}, true))
+	require.False(t, cloud.ValidExternalAuthHeaders([]string{"X Identity"}, true))
+	require.False(t, cloud.ValidExternalAuthHeaders([]string{"X-K"}, true))
+	require.Nil(t, normalizeAuthHeaders(nil, true))
+	require.Equal(t, []string{"host"}, normalizeAuthHeaders([]string{":authority", "Host"}, true))
+	require.Equal(t, []string{"authority", "host", "x-identity"}, normalizeAuthHeaders([]string{"X-Identity", "Host", "Authority"}, true))
 }

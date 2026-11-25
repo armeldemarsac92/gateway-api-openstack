@@ -23,17 +23,26 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
-	"golang.org/x/net/http/httpguts"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 const GatewayCapabilityPolicyExternalAuth = "l7policy_http_external_auth_v1"
+const GatewayCapabilityPolicyExternalAuthGRPC = "l7policy_grpc_external_auth_v1"
 const policyExternalAuthField = "external_auth"
+
+// PolicyExternalAuth is the authorization filter attached to an L7 policy.
+type PolicyExternalAuth struct {
+	Protocol               string   `json:"protocol,omitempty"`
+	PoolID                 string   `json:"pool_id"`
+	PathPrefix             string   `json:"path_prefix,omitempty"`
+	AllowedRequestHeaders  []string `json:"allowed_request_headers,omitempty"`
+	AllowedResponseHeaders []string `json:"allowed_response_headers,omitempty"`
+}
 
 // PolicyExternalAuthUpdate distinguishes an explicit removal from an unrelated policy edit.
 type PolicyExternalAuthUpdate struct {
-	Value *ListenerHTTPExternalAuth
+	Value *PolicyExternalAuth
 }
 
 func (opts PolicyCreateOpts) supportsExternalAuth() bool {
@@ -47,26 +56,31 @@ func (opts PolicyCreateOpts) supportsExternalAuth() bool {
 
 func (update PolicyExternalAuthUpdate) write(body map[string]any) error {
 	if auth := update.Value; auth != nil && !auth.validPolicyAuth() {
-		return errors.New("invalid external_auth pool, path prefix or headers")
+		return errors.New("invalid external_auth protocol, pool or options")
 	}
 	body["l7policy"].(map[string]any)[policyExternalAuthField] = update.Value
 	return nil
 }
 
-func (auth ListenerHTTPExternalAuth) validPolicyAuth() bool {
+func (auth PolicyExternalAuth) validPolicyAuth() bool {
 	id, err := uuid.Parse(auth.PoolID)
 	if err != nil || id.String() != auth.PoolID || !cloud.ValidExternalAuthPathPrefix(auth.PathPrefix) {
 		return false
 	}
-	for _, headers := range [][]string{auth.AllowedRequestHeaders, auth.AllowedResponseHeaders} {
-		if len(headers) > 64 || slices.ContainsFunc(headers, func(name string) bool { return len(name) > 256 || !httpguts.ValidHeaderFieldName(name) }) {
+	switch auth.Protocol {
+	case "":
+	case cloud.ExternalAuthProtocolGRPC:
+		if auth.PathPrefix != "" || len(auth.AllowedResponseHeaders) != 0 {
 			return false
 		}
+	default:
+		return false
 	}
-	return true
+	return cloud.ValidExternalAuthHeaders(auth.AllowedRequestHeaders, auth.Protocol == cloud.ExternalAuthProtocolGRPC) &&
+		cloud.ValidExternalAuthHeaders(auth.AllowedResponseHeaders, false)
 }
 
-func readPolicyExternalAuth(raw json.RawMessage) *ListenerHTTPExternalAuth {
+func readPolicyExternalAuth(raw json.RawMessage) *PolicyExternalAuth {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil {
 		return nil
@@ -76,7 +90,12 @@ func readPolicyExternalAuth(raw json.RawMessage) *ListenerHTTPExternalAuth {
 			return nil
 		}
 	}
-	var auth ListenerHTTPExternalAuth
+	if string(fields["protocol"]) == `"GRPC"` {
+		if fields["path_prefix"] != nil || fields["allowed_response_headers"] != nil {
+			return nil
+		}
+	}
+	var auth PolicyExternalAuth
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&auth) != nil || !auth.validPolicyAuth() {

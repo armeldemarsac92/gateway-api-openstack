@@ -85,9 +85,10 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 		return result(outcome), err
 	}
 	type candidate struct {
-		graph observedRouteGraph
-		proof openstackidentity.RouteOwnerProof
-		role  routeResourceRole
+		graph    observedRouteGraph
+		proof    openstackidentity.RouteOwnerProof
+		role     routeResourceRole
+		grpcAuth bool
 	}
 	var closed []candidate
 	var blocked error
@@ -110,34 +111,48 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 			continue
 		}
 		proof, owned := identity.RouteOwner(pool.Tags, role.raw)
+		grpcAuth := isGRPCAuthPool(pool)
+		if grpcAuth {
+			validRole = !isListenerAuthPool(pool) && strings.HasPrefix(pool.Name, grpcAuthPoolNamePrefix) && pool.MonitorID == ""
+			owned = p.validatePoolParent(pool, lb.ID, rolePool, identity) == nil
+		}
 		if !validRole || !owned || pool.ProjectID != p.projectID || validateBoundPoolParent(pool, lb.ID, cloud.ListenerProtocolHTTP) != nil ||
 			i > 0 && inventory.Items[i-1].ID == pool.ID || i+1 < len(inventory.Items) && inventory.Items[i+1].ID == pool.ID {
 			blocked = errors.Join(blocked, fmt.Errorf("%w: TLS pool %s could not be proven for backend client certificate withdrawal", cloud.ErrOwnershipConflict, pool.ID))
 			continue
 		}
 		actual := observedRouteGraph{pool: &pool, backendTLS: tls}
-		if step := plan.withdrawal(true, xBackendOnly, actual); step != nil && step.poolAdmin != nil {
+		if step := plan.withdrawal(true, xBackendOnly || grpcAuth, actual); step != nil && step.poolAdmin != nil {
 			if !step.retry {
 				return apply(step)
 			}
 			// Retry ERROR pools after fresh, independently available withdrawals.
 			pending = true
 		}
-		closed = append(closed, candidate{graph: actual, proof: proof, role: role})
+		closed = append(closed, candidate{graph: actual, proof: proof, role: role, grpcAuth: grpcAuth})
 	}
 	for _, pool := range closed {
 		if pool.graph.pool.ProvisioningStatus != "ACTIVE" || !pool.graph.backendTLS.AdminObserved || pool.graph.pool.AdminStateUp {
 			pending = true
 			continue
 		}
-		owner := routeGraphOwner{identity: identity, recovery: &pool.proof}
-		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, &pool.graph, pool.role.backend); err != nil {
-			blocked = errors.Join(blocked, err)
-			continue
-		}
-		if err := pool.graph.validateScopedHTTPPoolChildren(); err != nil {
-			blocked = errors.Join(blocked, err)
-			continue
+		if pool.grpcAuth {
+			members, err := p.observeAuxiliaryHTTPPoolMembers(ctx, identity, *pool.graph.pool, grpcAuthPoolTag)
+			if err != nil {
+				blocked = errors.Join(blocked, err)
+				continue
+			}
+			pool.graph.members = members
+		} else {
+			owner := routeGraphOwner{identity: identity, recovery: &pool.proof}
+			if err := p.observeRoutePoolChildrenWithRole(ctx, owner, &pool.graph, pool.role.backend); err != nil {
+				blocked = errors.Join(blocked, err)
+				continue
+			}
+			if err := pool.graph.validateScopedHTTPPoolChildren(); err != nil {
+				blocked = errors.Join(blocked, err)
+				continue
+			}
 		}
 		if step := plan.withdrawal(true, false, pool.graph); step != nil {
 			return apply(step)
@@ -146,7 +161,7 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 	}
 	if pending {
 		for _, pool := range closed {
-			if step := plan.withdrawal(true, xBackendOnly, pool.graph); step != nil && step.retry {
+			if step := plan.withdrawal(true, xBackendOnly || pool.grpcAuth, pool.graph); step != nil && step.retry {
 				return apply(step)
 			}
 		}

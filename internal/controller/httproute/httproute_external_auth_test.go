@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/pkg/features"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 func TestHTTPRouteExternalAuthGrantAndEndpointChangesKeepPublicFallback(t *testing.T) {
@@ -145,7 +148,7 @@ func TestHTTPRouteExternalAuthRejectsUnsupportedCompositionAndRegion(t *testing.
 			assertRouteRequests(t, f.reconciler.enqueueRoutesForBackendTLSPolicy(t.Context(), policy), f.route)
 		}, "backend TLS is unsupported"},
 		{"unenrolled region", func(_ *testing.T, f *routeModelInputFixture) {
-			f.reconciler.RouteExternalAuthAvailable = func(context.Context) (bool, error) { return false, nil }
+			f.reconciler.RouteExternalAuthAvailable = func(context.Context, bool) (bool, error) { return false, nil }
 		}, "does not advertise"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -242,13 +245,177 @@ func TestHTTPRouteExternalAuthPreservesWeightedOrigins(t *testing.T) {
 	require.Equal(t, "authorize-uid", rule.Matches[0].ExternalAuth.ServiceUID)
 }
 
+func TestHTTPRouteGRPCExternalAuthIsOptInAndKeepsOtherRulesServing(t *testing.T) {
+	f, grant, _ := externalAuthFixture(t)
+	grpc := f.route.Spec.Rules[1].DeepCopy()
+	grpc.Matches[0].Path.Value = ptr.To("/grpc-auth")
+	auth := grpc.Filters[0].ExternalAuth
+	auth.ExternalAuthProtocol = gatewayv1.HTTPRouteExternalAuthGRPCProtocol
+	auth.HTTPAuthConfig = nil
+	auth.GRPCAuthConfig = &gatewayv1.GRPCAuthConfig{AllowedRequestHeaders: []string{"X-User", "authorization"}}
+	auth.ForwardBody = &gatewayv1.ForwardBodyConfig{MaxSize: 0}
+	f.route.Spec.Rules = append(f.route.Spec.Rules, *grpc)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	assertLocalRejection := func(paths ...string) {
+		t.Helper()
+		spec := f.observe(t).Nodes[0].Spec
+		var rejected []string
+		for _, rule := range spec.FixedHTTPRules {
+			for _, match := range rule.Matches {
+				rejected = append(rejected, match.PathValue)
+			}
+		}
+		require.ElementsMatch(t, paths, rejected)
+		require.True(t, slices.ContainsFunc(spec.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool {
+			return match.PathValue == "/" && match.ExternalAuth == nil
+		}))
+	}
+	assertLocalRejection("/grpc-auth")
+
+	f.reconciler.Config.RouteExternalAuthGRPC = true
+	f.reconciler.RouteExternalAuthGRPCAvailable = func(_ context.Context, tls *cloud.BackendTLSValidation, _ bool) (bool, error) {
+		require.Nil(t, tls)
+		return false, nil
+	}
+	assertLocalRejection("/grpc-auth")
+	key := client.ObjectKeyFromObject(f.route)
+	_, err := newTestReconciler(*f.reconciler, &recordingProvider{}).Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), key, f.route))
+	conditions := f.route.Status.Parents[0].Conditions
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)))
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionPartiallyInvalid)))
+
+	f.reconciler.RouteExternalAuthGRPCAvailable = func(context.Context, *cloud.BackendTLSValidation, bool) (bool, error) { return true, nil }
+	f.route.Spec.Rules[2].Filters[0].ExternalAuth.ForwardBody.MaxSize = 1024
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	assertLocalRejection("/grpc-auth")
+	f.route.Spec.Rules[2].Filters[0].ExternalAuth.ForwardBody.MaxSize = 0
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	snapshot := f.observe(t)
+	spec := snapshot.Nodes[0].Spec
+	require.Empty(t, spec.FixedHTTPRules)
+	matches := spec.HTTPBackends[0].Matches
+	i := slices.IndexFunc(matches, func(match cloud.HTTPPathMatch) bool { return match.PathValue == "/grpc-auth" })
+	require.GreaterOrEqual(t, i, 0)
+	protected := matches[i]
+	require.Equal(t, cloud.ExternalAuthProtocolGRPC, protected.ExternalAuth.Protocol)
+	require.Equal(t, []string{"authorization", "x-user"}, protected.ExternalAuth.AllowedRequestHeaders)
+	public := slices.IndexFunc(matches, func(match cloud.HTTPPathMatch) bool { return match.PathValue == "/" })
+	require.GreaterOrEqual(t, public, 0)
+	require.Less(t, protected.Precedence, matches[public].Precedence)
+
+	require.NoError(t, f.client.Delete(t.Context(), grant))
+	require.ErrorIs(t, snapshot.Validate(t.Context()), errHTTPRouteChanged)
+	assertLocalRejection("/private", "/grpc-auth")
+}
+
+func TestHTTPRouteGRPCExternalAuthWeightedLossPreservesSiblingRules(t *testing.T) {
+	f, _, _ := externalAuthFixture(t)
+	f.reconciler.Config.RouteExternalAuthGRPC, f.reconciler.Config.WeightedHTTPTargets = true, true
+	f.reconciler.RouteExternalAuthGRPCAvailable = func(_ context.Context, _ *cloud.BackendTLSValidation, weighted bool) (bool, error) {
+		return !weighted, nil
+	}
+	single := &f.route.Spec.Rules[1]
+	filter := single.Filters[0].ExternalAuth
+	filter.ExternalAuthProtocol, filter.HTTPAuthConfig = gatewayv1.HTTPRouteExternalAuthGRPCProtocol, nil
+	filter.GRPCAuthConfig = &gatewayv1.GRPCAuthConfig{AllowedRequestHeaders: []string{":authority"}}
+	weighted := single.DeepCopy()
+	weighted.Matches[0].Path.Value = ptr.To("/weighted")
+	weighted.BackendRefs = append(weighted.BackendRefs, gatewayv1.HTTPBackendRef{
+		BackendRef: gatewayv1.BackendRef{BackendObjectReference: filter.BackendRef},
+	})
+	f.route.Spec.Rules = append(f.route.Spec.Rules, *weighted)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	spec := f.observe(t).Nodes[0].Spec
+	require.Len(t, spec.FixedHTTPRules, 1)
+	require.Equal(t, "/weighted", spec.FixedHTTPRules[0].Matches[0].PathValue)
+	require.Empty(t, spec.WeightedHTTPRules)
+	require.Len(t, spec.HTTPBackends, 1)
+	require.True(t, slices.ContainsFunc(spec.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool {
+		return match.PathValue == "/" && match.ExternalAuth == nil
+	}))
+	require.True(t, slices.ContainsFunc(spec.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool {
+		return match.PathValue == "/private" && match.ExternalAuth != nil &&
+			slices.Equal(match.ExternalAuth.AllowedRequestHeaders, []string{":authority"})
+	}))
+}
+
+func TestHTTPRouteGRPCExternalAuthUsesBackendTLSPolicyAndFencesChanges(t *testing.T) {
+	f, _, _ := externalAuthFixture(t)
+	f.reconciler.Config.RouteExternalAuthGRPC, f.reconciler.Config.BackendTLSPolicy = true, true
+	f.reconciler.RouteExternalAuthGRPCAvailable = func(_ context.Context, tls *cloud.BackendTLSValidation, _ bool) (bool, error) {
+		require.NotNil(t, tls)
+		require.Equal(t, cloud.BackendTLSTrustSystem, tls.Trust)
+		require.Equal(t, "authorize.example.test", tls.Hostname)
+		require.True(t, tls.RequireH2)
+		return true, nil
+	}
+	filter := f.route.Spec.Rules[1].Filters[0].ExternalAuth
+	filter.ExternalAuthProtocol, filter.HTTPAuthConfig = gatewayv1.HTTPRouteExternalAuthGRPCProtocol, nil
+	filter.GRPCAuthConfig = &gatewayv1.GRPCAuthConfig{}
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "auth", Name: "authorize-tls", UID: "auth-policy-uid"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: "authorize"}}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{Hostname: "authorize.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem)},
+		},
+	}
+	f.create(t, policy)
+	policyStatus := &backendTLSPolicyStatusReconciler{routes: f.reconciler}
+	_, err := policyStatus.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(policy)})
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
+	require.Len(t, policy.Status.Ancestors, 1)
+	require.True(t, meta.IsStatusConditionTrue(policy.Status.Ancestors[0].Conditions, string(gatewayv1.PolicyConditionAccepted)))
+
+	snapshot := f.observe(t)
+	spec := snapshot.Nodes[0].Spec
+	require.Empty(t, spec.FixedHTTPRules)
+	require.Len(t, spec.HTTPBackends[0].Matches, 2)
+	for _, match := range spec.HTTPBackends[0].Matches {
+		if match.PathValue == "/private" {
+			require.NotNil(t, match.ExternalAuth.BackendTLS)
+			require.Empty(t, match.ExternalAuth.AllowedRequestHeaders)
+		}
+	}
+	policy.Spec.Validation.Hostname = "*"
+	require.NoError(t, f.client.Update(t.Context(), policy))
+	require.ErrorIs(t, snapshot.Validate(t.Context()), errHTTPRouteChanged)
+	require.Len(t, f.observe(t).Nodes[0].Spec.FixedHTTPRules, 1)
+
+	policy.Spec.Validation.Hostname = "authorize.example.test"
+	require.NoError(t, f.client.Update(t.Context(), policy))
+	f.gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "authorizer-client"},
+	}}
+	require.NoError(t, f.client.Update(t.Context(), f.gateway))
+	certificate := cloud.BackendClientCertificate{Reference: "https://barbican.example/v1/secrets/current-client"}
+	f.reconciler.BackendClientCertificateForGateway = func(context.Context, *gatewayv1.Gateway) cloud.BackendClientCertificate {
+		return certificate
+	}
+	snapshot = f.observe(t)
+	require.Empty(t, snapshot.Nodes[0].Spec.FixedHTTPRules)
+	certificate = cloud.BackendClientCertificate{Denied: true}
+	require.ErrorIs(t, snapshot.Validate(t.Context()), errHTTPRouteChanged)
+	spec = f.observe(t).Nodes[0].Spec
+	require.Len(t, spec.FixedHTTPRules, 1)
+	require.Equal(t, "/private", spec.FixedHTTPRules[0].Matches[0].PathValue)
+	require.Len(t, spec.HTTPBackends, 1)
+	require.Equal(t, "/", spec.HTTPBackends[0].Matches[0].PathValue)
+}
+
 func externalAuthFixture(t *testing.T) (*routeModelInputFixture, *gatewayv1.ReferenceGrant, *discoveryv1.EndpointSlice) {
 	t.Helper()
 	config := testConfig()
 	config.GatewayAPIChannel = features.FeatureChannelExperimental
 	config.RouteExternalAuth, config.FixedHTTPResponses = true, true
 	f := newRouteModelInputFixtureWithConfig(t, config)
-	f.reconciler.RouteExternalAuthAvailable = func(context.Context) (bool, error) { return true, nil }
+	f.reconciler.RouteExternalAuthAvailable = func(context.Context, bool) (bool, error) { return true, nil }
 	auth := f.service.DeepCopy()
 	auth.Namespace, auth.Name, auth.UID, auth.ResourceVersion = "auth", "authorize", "authorize-uid", ""
 	endpoints := f.endpoints.DeepCopy()

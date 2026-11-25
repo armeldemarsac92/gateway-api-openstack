@@ -128,8 +128,13 @@ func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
 }
 
 // RouteExternalAuthAvailable checks regional support for HTTPRoute authorization.
-func (p *Provider) RouteExternalAuthAvailable(ctx context.Context) (bool, error) {
-	return p.graph.RouteExternalAuthAvailable(ctx)
+func (p *Provider) RouteExternalAuthAvailable(ctx context.Context, weighted bool) (bool, error) {
+	return p.graph.RouteExternalAuthAvailable(ctx, weighted)
+}
+
+// RouteExternalAuthGRPCAvailable checks regional support for the selected gRPC authorizer transport.
+func (p *Provider) RouteExternalAuthGRPCAvailable(ctx context.Context, tls *cloud.BackendTLSValidation, weighted bool) (bool, error) {
+	return p.graph.RouteExternalAuthGRPCAvailable(ctx, tls, weighted)
 }
 
 // GRPCBackendTLSAvailable discovers hostname validation and mandatory h2 negotiation.
