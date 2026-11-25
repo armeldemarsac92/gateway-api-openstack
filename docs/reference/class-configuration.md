@@ -274,6 +274,8 @@ Traffic splitting still selects a backend according to the rule's weights. Its c
 
 Check the XBackend's current-generation `Accepted` condition under the Gateway ancestor and the HTTPRoute's `ResolvedRefs` and `Programmed` conditions. A missing provider capability reports `UnsupportedValue`. A failed discovery reports `Pending` while the controller retries. During either condition, a direct match uses an empty pool and a weighted rule returns HTTP 500 for the affected share. The controller empties an affected pool before changing or withdrawing the cookie. Once the replacement settings are verified, the pool can serve its eligible endpoints again. [Session persistence contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-1619/index.md)
 
+In a local kind trial, two HTTPRoutes shared an EndpointSelector. Across their two pools, the client sent 9 requests to one Pod. When it became unready, the next request with the old cookie reached the other Pod and its response renewed the cookie. A separate ServerOnly backend issued its own session cookie. [Requests and pool membership](../qualification/v1.7.0/provider/xbackend-session-cookie-evidence/receipt.json)
+
 ### Route HTTP to an Experimental XBackend hostname
 
 Install the v1.7.0 Experimental bundle and controller overlay. Select an Amphora GatewayClass with `memberMode: Endpoint` and `backendSecurity.mode: Unmanaged`. Add these manager arguments for each permitted GatewayClass and destination prefix. The example uses a documentation-only IPv4 range.
