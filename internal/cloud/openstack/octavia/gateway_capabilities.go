@@ -18,6 +18,7 @@ package octavia
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"slices"
@@ -87,26 +88,55 @@ func (e *MissingGatewayCapability) Error() string {
 // region-specific load-balancer endpoint. Only an explicit capability list
 // authorizes use of the requested extensions.
 func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string, required ...string) error {
-	capabilities, err := s.GatewayCapabilities(ctx, provider)
+	return s.VerifyGatewayCapabilitiesForBody(ctx, provider, 0, required...)
+}
+
+// VerifyGatewayCapabilitiesForBody also checks the regional per-request limit
+// when a route forwards its request body to an authorization service.
+func (s *Service) VerifyGatewayCapabilitiesForBody(ctx context.Context, provider string, bodySize int32, required ...string) error {
+	response, err := s.providerGatewayCapabilities(ctx, provider)
 	if err != nil {
 		return err
 	}
 	for _, capability := range required {
-		if !slices.Contains(capabilities, capability) {
+		if !slices.Contains(response.Capabilities, capability) {
 			return &MissingGatewayCapability{Provider: provider, Capability: capability}
+		}
+	}
+	if bodySize > 0 {
+		var limit int32
+		if len(response.MaxAuthBodyBytes) != 0 {
+			if err := json.Unmarshal(response.MaxAuthBodyBytes, &limit); err != nil || limit < 0 {
+				return fmt.Errorf("invalid maximum authorization body size reported by Octavia provider %q", provider)
+			}
+		}
+		if bodySize > limit {
+			return fmt.Errorf("authorization requires %d bytes, region advertises %d: %w", bodySize, limit,
+				&MissingGatewayCapability{Provider: provider, Capability: GatewayCapabilityPolicyExternalAuthForwardBody})
 		}
 	}
 	return nil
 }
 
+type providerGatewayCapabilities struct {
+	Capabilities     []string        `json:"gateway_capabilities"`
+	MaxAuthBodyBytes json.RawMessage `json:"l7policy_external_auth_max_body_bytes"`
+}
+
 // GatewayCapabilities reads the selected region's capability list.
 func (s *Service) GatewayCapabilities(ctx context.Context, provider string) ([]string, error) {
+	response, err := s.providerGatewayCapabilities(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	return response.Capabilities, nil
+}
+
+func (s *Service) providerGatewayCapabilities(ctx context.Context, provider string) (*providerGatewayCapabilities, error) {
 	if strings.TrimSpace(provider) == "" {
 		return nil, fmt.Errorf("missing effective load balancer provider in Octavia response")
 	}
-	var response struct {
-		Capabilities []string `json:"gateway_capabilities"`
-	}
+	var response providerGatewayCapabilities
 	endpoint := s.client.ServiceURL("lbaas", "providers", url.PathEscape(provider), "gateway_capabilities")
 	if _, err := s.client.Get(ctx, endpoint, &response, nil); err != nil {
 		return nil, fmt.Errorf("discover Gateway capabilities for Octavia provider %q: %w", provider, err)
@@ -114,5 +144,5 @@ func (s *Service) GatewayCapabilities(ctx context.Context, provider string) ([]s
 	if response.Capabilities == nil {
 		return nil, fmt.Errorf("discover Gateway capabilities for Octavia provider %q: response does not contain a capability list", provider)
 	}
-	return response.Capabilities, nil
+	return &response, nil
 }

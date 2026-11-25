@@ -430,6 +430,42 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 	require.Nil(t, step)
 }
 
+func TestRouteAuthorizerRegionalBodyLimit(t *testing.T) {
+	offer := map[string]any{"gateway_capabilities": append(grpcAuthorizerCapabilities(nil), octavia.GatewayCapabilityPolicyExternalAuthForwardBody)}
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
+		safetyWriteJSON(t, w, offer)
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
+		ProviderConfig{RouteExternalAuthGRPC: true, FixedHTTPResponses: true})
+	auth := cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC, ForwardBodyMaxSize: 1024}
+	check := func(allowed bool) {
+		t.Helper()
+		available, err := provider.RouteExternalAuthAvailable(t.Context(), auth, false)
+		require.NoError(t, err)
+		require.Equal(t, allowed, available)
+	}
+	check(false)
+	offer["l7policy_external_auth_max_body_bytes"] = 1024
+	check(true)
+	auth.ForwardBodyMaxSize++
+	check(false)
+	desired, actual := fixedHTTPPlanFixture(desiredRoute{fixedResponse: true}, observedRouteGraph{})
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.loadBalancer.Provider = "amphora"
+	policy := desiredPolicy{externalAuth: &auth, resolvedExternalAuth: policyAuthorizer("12345678-1234-4000-8000-123456789abc", auth)}
+	step := graphMutation{kind: graphRouteMutation, route: routeMutation{kind: routeMutationCreatePolicy, policy: policy}}
+	_, writeErr := provider.prepareGraphMutation(t.Context(), desired, actual, step)
+	var missing *octavia.MissingGatewayCapability
+	require.ErrorAs(t, writeErr, &missing)
+	require.Equal(t, octavia.GatewayCapabilityPolicyExternalAuthForwardBody, missing.Capability)
+	offer["l7policy_external_auth_max_body_bytes"] = "unreadable"
+	_, err := provider.RouteExternalAuthAvailable(t.Context(), auth, false)
+	require.Error(t, err)
+	auth.ForwardBodyMaxSize = 0
+	check(true)
+}
+
 func TestRouteAuthorizerWeightedCapabilityAppliesOnlyToWeightedPolicyWrites(t *testing.T) {
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
@@ -437,12 +473,17 @@ func TestRouteAuthorizerWeightedCapabilityAppliesOnlyToWeightedPolicyWrites(t *t
 	}))
 	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
 		ProviderConfig{RouteExternalAuthGRPC: true, FixedHTTPResponses: true, WeightedHTTPTargets: true})
-	available, err := provider.RouteExternalAuthGRPCAvailable(t.Context(), nil, true)
+	auth := cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC}
+	available, err := provider.RouteExternalAuthAvailable(t.Context(), auth, true)
 	require.NoError(t, err)
 	require.False(t, available)
-	available, err = provider.RouteExternalAuthGRPCAvailable(t.Context(), nil, false)
+	available, err = provider.RouteExternalAuthAvailable(t.Context(), auth, false)
 	require.NoError(t, err)
 	require.True(t, available)
+	auth.ForwardBodyMaxSize = 1024
+	available, err = provider.RouteExternalAuthAvailable(t.Context(), auth, false)
+	require.NoError(t, err)
+	require.False(t, available)
 
 	desired, actual := fixedHTTPPlanFixture(desiredRoute{fixedResponse: true}, observedRouteGraph{})
 	desired.protocol = cloud.ListenerProtocolHTTP

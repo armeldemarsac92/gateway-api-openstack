@@ -33,9 +33,13 @@ type HTTPExternalAuth struct {
 	Weighted   bool
 }
 
-// NormalizeHTTPExternalAuth validates the bodyless HTTP profile shared by route and listener filters.
+// NormalizeHTTPExternalAuth validates the bodyless HTTP listener filter.
 func NormalizeHTTPExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter) (*HTTPExternalAuth, *Diagnostic) {
-	return normalizeExternalAuth(filter, false)
+	auth, diagnostic := normalizeExternalAuth(filter, false)
+	if auth != nil && auth.Config.ForwardBodyMaxSize > 0 {
+		return nil, unsupported("Listener ExternalAuth request body forwarding is unsupported", ScopeRule)
+	}
+	return auth, diagnostic
 }
 
 func normalizeExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter, grpc bool) (*HTTPExternalAuth, *Diagnostic) {
@@ -54,11 +58,14 @@ func normalizeExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter, grpc bool) 
 	if grpc && (filter.HTTPAuthConfig != nil || filter.GRPCAuthConfig == nil) || !grpc && filter.GRPCAuthConfig != nil {
 		return invalid("Invalid ExternalAuth protocol options")
 	}
-	if filter.ForwardBody != nil && filter.ForwardBody.MaxSize > 0 {
-		return nil, unsupported("ExternalAuth request body forwarding is unsupported", ScopeRule)
-	}
 	var auth cloud.ListenerExternalAuth
+	if filter.ForwardBody != nil {
+		auth.ForwardBodyMaxSize = filter.ForwardBody.MaxSize
+	}
 	if grpc {
+		if auth.ForwardBodyMaxSize > cloud.MaxGRPCExternalAuthBodySize {
+			return nil, unsupported("ExternalAuth body size exceeds the gRPC CheckRequest limit", ScopeRule)
+		}
 		auth.Protocol = cloud.ExternalAuthProtocolGRPC
 		headers := filter.GRPCAuthConfig.AllowedRequestHeaders
 		if !cloud.ValidExternalAuthHeaders(headers, true) {

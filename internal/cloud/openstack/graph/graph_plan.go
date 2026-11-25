@@ -882,6 +882,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	var required []string
 	var mirrorCapabilities []string
 	var reopensAuthenticatedH2Cookie bool
+	var authBodySize int32
 	fixed := desired.fixedHTTPResponses
 	switch step.kind {
 	case graphCreateLoadBalancer:
@@ -915,6 +916,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			if step.route.policy.resolvedExternalAuth == nil {
 				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for the HTTPRoute authorization pool"))
 			}
+			authBodySize = step.route.policy.externalAuth.ForwardBodyMaxSize
 			required = append(required, routeAuthorizerCapabilities(*step.route.policy.externalAuth, step.route.policy.weighted)...)
 		}
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
@@ -989,14 +991,14 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		return p.preparePolicyCreation(ctx, actual, desired, step)
 	}
 	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
-	verify := p.verifyGatewayHTTPCapabilities
+	verify := p.verifyGatewayHTTPRequirements
 	if slices.Contains(required, octavia.GatewayCapabilityHTTPRequestRedirect) || slices.Contains(required, octavia.GatewayCapabilityRequestURLRewrite) ||
 		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityTargetResponseHeaders) ||
 		slices.Contains(required, octavia.GatewayCapabilityRequestCORS) ||
 		len(mirrorCapabilities) != 0 {
-		verify = p.verifyGatewayHTTPURLCapabilities
+		verify = p.verifyGatewayHTTPURLRequirements
 	}
-	err := verify(ctx, desired, actual, required)
+	err := verify(ctx, desired, actual, required, authBodySize)
 	if err != nil && reopensAuthenticatedH2Cookie {
 		var missing *octavia.MissingGatewayCapability
 		capability := octavia.GatewayCapabilityHTTPCookieName
@@ -1023,7 +1025,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		// new ones. The restrictive action still needs its own capability.
 		step.route.responseHeaderOperations = nil
 		required = slices.DeleteFunc(required, isResponseHeaderCapability)
-		err = verify(ctx, desired, actual, required)
+		err = verify(ctx, desired, actual, required, authBodySize)
 	}
 	if err != nil {
 		// Removing a withdrawal predicate would expose a lower-priority

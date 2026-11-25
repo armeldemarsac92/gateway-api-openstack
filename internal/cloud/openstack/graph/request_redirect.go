@@ -72,7 +72,11 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	if len(states) == 0 {
 		return plan
 	}
-	verified := make(map[string]error)
+	type requirements struct {
+		capabilities string
+		bodySize     int32
+	}
+	verified := make(map[requirements]error)
 	unavailable := make(map[string]bool)
 	blocked := make(map[string]bool)
 	unverifiedClosed := make(map[string]bool)
@@ -91,10 +95,10 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		available := disposition == cloud.GraphEnsure && enabled && actual.loadBalancer != nil
 		if available && state.desired {
 			required := append([]string{predicate.capability}, slices.Sorted(maps.Keys(state.additionalCapabilities))...)
-			key := strings.Join(required, ",")
+			key := requirements{capabilities: strings.Join(required, ","), bodySize: state.maxAuthBodyBytes}
 			err, found := verified[key]
 			if !found {
-				err = p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, required)
+				err = p.verifyGatewayHTTPURLRequirements(ctx, desired, actual, required, state.maxAuthBodyBytes)
 				verified[key] = err
 			}
 			var missing *octavia.MissingGatewayCapability
@@ -201,6 +205,10 @@ func httpURLPolicyCleanup(kind routeMutationKind) bool {
 }
 
 func (p *Provider) verifyGatewayHTTPURLCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
+	return p.verifyGatewayHTTPURLRequirements(ctx, desired, actual, required, 0)
+}
+
+func (p *Provider) verifyGatewayHTTPURLRequirements(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string, bodySize int32) error {
 	// Discovery may stop responding during an outage. Preserve time in the
 	// parent context to validate and submit a restrictive listener update.
 	budget := 3 * time.Second
@@ -209,5 +217,5 @@ func (p *Provider) verifyGatewayHTTPURLCapabilities(ctx context.Context, desired
 	}
 	discovery, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	return p.verifyGatewayHTTPCapabilities(discovery, desired, actual, required)
+	return p.verifyGatewayHTTPRequirements(discovery, desired, actual, required, bodySize)
 }

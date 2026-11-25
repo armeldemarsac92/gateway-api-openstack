@@ -21,6 +21,7 @@ package cloud
 import (
 	"fmt"
 	"iter"
+	"math"
 	"slices"
 )
 
@@ -86,6 +87,10 @@ type ListenerRequestFilterSection struct {
 
 const ExternalAuthProtocolGRPC = "GRPC"
 
+// MaxGRPCExternalAuthBodySize leaves 1 MiB for the Envoy CheckRequest
+// envelope and headers derived from at most 256 KiB of request metadata.
+const MaxGRPCExternalAuthBodySize = math.MaxInt32 - (1 << 20)
+
 // ListenerExternalAuth describes an authorization Service resolved from
 // the referring Gateway or HTTPRoute.
 type ListenerExternalAuth struct {
@@ -98,6 +103,7 @@ type ListenerExternalAuth struct {
 	BackendSecurityGroups  []string
 	Members                []Member
 	PathPrefix             string
+	ForwardBodyMaxSize     int32
 	AllowedRequestHeaders  []string
 	AllowedResponseHeaders []string
 }

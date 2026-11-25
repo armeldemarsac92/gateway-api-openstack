@@ -165,38 +165,30 @@ func (r *Reconciler) checkExternalAuthCapabilities(ctx context.Context, observat
 		protocol      string
 		tls, systemCA bool
 		san, weighted bool
+		bodySize      int32
 	}
 	checked := map[requirements]model.Diagnostic{}
 	for filter, auth := range observations {
 		if auth.config == nil {
 			continue
 		}
-		key := requirements{protocol: auth.config.Protocol, weighted: filter.Weighted}
-		var probe func(context.Context) (bool, error)
-		if r.RouteExternalAuthAvailable != nil {
-			probe = func(ctx context.Context) (bool, error) { return r.RouteExternalAuthAvailable(ctx, key.weighted) }
-		}
-		if key.protocol == cloud.ExternalAuthProtocolGRPC {
-			probe = nil
-			if tls := auth.config.BackendTLS; tls != nil {
-				key.tls = true
-				key.systemCA = tls.Trust == cloud.BackendTLSTrustSystem
-				key.san = len(tls.SubjectAltNames) > 0
-			}
-			if r.RouteExternalAuthGRPCAvailable != nil {
-				probe = func(ctx context.Context) (bool, error) {
-					return r.RouteExternalAuthGRPCAvailable(ctx, auth.config.BackendTLS, key.weighted)
-				}
-			}
+		key := requirements{protocol: auth.config.Protocol, weighted: filter.Weighted, bodySize: auth.config.ForwardBodyMaxSize}
+		if tls := auth.config.BackendTLS; tls != nil {
+			key.tls = true
+			key.systemCA = tls.Trust == cloud.BackendTLSTrustSystem
+			key.san = len(tls.SubjectAltNames) > 0
 		}
 		diagnostic, found := checked[key]
 		if !found {
 			diagnostic = pendingExternalAuth("Waiting to verify regional Octavia HTTPRoute ExternalAuth support")
-			if probe != nil {
-				if available, err := probe(ctx); err == nil {
+			if probe := r.RouteExternalAuthAvailable; probe != nil {
+				if available, err := probe(ctx, *auth.config, key.weighted); err == nil {
 					switch {
 					case available:
 						diagnostic = model.Diagnostic{}
+					case key.bodySize > 0:
+						diagnostic = model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
+							Message: "The regional Octavia provider does not support this ExternalAuth rule with the requested body limit", Scope: model.ScopeRule}
 					case key.protocol == cloud.ExternalAuthProtocolGRPC:
 						diagnostic = model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
 							Message: "The regional Octavia provider does not advertise the required gRPC ExternalAuth capabilities", Scope: model.ScopeRule}
