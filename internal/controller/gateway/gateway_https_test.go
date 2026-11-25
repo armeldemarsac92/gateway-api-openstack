@@ -169,6 +169,81 @@ func TestSharedHTTPSGatewayProgramsAndWithdrawsPortAsAUnit(t *testing.T) {
 	}
 }
 
+func TestSharedHTTPSGatewayReportsEachCertificateReference(t *testing.T) {
+	cfg := testConfig()
+	cfg.OperatorHTTPS, cfg.HTTPSListenerIsolation = true, true
+	gateway := programmedTestGateway(cfg)
+	gateway.Generation = 7
+	first := testHTTPSListener("https", 443)
+	first.TLS.CertificateRefs[0].Namespace = ptr.To(gatewayv1.Namespace("certificates"))
+	second := first.DeepCopy()
+	second.Name = "https-nonexistent-secret"
+	second.Hostname = ptr.To(gatewayv1.Hostname("nonexistent.example.com"))
+	second.TLS.CertificateRefs[0].Name = "nonexistent-certificate"
+	gateway.Spec.Listeners = []gatewayv1.Listener{first, *second}
+	for _, listener := range gateway.Spec.Listeners {
+		status := gatewayv1.ListenerStatus{Name: listener.Name}
+		setAcceptedListenerConditions(&status.Conditions, gateway.Generation)
+		gateway.Status.Listeners = append(gateway.Status.Listeners, status)
+	}
+
+	firstGranted := false
+	r := &Reconciler{Config: cfg, Certificates: testHTTPSReferenceResolver{
+		resolveHTTPSFunc: func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+			t.Fatalf("listener %s reached provider certificate resolution", listener.Name)
+			return "", ""
+		},
+		referenceStatus: func(listener *gatewayv1.Listener) gatewayv1.ListenerConditionReason {
+			if firstGranted && listener.TLS.CertificateRefs[0].Name == first.TLS.CertificateRefs[0].Name {
+				return ""
+			}
+			return gatewayv1.ListenerReasonRefNotPermitted
+		},
+	}}
+	checkStatus := func(sets ListenerSetProjection, firstRefsStatus metav1.ConditionStatus, firstRefsReason gatewayv1.ListenerConditionReason) {
+		t.Helper()
+		issues, err := r.listenerTLSIssues(t.Context(), gateway, sets, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		desired := gateway.DeepCopy()
+		r.applyHTTPSListenerStatus(desired, gateway.Status, issues, nil, false)
+		if len(desired.Status.Listeners) != 2 {
+			t.Fatalf("listener statuses = %#v", desired.Status.Listeners)
+		}
+		for _, listener := range desired.Status.Listeners {
+			check := func(kind gatewayv1.ListenerConditionType, status metav1.ConditionStatus, reason gatewayv1.ListenerConditionReason) {
+				t.Helper()
+				condition := meta.FindStatusCondition(listener.Conditions, string(kind))
+				if condition == nil || condition.Status != status || condition.Reason != string(reason) || condition.ObservedGeneration != desired.Generation {
+					t.Fatalf("listener %s %s = %+v, want %s/%s at generation %d", listener.Name, kind, condition, status, reason, desired.Generation)
+				}
+			}
+			check(gatewayv1.ListenerConditionAccepted, metav1.ConditionFalse, gatewayv1.ListenerReasonUnsupportedValue)
+			check(gatewayv1.ListenerConditionProgrammed, metav1.ConditionFalse, gatewayv1.ListenerReasonInvalid)
+			if listener.Name == first.Name {
+				check(gatewayv1.ListenerConditionResolvedRefs, firstRefsStatus, firstRefsReason)
+			} else {
+				check(gatewayv1.ListenerConditionResolvedRefs, metav1.ConditionFalse, gatewayv1.ListenerReasonRefNotPermitted)
+			}
+		}
+	}
+
+	checkStatus(ListenerSetProjection{}, metav1.ConditionFalse, gatewayv1.ListenerReasonRefNotPermitted)
+
+	firstGranted = true
+	set := testTLSListenerSet(gateway, "delegated.example.com")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(set).Build()
+	sets, err := r.ObserveListenerSets(t.Context(), kube, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sets.RejectsGatewayHTTPSSection(&first) || !sets.RejectsGatewayHTTPSSection(second) {
+		t.Fatal("ListenerSet projection must preserve the shared port restriction for both Gateway sections")
+	}
+	checkStatus(sets, metav1.ConditionTrue, gatewayv1.ListenerReasonResolvedRefs)
+}
+
 func TestHTTPSGatewayWithdrawsRevokedPortAndPreservesSiblings(t *testing.T) {
 	cfg := testConfig()
 	cfg.OperatorHTTPS = true
