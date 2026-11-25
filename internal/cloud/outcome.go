@@ -110,6 +110,8 @@ type GatewayResult struct {
 	FrontendFallbackUnavailablePorts []int
 	// ListenerFilterUnavailablePorts require a capability that Octavia did not advertise.
 	ListenerFilterUnavailablePorts []int
+	// ListenerFilterBodyUnavailableSections exceed the regional body capability or limit.
+	ListenerFilterBodyUnavailableSections map[int][]string
 	// ListenerFilterCapabilityPendingPorts are waiting for a usable discovery response.
 	ListenerFilterCapabilityPendingPorts []int
 	// ListenerFilterRecoveringSections are guarded locally while their backends converge.

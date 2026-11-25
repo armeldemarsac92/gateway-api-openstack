@@ -62,6 +62,7 @@ func TestListenerFiltersResolveGatewayGrantAndKeepDeclaredOrder(t *testing.T) {
 	}
 	filtered := gatewayv1.Listener{Name: "secured", Protocol: gatewayv1.HTTPProtocolType, Port: 80, Hostname: ptr.To(gatewayv1.Hostname("protected.example.test")),
 		Filters: &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{step("/first"), step("/second")}}}
+	filtered.Filters.Requests[1].ExternalAuth.ForwardBody = &gatewayv1.ForwardBodyConfig{MaxSize: 4096}
 	peer := gatewayv1.Listener{Name: "ordinary", Protocol: gatewayv1.HTTPProtocolType, Port: 80}
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "app"}, Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{filtered, peer}}}
 	topology := classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}
@@ -74,6 +75,28 @@ func TestListenerFiltersResolveGatewayGrantAndKeepDeclaredOrder(t *testing.T) {
 	chain := got.ports[80][1].Requests
 	require.Len(t, chain, 2)
 	require.Equal(t, []string{"/first", "/second"}, []string{chain[0].PathPrefix, chain[1].PathPrefix})
+	require.Zero(t, chain[0].ForwardBodyMaxSize)
+	require.EqualValues(t, 4096, chain[1].ForwardBodyMaxSize)
+	require.False(t, GatewayOwnsListenerRequestFilters(controller.Config{GatewayListenerFilters: true,
+		GatewayAPIChannel: features.FeatureChannelStandard}, &filtered))
+	https := filtered
+	https.Protocol = gatewayv1.HTTPSProtocolType
+	require.False(t, GatewayOwnsListenerRequestFilters(config, &https))
+	config.OperatorHTTPS = true
+	require.True(t, GatewayOwnsListenerRequestFilters(config, &https))
+	https.Port = 443
+	https.TLS = &gatewayv1.ListenerTLSConfig{
+		CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "cert"}},
+	}
+	tlsGateway := gateway.DeepCopy()
+	tlsGateway.Spec.Listeners = []gatewayv1.Listener{https}
+	r.Config = config
+	httpsListeners, err := SupportedListenersForConfig(config, tlsGateway)
+	require.NoError(t, err)
+	tlsFilters, err := r.observeListenerFilters(t.Context(), tlsGateway, httpsListeners, ListenerSetProjection{}, topology)
+	require.NoError(t, err)
+	require.Empty(t, tlsFilters.issues)
+	require.Equal(t, got.ports[80][1:2], tlsFilters.ports[443])
 	require.Equal(t, []string{"host", "x-identity"}, chain[0].AllowedResponseHeaders)
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.5", Port: 9443}}, chain[0].Members)
 
@@ -84,6 +107,9 @@ func TestListenerFiltersResolveGatewayGrantAndKeepDeclaredOrder(t *testing.T) {
 	require.Empty(t, got.ports[80][1].Requests[0].Members)
 
 	require.NoError(t, reader.Delete(t.Context(), grant))
+	tlsFilters, err = r.observeListenerFilters(t.Context(), tlsGateway, httpsListeners, ListenerSetProjection{}, topology)
+	require.NoError(t, err)
+	require.Equal(t, []cloud.ListenerRequestFilterSection{{Hostname: string(*https.Hostname), Reject: true}}, tlsFilters.ports[443])
 	gateway.Status.Listeners = []gatewayv1.ListenerStatus{{Name: filtered.Name}, {Name: peer.Name}}
 	got, err = r.observeListenerFilters(t.Context(), gateway, listeners, ListenerSetProjection{}, topology)
 	require.NoError(t, err)

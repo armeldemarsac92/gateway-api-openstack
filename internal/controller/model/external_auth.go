@@ -33,13 +33,9 @@ type HTTPExternalAuth struct {
 	Weighted   bool
 }
 
-// NormalizeHTTPExternalAuth validates the bodyless HTTP listener filter.
+// NormalizeHTTPExternalAuth validates the HTTP listener filter.
 func NormalizeHTTPExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter) (*HTTPExternalAuth, *Diagnostic) {
-	auth, diagnostic := normalizeExternalAuth(filter, false)
-	if auth != nil && auth.Config.ForwardBodyMaxSize > 0 {
-		return nil, unsupported("Listener ExternalAuth request body forwarding is unsupported", ScopeRule)
-	}
-	return auth, diagnostic
+	return normalizeExternalAuth(filter, false)
 }
 
 func normalizeExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter, grpc bool) (*HTTPExternalAuth, *Diagnostic) {

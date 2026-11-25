@@ -271,6 +271,11 @@ func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previ
 			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "Octavia does not provide listener_request_filters_v1"}
 			found = true
 		}
+		if !found && slices.Contains(result.ListenerFilterBodyUnavailableSections[port], HTTPVirtualHostname(listener)) {
+			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+				"Octavia listener ExternalAuth body forwarding is unavailable at the requested size"}
+			found = true
+		}
 		var message string
 		programmedReason := gatewayv1.ListenerReasonPending
 		switch {
