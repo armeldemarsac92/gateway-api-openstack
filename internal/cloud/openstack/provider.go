@@ -62,6 +62,11 @@ func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error
 	return p.graph.BackendRetryBudgetAvailable(ctx)
 }
 
+// XBackendCookieAvailable discovers regional Amphora named HTTP cookie support.
+func (p *Provider) XBackendCookieAvailable(ctx context.Context) (bool, error) {
+	return p.graph.XBackendCookieAvailable(ctx)
+}
+
 // BackendTLSAvailable discovers the fixed backend hostname capability in the configured region.
 func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)

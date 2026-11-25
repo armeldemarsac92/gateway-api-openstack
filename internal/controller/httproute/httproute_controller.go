@@ -81,6 +81,8 @@ type Reconciler struct {
 	retryBudgetPolicyServed bool
 	// BackendRetryBudgetAvailable checks regional Amphora support for Service budgets.
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
+	// XBackendCookieAvailable checks regional Amphora support for named HTTP cookies.
+	XBackendCookieAvailable func(context.Context) (bool, error)
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// TelemetryBackendTLSAvailable reports authentication capabilities for collectors.
@@ -418,11 +420,12 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			}
 		}
 		if !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
+			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
 			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot).
-				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull)
+				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull).withXBackendCookieIssue(graphResult.BackendSessionPersistenceIssue)
 			status.partiallyInvalid = graphResult.PartiallyInvalid
 			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})

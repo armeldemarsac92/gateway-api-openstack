@@ -195,7 +195,7 @@ func servingWeightedListenerID(actual observedGatewayGraph, route desiredRoute) 
 func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed observedRouteGraph, listenerID string) desiredRoute {
 	part.policies = slices.Clone(part.policies)
 	ready := make(map[string]bool)
-	denied := deniedBackendTLSKeys(route)
+	denied := deniedHTTPBackendKeys(route)
 	allLocal := !slices.ContainsFunc(part.weightedTargets, func(target desiredHTTPWeightedTarget) bool {
 		return target.weight > 0 && target.backendKey != "" && !denied[target.backendKey]
 	})
@@ -408,7 +408,7 @@ func observedWeightedPoolWeights(demand map[string]int, observed observedRouteGr
 // closes genuine revocations when an edit removed the predicate altogether.
 func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph, portsByListener map[string]int) map[string]map[string]int {
 	var out map[string]map[string]int
-	denied := deniedBackendTLSKeys(route)
+	denied := deniedHTTPBackendKeys(route)
 	for _, part := range actual.httpParts {
 		for _, policy := range part.policies {
 			if !isObservedWeightedHTTPPolicy(policy) {
@@ -443,10 +443,11 @@ func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph,
 	return out
 }
 
-func deniedBackendTLSKeys(route desiredRoute) map[string]bool {
+func deniedHTTPBackendKeys(route desiredRoute) map[string]bool {
 	denied := make(map[string]bool)
 	for _, backend := range route.httpParts {
-		if backend.backendTLS.denies() {
+		issue := backend.cookieSupportIssue()
+		if backend.backendTLS.denies() || issue == cloud.SessionPersistenceUnsupported || issue == cloud.SessionPersistenceUnverified {
 			denied[backend.backendKey] = true
 		}
 	}

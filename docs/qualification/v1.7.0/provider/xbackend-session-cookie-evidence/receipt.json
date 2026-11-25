@@ -1,0 +1,753 @@
+{
+  "subject": "Session cookies across HTTPRoutes to an Experimental EndpointSelector XBackend",
+  "scope": "Local kind cluster, manager extracted from OCI, Octavia REST, Amphora configuration and HAProxy; fixtures provide cloud inventory, provisioning and Amphora agent transport.",
+  "registeredUpstreamCase": false,
+  "controller": {
+    "source": "26413e35c7b9578e960675139edf57471b888a36",
+    "parents": [
+      "7d446e21dbbc4e778f1ec677a557fb4db7573bb0"
+    ],
+    "tree": "a48126ec48ca612f6d90cfe108496d3b658189a9",
+    "signatureVerified": true,
+    "manifestDigest": "sha256:d99e3110f686e1f5535703bb81867c4315ce97f482e1a83af01c93e753fb7a13",
+    "managerSHA256": "3690c0de1313dd03d280057d3c2ee4eaff5963ae1eb01582f9cc46a84ee309d0",
+    "ociArchiveSHA256": "d68168b97c995fdbac1c2782bdc8608dc7b0ea664f083b7a95306b4267ab4d84",
+    "platform": "linux/amd64",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "providers": {
+    "octavia": {
+      "source": "448467a724a80efec044463ea92d4432092e1fc3",
+      "wheel": "octavia-19.0.1.dev56-py3-none-any.whl",
+      "wheelSHA256": "f8f44272213a54a1ee6ce1e250bd02fd9d9e7f43a7d13ba25c70fa2ea7df8f0b",
+      "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-cookie-name-448467a724a8"
+    },
+    "octaviaLib": {
+      "source": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+      "wheel": "octavia_lib-3.12.1.dev19-py3-none-any.whl",
+      "wheelSHA256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+      "release": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-otlp-tracing-542a56dcbec8"
+    }
+  },
+  "channels": {
+    "standard": {
+      "rawReceiptSHA256": "0d70ed21ddcc156da2b29fe9d721dce2d161774bf58afe7bcf1235cb836e913e",
+      "rawWireSHA256": "c43b517fba9158eaee086e9663d29112ae73c9d746b5fa4ea35aa147ab824e4b",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "xBackendCRD": {
+        "installed": false,
+        "discovered": false
+      },
+      "regionalCookieCapability": false,
+      "ordinaryService": {
+        "resource": {
+          "generation": 1,
+          "object": "f1a22b93a1e998b48567afd903add1097d794387843261309158d3648c6625fd",
+          "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
+        },
+        "pool": "d53dd61362cf23d0c7f2d15f2e09cf898ff1bc43dc2dbea6e87bc87e700ab036",
+        "members": [
+          "131eb6b0a525734db5f7957321e737835a80859e291acca02b5e4754815d1ef1"
+        ],
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "http": [
+          200,
+          200,
+          200
+        ],
+        "setCookieCount": 0
+      },
+      "recordedAtUTC": "2026-11-25T05:03:48+00:00",
+      "ordinaryServiceResponsesIncludingProvisioning": {
+        "503": 9,
+        "200": 6
+      },
+      "managerOctaviaMicroversion": "2.8",
+      "alpnPoolWrites": [],
+      "renderedMicroversion": "2.8"
+    },
+    "experimental": {
+      "rawReceiptSHA256": "5abea1d0827430c9922191d5797bb65d12c5ca0d6e3d6ae12bb0d113eecbc065",
+      "rawWireSHA256": "84c8e197e27ebaf0727168f5740e6c6a9c42020e53dabb9b390a1cff81f10f96",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "xBackendCRD": {
+        "installed": true,
+        "discovered": true,
+        "servedVersions": [
+          "v1alpha1"
+        ]
+      },
+      "regionalCookieCapability": true,
+      "ordinaryService": {
+        "resource": {
+          "generation": 1,
+          "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
+          "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
+        },
+        "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
+        "members": [
+          "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
+        ],
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "http": [
+          200,
+          200,
+          200
+        ],
+        "setCookieCount": 0
+      },
+      "recordedAtUTC": "2026-11-25T05:05:25+00:00",
+      "ordinaryServiceResponsesIncludingProvisioning": {
+        "503": 9,
+        "200": 15
+      },
+      "managerOctaviaMicroversion": "2.24",
+      "alpnPoolWrites": [
+        {
+          "method": "POST",
+          "http": 201,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        }
+      ],
+      "renderedMicroversion": "2.24",
+      "phases": {
+        "two-ready-endpoints": {
+          "resource": {
+            "generation": 1,
+            "object": "c78777084a38db4783a3e584c438f4d97d522c736ec4a5bdcebb3a001270a658",
+            "specSHA256": "4ff7e43b3079c223cf18b82b0e78712959d4a51931f63a1980f3e72f27837c77"
+          },
+          "conditions": {
+            "Accepted": "True/Accepted"
+          },
+          "routes": {
+            "first": {
+              "resource": {
+                "generation": 1,
+                "object": "f9417fee97d38a941aee014ed7528b2beda402c7ec523f9b96a72e24413a97a4",
+                "specSHA256": "5d2f7c498080c9d9bcfc0af55f8e3bded39f1604d5de8e4e372584b61c02b170"
+              },
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "pool": "ba512fff82406ef9c6120f6489b4dad5378e2dd29dcf96ce68809995312ff64a",
+              "policy": "f96f2eb9c0570cf22c8234a34c30d667b72471c9c97ddb1e24e677e2d8f17f1a",
+              "rule": "06c94aa581ec460dc8992bfeb3ccf7cdf3e3bc9a135d2120f94470b1ba554602",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
+              "match": {
+                "value": "/first/session",
+                "compare": "EQUAL_TO"
+              },
+              "sessionPersistence": {
+                "type": "HTTP_COOKIE",
+                "cookie_name": "fixture_session",
+                "persistence_timeout": null,
+                "persistence_granularity": null
+              },
+              "tlsEnabled": false,
+              "poolEnabled": true,
+              "nativeVerifyRequired": false,
+              "nativeStrictHostname": [],
+              "nativeALPN": [],
+              "nativeConfigSHA256": "19ecbb3f8d7c6c3f45c6f06ca6fa1cb761bb1202b0fc2eecc0b4b42b9adae3ac",
+              "nativeCookieDirectives": [
+                "fixture_session insert indirect nocache"
+              ],
+              "eligibleMembers": [
+                "9a2d6ee38af51545d73a285d9495accbd901e0d9dc0570f42e8a369bedff6f3f",
+                "1b5485c02bafe2e04103396f4309254c14fda97fd45982f162a859b442b29618"
+              ]
+            },
+            "second": {
+              "resource": {
+                "generation": 1,
+                "object": "2998500cc18b351610937d61d46728aa5cd2f945bdf37b2126362490e62a11a7",
+                "specSHA256": "32e40705ebbe461bef0e827dc9ff17d3d2ab6777bf19367e63f1c46190e86a3d"
+              },
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "pool": "fb61744024635ad6f00f93a00c7e47f7f153120778121322a8dc2c09e0c0cb18",
+              "policy": "8e082a4d1ce574bffd8e4862154c0d84867f9226ca0150f89e5c4ba87d12f3c3",
+              "rule": "4df8dd34cb6a2eac4059780869cf256a7c29c10ad76c7d0ef2e8089c83a5b21d",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
+              "match": {
+                "value": "/second/session",
+                "compare": "EQUAL_TO"
+              },
+              "sessionPersistence": {
+                "type": "HTTP_COOKIE",
+                "cookie_name": "fixture_session",
+                "persistence_timeout": null,
+                "persistence_granularity": null
+              },
+              "tlsEnabled": false,
+              "poolEnabled": true,
+              "nativeVerifyRequired": false,
+              "nativeStrictHostname": [],
+              "nativeALPN": [],
+              "nativeConfigSHA256": "19ecbb3f8d7c6c3f45c6f06ca6fa1cb761bb1202b0fc2eecc0b4b42b9adae3ac",
+              "nativeCookieDirectives": [
+                "fixture_session insert indirect nocache"
+              ],
+              "eligibleMembers": [
+                "f9d64a7144a9d09874efaa585451d4414444a7cb33d195af16441823cb5e6643",
+                "66a84f4410d7b31050507b8e4659b099733b1ff8648766e4f759b73e0e9d9929"
+              ]
+            }
+          },
+          "sibling": {
+            "resource": {
+              "generation": 1,
+              "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
+              "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
+            },
+            "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
+            "members": [
+              "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "setCookieCount": 0
+          },
+          "requests": [
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {},
+              "issued": [
+                {
+                  "name": "fixture_session",
+                  "value": "value-1",
+                  "path": "/",
+                  "session": true
+                }
+              ]
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-a",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": []
+            }
+          ],
+          "selectedPod": "pod-a"
+        },
+        "selected-endpoint-withdrawal": {
+          "resource": {
+            "generation": 1,
+            "object": "c78777084a38db4783a3e584c438f4d97d522c736ec4a5bdcebb3a001270a658",
+            "specSHA256": "4ff7e43b3079c223cf18b82b0e78712959d4a51931f63a1980f3e72f27837c77"
+          },
+          "conditions": {
+            "Accepted": "True/Accepted"
+          },
+          "routes": {
+            "first": {
+              "resource": {
+                "generation": 1,
+                "object": "f9417fee97d38a941aee014ed7528b2beda402c7ec523f9b96a72e24413a97a4",
+                "specSHA256": "5d2f7c498080c9d9bcfc0af55f8e3bded39f1604d5de8e4e372584b61c02b170"
+              },
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "pool": "ba512fff82406ef9c6120f6489b4dad5378e2dd29dcf96ce68809995312ff64a",
+              "policy": "f96f2eb9c0570cf22c8234a34c30d667b72471c9c97ddb1e24e677e2d8f17f1a",
+              "rule": "06c94aa581ec460dc8992bfeb3ccf7cdf3e3bc9a135d2120f94470b1ba554602",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
+              "match": {
+                "value": "/first/session",
+                "compare": "EQUAL_TO"
+              },
+              "sessionPersistence": {
+                "type": "HTTP_COOKIE",
+                "cookie_name": "fixture_session",
+                "persistence_timeout": null,
+                "persistence_granularity": null
+              },
+              "tlsEnabled": false,
+              "poolEnabled": true,
+              "nativeVerifyRequired": false,
+              "nativeStrictHostname": [],
+              "nativeALPN": [],
+              "nativeConfigSHA256": "f8e4d97113565f291d05bdd786cac521f2c5af96cacfaf7a8da5800fda0b2697",
+              "nativeCookieDirectives": [
+                "fixture_session insert indirect nocache"
+              ],
+              "eligibleMembers": [
+                "1b5485c02bafe2e04103396f4309254c14fda97fd45982f162a859b442b29618"
+              ]
+            },
+            "second": {
+              "resource": {
+                "generation": 1,
+                "object": "2998500cc18b351610937d61d46728aa5cd2f945bdf37b2126362490e62a11a7",
+                "specSHA256": "32e40705ebbe461bef0e827dc9ff17d3d2ab6777bf19367e63f1c46190e86a3d"
+              },
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "pool": "fb61744024635ad6f00f93a00c7e47f7f153120778121322a8dc2c09e0c0cb18",
+              "policy": "8e082a4d1ce574bffd8e4862154c0d84867f9226ca0150f89e5c4ba87d12f3c3",
+              "rule": "4df8dd34cb6a2eac4059780869cf256a7c29c10ad76c7d0ef2e8089c83a5b21d",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
+              "match": {
+                "value": "/second/session",
+                "compare": "EQUAL_TO"
+              },
+              "sessionPersistence": {
+                "type": "HTTP_COOKIE",
+                "cookie_name": "fixture_session",
+                "persistence_timeout": null,
+                "persistence_granularity": null
+              },
+              "tlsEnabled": false,
+              "poolEnabled": true,
+              "nativeVerifyRequired": false,
+              "nativeStrictHostname": [],
+              "nativeALPN": [],
+              "nativeConfigSHA256": "f8e4d97113565f291d05bdd786cac521f2c5af96cacfaf7a8da5800fda0b2697",
+              "nativeCookieDirectives": [
+                "fixture_session insert indirect nocache"
+              ],
+              "eligibleMembers": [
+                "66a84f4410d7b31050507b8e4659b099733b1ff8648766e4f759b73e0e9d9929"
+              ]
+            }
+          },
+          "sibling": {
+            "resource": {
+              "generation": 1,
+              "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
+              "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
+            },
+            "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
+            "members": [
+              "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "setCookieCount": 0
+          },
+          "requests": [
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-1"
+              },
+              "issued": [
+                {
+                  "name": "fixture_session",
+                  "value": "value-2",
+                  "path": "/",
+                  "session": true
+                }
+              ]
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            },
+            {
+              "path": "/second/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": []
+            }
+          ],
+          "selectedPod": "pod-b"
+        },
+        "server-only-http11-cookie": {
+          "resource": {
+            "generation": 1,
+            "object": "645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69",
+            "specSHA256": "5c31f1f4aa7c03d12068cd513e43ac0dc7deae20e7c3954c83aaf2b9ae03a22b"
+          },
+          "conditions": {
+            "Accepted": "True/Accepted"
+          },
+          "routes": {
+            "secure": {
+              "resource": {
+                "generation": 1,
+                "object": "3f71f48c7a933f5e7130aca3cb022ba0c1d3654062d864de870b028b9bf99c2f",
+                "specSHA256": "963ae8e29e84d948c1bac7bdf20f13898403acb22e7b98ff1992db3d2a5eac7f"
+              },
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "pool": "2d9aa38666e772a0ddf1282d7b048741000cdc46e57f4b2319567264c9f5e983",
+              "policy": "04aa5a3451d1105efe05fc4c2bfe834b5a15c3d0e08deb6ba873ee6b6924ee72",
+              "rule": "18a1c04d78a3ff3dbe868291efaaf00f36f2bf0fedfbd3fa424f05f9b3f4dd60",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
+              "match": {
+                "value": "/secure/session",
+                "compare": "EQUAL_TO"
+              },
+              "sessionPersistence": {
+                "type": "HTTP_COOKIE",
+                "cookie_name": "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69",
+                "persistence_timeout": null,
+                "persistence_granularity": null
+              },
+              "tlsEnabled": true,
+              "poolEnabled": true,
+              "nativeVerifyRequired": true,
+              "nativeStrictHostname": [
+                "endpoint.backend.test"
+              ],
+              "nativeALPN": [
+                "http/1.1"
+              ],
+              "nativeConfigSHA256": "9347a50cd591d506a81afadc5dc5b44b114f08584b2050cae17d2d012881ee2d",
+              "nativeCookieDirectives": [
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69 insert indirect nocache"
+              ],
+              "eligibleMembers": [
+                "3ee13075edfe96cf6c46305fad38c8baa0d4966e47101fd77dfdedd04cf49e5b"
+              ]
+            }
+          },
+          "sibling": {
+            "resource": {
+              "generation": 1,
+              "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
+              "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
+            },
+            "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
+            "members": [
+              "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "setCookieCount": 0
+          },
+          "requests": [
+            {
+              "path": "/secure/session",
+              "http": 200,
+              "origin": {
+                "alpn": "http/1.1",
+                "httpProtocol": "HTTP/1.1",
+                "origin": "secure",
+                "sni": "endpoint.backend.test"
+              },
+              "sent": {
+                "fixture_session": "value-2"
+              },
+              "issued": [
+                {
+                  "name": "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69",
+                  "value": "value-3",
+                  "path": "/",
+                  "session": true
+                }
+              ]
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2",
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
+              },
+              "issued": []
+            },
+            {
+              "path": "/secure/session",
+              "http": 200,
+              "origin": {
+                "alpn": "http/1.1",
+                "httpProtocol": "HTTP/1.1",
+                "origin": "secure",
+                "sni": "endpoint.backend.test"
+              },
+              "sent": {
+                "fixture_session": "value-2",
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2",
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
+              },
+              "issued": []
+            },
+            {
+              "path": "/secure/session",
+              "http": 200,
+              "origin": {
+                "alpn": "http/1.1",
+                "httpProtocol": "HTTP/1.1",
+                "origin": "secure",
+                "sni": "endpoint.backend.test"
+              },
+              "sent": {
+                "fixture_session": "value-2",
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
+              },
+              "issued": []
+            },
+            {
+              "path": "/first/session",
+              "http": 200,
+              "origin": "pod-b",
+              "sent": {
+                "fixture_session": "value-2",
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
+              },
+              "issued": []
+            },
+            {
+              "path": "/secure/session",
+              "http": 200,
+              "origin": {
+                "alpn": "http/1.1",
+                "httpProtocol": "HTTP/1.1",
+                "origin": "secure",
+                "sni": "endpoint.backend.test"
+              },
+              "sent": {
+                "fixture_session": "value-2",
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
+              },
+              "issued": []
+            }
+          ],
+          "caCertificateSHA256": "200257c44550ea8831a4b01141d179b0351baa737a11c3e7eec231c41dd58d72",
+          "authenticatedOrigin": {
+            "origin": "secure",
+            "sni": "endpoint.backend.test",
+            "alpn": "http/1.1",
+            "httpProtocol": "HTTP/1.1"
+          }
+        }
+      },
+      "podReadiness": {
+        "initial": {
+          "pod-a": {
+            "object": "b2125bfb39825a4d30ddd6c4835f6e497026dc7ad8a6716556505fbcfd4af041",
+            "ready": "True",
+            "containersReady": "True",
+            "gate": "True"
+          },
+          "pod-b": {
+            "object": "aea289597fce19e1025266e529f07f21424ab40b39dbc05d771846c6a3958c4c",
+            "ready": "True",
+            "containersReady": "True",
+            "gate": "True"
+          }
+        },
+        "afterWithdrawal": {
+          "pod-a": {
+            "object": "b2125bfb39825a4d30ddd6c4835f6e497026dc7ad8a6716556505fbcfd4af041",
+            "ready": "False",
+            "containersReady": "True",
+            "gate": "False"
+          },
+          "pod-b": {
+            "object": "aea289597fce19e1025266e529f07f21424ab40b39dbc05d771846c6a3958c4c",
+            "ready": "True",
+            "containersReady": "True",
+            "gate": "True"
+          }
+        }
+      }
+    }
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+    "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287"
+  },
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "fixtureBackendSHA256": "e8a1336969acca9b1cadc633f2bd21e7e0218a8fbc4d6c1fea95f8400f35d9e4"
+}
