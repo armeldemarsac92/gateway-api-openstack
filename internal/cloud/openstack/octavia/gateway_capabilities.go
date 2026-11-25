@@ -23,10 +23,13 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
 const (
 	GatewayCapabilityHTTPLongHostname          = "http_long_hostname_v1"
+	GatewayCapabilityHTTPLiteralPath           = "http_literal_path_v1"
 	GatewayCapabilityHTTPHeaderExact           = "http_header_exact_v1"
 	GatewayCapabilityHTTPQueryParamExact       = "http_query_param_exact_v1"
 	GatewayCapabilityHTTPRequestPolicy         = "http_request_policy_v1"
@@ -74,6 +77,9 @@ const (
 const GatewayCapabilityL7PolicyConditionalRemoval = "l7policy_conditional_removal_v1"
 
 const GatewayCapabilityTLSSNIPassthroughWeightedPools = "tls_sni_passthrough_weighted_pools_v1"
+
+// RuleTypeHTTPPathLiteral is the Octavia type for a raw HTTP path predicate.
+const RuleTypeHTTPPathLiteral l7policies.RuleType = "HTTP_PATH_LITERAL"
 
 // MissingGatewayCapability reports an explicit negative capability discovery.
 type MissingGatewayCapability struct {

@@ -1754,10 +1754,12 @@ func buildRoutePolicyPlan(
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
 			replacingNativeMedia := rule.RuleType == string(grpcContentTypeRuleType) && wantedRule.ruleType != grpcContentTypeRuleType
-			unexpectedKey := rule.Key != "" && (wantedRule.ruleType == httpMethodRuleType || observedPolicy.initialRules && wantedRule.key == "")
-			if replacingNativeMedia || unexpectedKey {
+			replacingLiteralPath := rule.RuleType == string(octavia.RuleTypeHTTPPathLiteral) && wantedRule.ruleType != octavia.RuleTypeHTTPPathLiteral
+			unexpectedKey := rule.Key != "" && (wantedRule.ruleType == httpMethodRuleType ||
+				wantedRule.ruleType == octavia.RuleTypeHTTPPathLiteral || observedPolicy.initialRules && wantedRule.key == "")
+			if replacingNativeMedia || replacingLiteralPath || unexpectedKey {
 				// Octavia permits deletion after regional withdrawal. A PUT that
-				// changes the native media type still requires enrollment.
+				// changes the rule type still requires enrollment.
 				grpcContentTypeChanged = grpcContentTypeChanged || replacingNativeMedia
 				plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.ID, parentID: policy.ID})
 				delete(actualRules, wantedRule.role)
