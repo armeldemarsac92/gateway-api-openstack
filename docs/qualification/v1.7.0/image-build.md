@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller preserved a 3:1 TCPRoute split through changes to backend authorization and endpoint readiness on a local kind Gateway. [Build record](image.json) · [TCP traffic](provider/tcproute-connection-rejection-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-85dd1a6b3aaf2ebfeb515f3a88fb0cdae0c38806)
+The linux/amd64 controller presented an operator-enrolled client certificate to an Experimental EndpointSelector origin and withdrew it when the Secret's ReferenceGrant was removed. [Build record](image.json) · [Mutual TLS traffic](provider/xbackend-client-tls-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-b5e9dc2ecfdf5a595751a43920f425fe87707212)
+
+The linux/amd64 controller preserved a 3:1 TCPRoute split through changes to backend authorization and endpoint readiness on a local kind Gateway. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-85dd1a6b3aaf2ebfeb515f3a88fb0cdae0c38806/image.json) · [TCP traffic](provider/tcproute-connection-rejection-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-85dd1a6b3aaf2ebfeb515f3a88fb0cdae0c38806)
 
 On 2026-11-25, the linux/amd64 controller kept a session cookie across two HTTPRoutes to the same Experimental XBackend. Withdrawing readiness from the selected Pod moved the session to the other Pod. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-26413e35c7b9578e960675139edf57471b888a36/image.json) · [Cookie traffic](provider/xbackend-session-cookie-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-26413e35c7b9578e960675139edf57471b888a36)
 
