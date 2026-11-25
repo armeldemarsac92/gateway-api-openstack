@@ -38,6 +38,7 @@ func TestRequireGatewayAPIs(t *testing.T) {
 	for _, tc := range []struct {
 		name, missing  string
 		experimental   bool
+		ambientXMesh   bool
 		tlsPassthrough bool
 		tlsTerminate   bool
 		backendTLS     bool
@@ -52,6 +53,8 @@ func TestRequireGatewayAPIs(t *testing.T) {
 		{name: "termination needs backend TLS policy inventory", tlsTerminate: true, missing: "backendtlspolicies"},
 		{name: "experimental", experimental: true},
 		{name: "missing xbackends", missing: "xbackends", experimental: true},
+		{name: "experimental XMesh", experimental: true, ambientXMesh: true},
+		{name: "missing opt-in xmeshes", missing: "xmeshes", experimental: true, ambientXMesh: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resources := metav1.APIResourceList{GroupVersion: gatewayv1.GroupVersion.String()}
@@ -61,8 +64,10 @@ func TestRequireGatewayAPIs(t *testing.T) {
 				}
 			}
 			experimental := metav1.APIResourceList{GroupVersion: gatewayx.GroupVersion.String()}
-			if tc.missing != "xbackends" {
-				experimental.APIResources = []metav1.APIResource{{Name: "xbackends"}}
+			for _, resource := range []string{"xbackends", "xmeshes"} {
+				if resource != tc.missing && (resource != "xmeshes" || tc.ambientXMesh) {
+					experimental.APIResources = append(experimental.APIResources, metav1.APIResource{Name: resource})
+				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				var response metav1.APIResourceList
@@ -86,7 +91,7 @@ func TestRequireGatewayAPIs(t *testing.T) {
 			if tc.experimental {
 				configuration.GatewayAPIChannel = "experimental"
 			}
-			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, configuration)
+			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, configuration, tc.ambientXMesh)
 			if tc.missing == "" && err != nil {
 				t.Fatalf("requireGatewayAPIs() rejected available resources: %v", err)
 			}

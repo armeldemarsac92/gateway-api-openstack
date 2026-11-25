@@ -27,6 +27,22 @@ A client namespace on an enrolled, single-network mesh can set literal response 
 
 To return to the standard pilot, remove the consumer routes and verify the producer response from both namespaces. Rerun the install command with its four original arguments.
 
+## Report mesh capabilities on Experimental
+
+On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. Keep your existing controller image, cluster ID and OpenStack settings. An installation already based on Experimental, including the Magnum workload addon, can add the `config/components/istio-ambient-xmesh` component to its overlay. The component enables `--istio-ambient-xmesh` and adds the API permissions for reporting.
+
+The controller looks for `XMesh/hibiscus-istio-ambient` at startup and creates it if the name is free. To choose another name, add `--istio-ambient-xmesh-name=<name>` to the controller Deployment arguments. An existing XMesh keeps its spec. A resource using another identity is left to its controller, including at the configured name.
+
+```sh
+rtk kubectl --kubeconfig "$kubeconfig" --context "$context" get xmesh hibiscus-istio-ambient -o yaml
+```
+
+The XMesh controller identity is `gateway-api-openstack.github.io/istio-ambient`. Every XMesh selecting it is reconciled. `Accepted=True` at the XMesh's generation means the reporting configuration was accepted. This integration has no XMesh parameters, so setting `spec.parametersRef` produces `Accepted=False` with reason `InvalidParameters`.
+
+`Programmed=True` and `supportedFeatures` require `GatewayClass/istio-waypoint` to report current-generation acceptance under `istio.io/mesh-controller` and `istio-system/istiod` to have completed the rollout of a pinned pilot image from this module with ambient mode enabled. `MeshConsumerRoute` is published only for the pinned image selected by `--consumer-routes`, within the scope described above. The controller rechecks the pilot Deployment every ten seconds. These conditions cover the observed control plane. Verify enrollment, Service-parent Route conditions and traffic separately for each Service.
+
+On Standard, use the existing controller installation and workload enrollment instructions. To turn reporting off on Experimental, remove the component or switch the base back to `config/experimental`. After the controller rollout finishes, you can delete the XMesh if it belongs to this installation. Istio continues to manage its waypoints and Service-parent Route status separately.
+
 ## Enroll workloads and bind one Service
 
 Get consent from the owners of each client and destination namespace. Ambient mode enrolls eligible pods throughout a labeled namespace. Use namespaces without sidecar injection, existing ambient enrollment or a namespace-level waypoint binding. Set `destination_namespace`, `client_namespace` and `service` to the selected resources. Use a cluster-internal Service and declare HTTP using `appProtocol: http` and cleartext gRPC using `appProtocol: kubernetes.io/h2c` on the relevant Service ports.
