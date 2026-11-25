@@ -323,8 +323,9 @@ type HTTPBackend struct {
 	// SessionCookieName enables an HTTP session cookie on an XBackend's pool.
 	SessionCookieName string `json:",omitempty"`
 	// SessionCookiePath holds a custom Path value, including an explicitly empty path.
-	SessionCookiePath     *string                    `json:",omitempty"`
-	SessionCookieDeadline *HTTPSessionCookieDeadline `json:",omitempty"`
+	SessionCookiePath     *string                       `json:",omitempty"`
+	SessionCookieDeadline *HTTPSessionCookieDeadline    `json:",omitempty"`
+	SessionHeader         *HTTPSessionHeaderPersistence `json:",omitempty"`
 	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.
 	InvalidReference bool `json:",omitempty"`
 	BackendH2C       bool `json:",omitempty"`

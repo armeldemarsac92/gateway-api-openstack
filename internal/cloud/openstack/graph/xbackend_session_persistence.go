@@ -21,6 +21,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -61,11 +62,6 @@ func (p *Provider) XBackendCookieAvailable(ctx context.Context, requirements clo
 }
 
 func (p *Provider) discoverXBackendCookie(ctx context.Context, provider string, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
-	if !p.xBackendSessionPersistence {
-		return false, nil
-	}
-	discovery, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
 	required := []string{octavia.GatewayCapabilityHTTPCookieName}
 	if requirements&(cloud.HTTPSessionCookieTimed|cloud.HTTPSessionCookiePermanent) != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout)
@@ -76,6 +72,15 @@ func (p *Provider) discoverXBackendCookie(ctx context.Context, provider string, 
 	if requirements&cloud.HTTPSessionCookiePath != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookiePath)
 	}
+	return p.discoverXBackendPersistence(ctx, provider, required...)
+}
+
+func (p *Provider) discoverXBackendPersistence(ctx context.Context, provider string, required ...string) (bool, error) {
+	if !p.xBackendSessionPersistence {
+		return false, nil
+	}
+	discovery, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	err := p.octavia.VerifyGatewayCapabilities(discovery, provider, required...)
 	var missing *octavia.MissingGatewayCapability
 	if errors.As(err, &missing) || isNotFound(err) {
@@ -84,9 +89,9 @@ func (p *Provider) discoverXBackendCookie(ctx context.Context, provider string, 
 	return err == nil, err
 }
 
-// Prepare positive cookie pools against the effective provider. Keep the
-// predicate installed while emptying a pool with unverified persistence.
-func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) *graphMutation {
+// Prepare persistence against the effective provider and retain the policy
+// predicate while withdrawing members from a pool with unverified settings.
+func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) *graphMutation {
 	if actual.loadBalancer == nil || actual.protocol != cloud.ListenerProtocolHTTP ||
 		desired.spec.Gateway.Disposition != cloud.GraphEnsure || len(desired.routes) != len(actual.routes) {
 		return nil
@@ -109,6 +114,17 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 		capabilities[requirements] = observation
 		return observation
 	}
+	headerCapability := sync.OnceValue(func() xBackendCookieCapability {
+		available, err := p.discoverXBackendHeader(ctx, actual.loadBalancer.Provider)
+		switch {
+		case err != nil:
+			return xBackendCookieUnverified
+		case available:
+			return xBackendCookieAvailable
+		default:
+			return xBackendCookieUnavailable
+		}
+	})
 	permanentPools := make(map[string][]*desiredRoute)
 	var withdrawal *graphMutation
 	for i := range desired.routes {
@@ -121,6 +137,13 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 			part := &desired.routes[i].httpParts[j]
 			targets[part.backendKey] = true
 			current := actual.routes[i].httpParts[part.backendKey]
+			part.headerReadbackPending = false
+			if part.sessionHeader != nil {
+				part.sessionHeaderCapability = headerCapability()
+				part.headerReadbackPending = current == nil || !part.activeHeaderMatches(*current)
+			} else if part.xBackend && current != nil {
+				part.headerReadbackPending = enrolledHeader(*current)
+			}
 			part.cookieReadbackPending, part.cookiePathReadbackPending = false, false
 			if part.sessionCookieName != "" {
 				part.sessionCookieCapability = capability(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))
@@ -149,7 +172,7 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 			if current == nil || withdrawal != nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 				continue
 			}
-			if step, _ := planXBackendCookie(*part, *current); step != nil &&
+			if step, _ := planXBackendPersistence(*part, *current); step != nil &&
 				(step.kind == routeMutationClearPoolMembers ||
 					step.poolPersistence != nil && *step.poolPersistence == (pools.SessionPersistence{}) &&
 						(!step.retry || current.pool.AdminStateUp && len(current.members) != 0)) {
@@ -160,12 +183,12 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 		if withdrawal == nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
 			for _, key := range slices.Sorted(maps.Keys(actual.routes[i].httpParts)) {
 				old := actual.routes[i].httpParts[key]
-				if targets[key] || old.pool == nil || !slices.ContainsFunc(old.pool.Tags, isXBackendCookieTag) {
+				if targets[key] || old.pool == nil || !enrolledHeader(*old) && !slices.ContainsFunc(old.pool.Tags, isXBackendCookieTag) {
 					continue
 				}
 				// A rejected weighted target is absent from the desired graph.
 				// Withdraw its old persistence before ordinary policy cleanup.
-				if step, _ := planXBackendCookie(desiredRoute{xBackend: true}, *old); step != nil {
+				if step, _ := planXBackendPersistence(desiredRoute{xBackend: true}, *old); step != nil {
 					withdrawal = &graphMutation{kind: graphRouteMutation, routeIndex: i, backendKey: key,
 						route: *step, withdrawHTTPPolicy: true, message: step.message()}
 					break
@@ -229,7 +252,7 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 		}
 		// Pool PUT can recover an ERROR pool even when member changes are
 		// locked. A downgrade must stop rendering the failed mode first.
-		step := &routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID,
+		step := &routeMutation{kind: routeMutationSetXBackendPersistence, id: pool.ID,
 			poolAdmin: boolPointer(pool.AdminStateUp), retry: true}
 		switch {
 		case !pathMatches || pathManaged != needsPath || needsPath && issue != nil:
@@ -273,12 +296,12 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	if len(observed.members) != 0 {
 		// A disabled stock HTTP pool can drop the direct L7 match in
 		// Amphora. An empty pool keeps ownership of its exact predicate.
-		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID, xBackendCookieDrain: true}, nil
+		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID, persistenceDrain: true}, nil
 	}
 	if !observed.backendTLS.AdminObserved {
 		return nil, errXBackendCookieUnverified
 	}
-	step := routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID}
+	step := routeMutation{kind: routeMutationSetXBackendPersistence, id: pool.ID}
 	hasPersistence := pool.Persistence != (pools.SessionPersistence{}) || observed.cookieDeadline.Value != nil || observed.cookieDeadline.Invalid ||
 		observed.cookiePath.Value != nil || observed.cookiePath.Invalid
 	restoreTimedSession := needsDeadline && !needsPermanent
@@ -389,18 +412,16 @@ func (route desiredRoute) cookieSupportIssue() cloud.SessionPersistenceIssue {
 			issue = cloud.SessionPersistenceDeadlineReadbackUnverified
 		}
 	}
-	for _, part := range route.httpParts {
-		issue = max(issue, part.cookieSupportIssue())
-	}
 	return issue
 }
 
-// cookieFallback supports ordinary direct L7 policy reconciliation with a
-// stock enabled empty pool while discovery cannot authorize persistence.
-// Weighted rules already have their own same-weight failure response.
-func (route desiredRoute) cookieFallback(observed observedRouteGraph) bool {
+// persistenceFallback keeps the predicate of a direct route on an empty
+// pool while discovery cannot authorize persistence. Weighted rules have
+// their own same-weight failure response.
+func (route desiredRoute) persistenceFallback(observed observedRouteGraph) bool {
 	if len(route.policies) == 0 || route.fixedResponse ||
-		route.sessionCookieCapability != xBackendCookieUnavailable && route.sessionCookieCapability != xBackendCookieUnverified {
+		route.sessionCookieCapability != xBackendCookieUnavailable && route.sessionCookieCapability != xBackendCookieUnverified &&
+			route.sessionHeaderCapability != xBackendCookieUnavailable && route.sessionHeaderCapability != xBackendCookieUnverified {
 		return false
 	}
 	return observed.pool == nil || observed.pool.ProvisioningStatus == "ACTIVE" &&

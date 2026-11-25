@@ -77,6 +77,11 @@ func (p *Provider) XBackendCookieAvailable(ctx context.Context, requirements clo
 	return p.graph.XBackendCookieAvailable(ctx, requirements)
 }
 
+// XBackendHeaderAvailable discovers regional Amphora support for HTTP header persistence.
+func (p *Provider) XBackendHeaderAvailable(ctx context.Context) (bool, error) {
+	return p.graph.XBackendHeaderAvailable(ctx)
+}
+
 // BackendTLSAvailable discovers the fixed backend hostname capability in the configured region.
 func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)

@@ -479,7 +479,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		}
 	}
 	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
-	cookieCapability := r.xBackendCookieCapability(ctx)
+	persistenceCapability := r.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.xBackendH2CDiagnostic(ctx) })
 	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
 	tlsObserver := graph.NewBackendTLSObserver(r.routePatchReader(), r.Config.ClusterTrustBundles)
@@ -528,8 +528,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			if pending && (h2c || observation.TLS.Validation != nil || observation.Spec.Type == gatewayx.BackendTypeExternalHostname || observation.Spec.SessionPersistence != nil) {
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Gateway member mode is pending"})
 			} else if observation.Spec.SessionPersistence != nil && status.resolved != metav1.ConditionFalse {
-				status.resolved, status.resolvedReason, status.resolvedMessage = cookieCapability.apply(status.resolved, status.resolvedReason, status.resolvedMessage,
-					model.XBackendCookieRequirements(*observation.Spec.SessionPersistence))
+				*status = status.withXBackendPersistenceIssue(persistenceCapability(*observation.Spec.SessionPersistence))
 			}
 			continue
 		}
