@@ -301,44 +301,80 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 	case kind != gatewayx.BackendTypeEndpointSelector:
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires EndpointSelector")
 	}
+	if diagnostic := validateSessionPersistence(persistence, "XBackend"); diagnostic != nil {
+		return diagnostic
+	}
+	if !IsHeaderSessionPersistence(persistence) && protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
+	}
+	return nil
+}
+
+func validateSessionPersistence(persistence gatewayv1.SessionPersistence, subject string) *Diagnostic {
+	const unsupported = gatewayv1.RouteReasonUnsupportedValue
 	timeout, valid := durationMilliseconds(persistence.AbsoluteTimeout)
 	if !valid {
-		return backendDiagnostic(unsupported, "XBackend sessionPersistence absoluteTimeout must be a Gateway API duration")
+		return backendDiagnostic(unsupported, subject+" sessionPersistence absoluteTimeout must be a Gateway API duration")
 	}
 	if IsHeaderSessionPersistence(persistence) {
 		if persistence.Header == nil || persistence.Cookie != nil {
-			return backendDiagnostic(unsupported, "XBackend Header sessionPersistence requires header settings and cannot include cookie settings")
+			return backendDiagnostic(unsupported, subject+" Header sessionPersistence requires header settings and cannot include cookie settings")
 		}
 		header := cloud.HTTPSessionHeaderPersistence{Name: string(persistence.Header.Name), TimeoutMS: timeout}
 		if !header.Valid() {
-			return backendDiagnostic(unsupported, "XBackend Header sessionPersistence requires a valid, unprotected HTTP header name and a supported absoluteTimeout")
+			return backendDiagnostic(unsupported, subject+" Header sessionPersistence requires a valid, unprotected HTTP header name and a supported absoluteTimeout")
 		}
 		return nil
 	}
-	if protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
-		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
-	}
 	if ptr.Deref(persistence.Type, gatewayv1.CookieBasedSessionPersistence) != gatewayv1.CookieBasedSessionPersistence || persistence.Header != nil {
-		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires Cookie or Header with matching settings")
+		return backendDiagnostic(unsupported, subject+" sessionPersistence requires Cookie or Header with matching settings")
 	}
 	if cookie := persistence.Cookie; cookie != nil {
 		switch {
 		case cookie.Path != nil && !cloud.ValidHTTPSessionCookiePath(*cookie.Path):
-			return backendDiagnostic(unsupported, "XBackend sessionPersistence cookie path must be at most 1024 printable ASCII bytes without semicolons")
+			return backendDiagnostic(unsupported, subject+" sessionPersistence cookie path must be at most 1024 printable ASCII bytes without semicolons")
 		case cookie.Name != nil && !cloud.ValidHTTPSessionCookieName(string(*cookie.Name)):
-			return backendDiagnostic(unsupported, "XBackend sessionPersistence cookie name must be a safe Octavia token without a reserved cookie prefix")
+			return backendDiagnostic(unsupported, subject+" sessionPersistence cookie name must be a safe Octavia token without a reserved cookie prefix")
 		}
 		switch lifetime := ptr.Deref(cookie.LifetimeType, gatewayv1.SessionCookieLifetimeType); lifetime {
 		case gatewayv1.SessionCookieLifetimeType:
 		case gatewayv1.PermanentCookieLifetimeType:
 			if persistence.AbsoluteTimeout == nil {
-				return backendDiagnostic(unsupported, "XBackend sessionPersistence requires absoluteTimeout for cookie lifetimeType Permanent")
+				return backendDiagnostic(unsupported, subject+" sessionPersistence requires absoluteTimeout for cookie lifetimeType Permanent")
 			}
 		default:
-			return backendDiagnostic(unsupported, fmt.Sprintf("XBackend sessionPersistence cookie lifetimeType %q is unsupported", lifetime))
+			return backendDiagnostic(unsupported, fmt.Sprintf("%s sessionPersistence cookie lifetimeType %q is unsupported", subject, lifetime))
 		}
 	}
 	return nil
+}
+
+// ServiceSessionPersistence validates and lowers the direct Service policy.
+func ServiceSessionPersistence(persistence gatewayv1.SessionPersistence, uid types.UID) (*cloud.ServiceSessionPersistence, *Diagnostic) {
+	if diagnostic := validateSessionPersistence(persistence, "Service"); diagnostic != nil {
+		return nil, diagnostic
+	}
+	timeout, _ := durationMilliseconds(persistence.AbsoluteTimeout)
+	if IsHeaderSessionPersistence(persistence) {
+		return &cloud.ServiceSessionPersistence{Header: &cloud.HTTPSessionHeaderPersistence{
+			Name: strings.ToLower(string(persistence.Header.Name)), TimeoutMS: timeout,
+		}}, nil
+	}
+	if uid == "" {
+		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "Service session cookie needs an observed Service UID")
+	}
+	scope := fmt.Sprintf("%x", sha256.Sum256([]byte("service/"+string(uid))))
+	name := "service-" + scope
+	if persistence.Cookie != nil && persistence.Cookie.Name != nil {
+		name = string(*persistence.Cookie.Name)
+	}
+	settings := &cloud.ServiceSessionPersistence{CookieName: name, CookiePath: xBackendCookiePath(persistence)}
+	if timeout != nil {
+		settings.CookieDeadline = &cloud.HTTPSessionCookieDeadline{
+			TimeoutMS: *timeout, Scope: scope, Permanent: XBackendCookieRequirements(persistence)&cloud.HTTPSessionCookiePermanent != 0,
+		}
+	}
+	return settings, nil
 }
 
 func IsHeaderSessionPersistence(persistence gatewayv1.SessionPersistence) bool {

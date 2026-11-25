@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -92,9 +93,20 @@ type routeRetryBudget struct {
 	slot   backendtls.AncestorSlot
 }
 
-func collectBackendRetryBudgets(ctx context.Context, reader client.Reader, services []corev1.Service, ancestor backendtls.GatewayAncestor) (map[types.NamespacedName]routeRetryBudget, error) {
+type routeServicePersistence struct {
+	serviceUID types.UID
+	settings   *cloud.ServiceSessionPersistence
+	slot       backendtls.AncestorSlot
+}
+
+func backendPolicyPersistence(policy *gatewayx.XBackendTrafficPolicy) *gatewayv1.SessionPersistence {
+	return policy.Spec.SessionPersistence //nolint:staticcheck // The deprecated field is served in the v1.7 Experimental API.
+}
+
+func collectBackendTrafficPolicies(ctx context.Context, reader client.Reader, services []corev1.Service, ancestor backendtls.GatewayAncestor, retry, affinity bool) (map[types.NamespacedName]routeRetryBudget, map[types.NamespacedName]routeServicePersistence, error) {
 	policies := make(map[string][]gatewayx.XBackendTrafficPolicy)
 	budgets := make(map[types.NamespacedName]routeRetryBudget)
+	persistence := make(map[types.NamespacedName]routeServicePersistence)
 	for i := range services {
 		service := &services[i]
 		if !service.DeletionTimestamp.IsZero() {
@@ -104,23 +116,44 @@ func collectBackendRetryBudgets(ctx context.Context, reader client.Reader, servi
 		if !listed {
 			var list gatewayx.XBackendTrafficPolicyList
 			if err := reader.List(ctx, &list, client.InNamespace(service.Namespace)); err != nil {
-				return nil, fmt.Errorf("read Service retry policies: %w", err)
+				return nil, nil, fmt.Errorf("read Service backend traffic policies: %w", err)
 			}
 			if list.Continue != "" {
-				return nil, fmt.Errorf("incomplete Service retry policy list")
+				return nil, nil, fmt.Errorf("incomplete Service backend traffic policy list")
 			}
 			items = list.Items
 			policies[service.Namespace] = items
 		}
-		if winner := retryBudgetPolicyForService(items, service.Name); winner != nil {
+		winner := retryBudgetPolicyForService(items, service.Name)
+		if winner == nil {
+			continue
+		}
+		key := client.ObjectKeyFromObject(service)
+		slot := ancestor.SlotFor(winner.Namespace, winner.Status.Ancestors)
+		if retry {
 			if budget, valid := serviceRetryBudget(winner.Spec.RetryConstraint, service.UID); valid && budget != nil {
-				budgets[client.ObjectKeyFromObject(service)] = routeRetryBudget{
-					budget: *budget, slot: ancestor.SlotFor(winner.Namespace, winner.Status.Ancestors),
-				}
+				budgets[key] = routeRetryBudget{budget: *budget, slot: slot}
+			}
+		}
+		if spec := backendPolicyPersistence(winner); spec != nil && affinity {
+			if settings, diagnostic := model.ServiceSessionPersistence(*spec, service.UID); diagnostic == nil {
+				persistence[key] = routeServicePersistence{serviceUID: service.UID, settings: settings, slot: slot}
 			}
 		}
 	}
-	return budgets, nil
+	return budgets, persistence, nil
+}
+
+func (inputs *routeModelInputs) serviceSessionPersistence(backend model.BackendGroup, grpc bool) (*cloud.ServiceSessionPersistence, backendtls.AncestorSlot) {
+	entry, found := inputs.servicePersistence[backend.Service]
+	if !found || backend.Diagnostic != nil || entry.serviceUID != backend.ServiceUID ||
+		grpc && entry.settings.Header != nil && !entry.settings.Header.ValidForGRPC() {
+		return nil, backendtls.AncestorSlotHeld
+	}
+	if entry.slot == backendtls.AncestorSlotHeld {
+		return entry.settings, entry.slot
+	}
+	return nil, entry.slot
 }
 
 func (inputs *routeModelInputs) backendRetryBudget(backend model.BackendGroup) (*cloud.BackendRetryBudget, bool) {
@@ -168,6 +201,10 @@ func retryBudgetTransportSelectable(backend model.BackendGroup) bool {
 // activeRetryBudgetBackends visits Service references that can receive traffic
 // from the admitted matches, including both levels of sampled mirrors.
 func activeRetryBudgetBackends(matches []routeLoweredMatch, rules []model.Rule, transportUsable func(model.BackendGroup) bool) iter.Seq[model.BackendGroup] {
+	return activeServiceBackends(matches, rules, transportUsable, true)
+}
+
+func activeServiceBackends(matches []routeLoweredMatch, rules []model.Rule, transportUsable func(model.BackendGroup) bool, includeMirrors bool) iter.Seq[model.BackendGroup] {
 	return func(yield func(model.BackendGroup) bool) {
 		emit := func(backend model.BackendGroup) bool {
 			return backend.Service.Name == "" || yield(backend)
@@ -192,14 +229,14 @@ func activeRetryBudgetBackends(matches []routeLoweredMatch, rules []model.Rule, 
 			if rule.Redirect != nil || len(rule.Backends) == 0 {
 				continue
 			}
-			if !mirrors(rule.RequestMirrors) {
+			if includeMirrors && !mirrors(rule.RequestMirrors) {
 				return
 			}
 			for _, backend := range rule.Backends {
 				if backend.Weight <= 0 || backend.Diagnostic != nil || backend.FilterDiagnostic != nil || !transportUsable(backend) {
 					continue
 				}
-				if !emit(backend) || !mirrors(backend.RequestMirrors) {
+				if !emit(backend) || includeMirrors && !mirrors(backend.RequestMirrors) {
 					return
 				}
 			}

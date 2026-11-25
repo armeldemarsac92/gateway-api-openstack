@@ -311,6 +311,14 @@ const (
 	BackendTLSSANURI      = "URI"
 )
 
+// ServiceSessionPersistence configures affinity to endpoints of a core Service.
+type ServiceSessionPersistence struct {
+	CookieName     string
+	CookiePath     *string
+	CookieDeadline *HTTPSessionCookieDeadline
+	Header         *HTTPSessionHeaderPersistence
+}
+
 // HTTPBackend groups the paths served by one backend within one HTTPRoute.
 // The zero kind denotes a core Service port.
 // Unavailable marks an unusable target. Its matches retain their position and
@@ -321,7 +329,9 @@ type HTTPBackend struct {
 	// XBackendClientCertificateReference is an authorized Barbican identity for this XBackend alone.
 	XBackendClientCertificateReference string `json:"-"`
 	// SessionCookieName enables an HTTP session cookie on an XBackend's pool.
-	SessionCookieName string `json:",omitempty"`
+	SessionCookieName                string                     `json:",omitempty"`
+	ServiceSessionPersistence        *ServiceSessionPersistence `json:",omitempty"`
+	ServiceSessionPersistencePending bool                       `json:",omitempty"`
 	// SessionCookiePath holds a custom Path value, including an explicitly empty path.
 	SessionCookiePath     *string                       `json:",omitempty"`
 	SessionCookieDeadline *HTTPSessionCookieDeadline    `json:",omitempty"`
@@ -414,10 +424,12 @@ type RouteSpec struct {
 	UDPPacketDrop          *UDPPacketDrop          `json:",omitempty"`
 	BackendRetryBudget     *BackendRetryBudget     `json:",omitempty"`
 	// BackendRetryBudgetPending waits for a reservable Gateway ancestor.
-	BackendRetryBudgetPending bool `json:",omitempty"`
-	Identity                  Identity
-	Gateway                   GatewayState
-	GatewayRequirements       GatewayRequirements
+	BackendRetryBudgetPending        bool                       `json:",omitempty"`
+	ServiceSessionPersistence        *ServiceSessionPersistence `json:",omitempty"`
+	ServiceSessionPersistencePending bool                       `json:",omitempty"`
+	Identity                         Identity
+	Gateway                          GatewayState
+	GatewayRequirements              GatewayRequirements
 	// BackendTLSObserved records a current policy inventory for this route.
 	// Only such an observation can release a previously protected backend.
 	BackendTLSObserved bool `json:"-"`

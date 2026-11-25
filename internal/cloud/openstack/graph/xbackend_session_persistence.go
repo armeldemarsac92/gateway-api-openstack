@@ -47,12 +47,12 @@ const (
 )
 
 var (
-	errXBackendCookiePathUnavailable      = errors.New("regional Octavia provider does not advertise all capabilities required for XBackend custom cookie paths, including http_cookie_path_v1")
+	errXBackendCookiePathUnavailable      = errors.New("regional Octavia provider does not advertise all capabilities required for custom cookie paths, including http_cookie_path_v1")
 	errXBackendCookieUnavailable          = errors.New("regional Octavia provider does not advertise http_cookie_name_v1")
 	errXBackendCookieDeadlineUnavailable  = errors.New("regional Octavia provider does not advertise both http_cookie_name_v1 and http_cookie_absolute_timeout_v1")
 	errXBackendCookiePermanentUnavailable = errors.New("regional Octavia provider does not advertise all capabilities required by a Permanent cookie")
-	errXBackendCookiePermanentReadback    = errors.New("waiting for all Octavia pools to confirm the requested XBackend Permanent cookie")
-	errXBackendCookieUnverified           = errors.New("waiting to verify Octavia XBackend session persistence")
+	errXBackendCookiePermanentReadback    = errors.New("waiting for all Octavia pools to confirm the requested Permanent cookie")
+	errXBackendCookieUnverified           = errors.New("waiting to verify Octavia backend session persistence")
 )
 
 // XBackendCookieAvailable checks regional support for the Amphora provider
@@ -87,6 +87,26 @@ func (p *Provider) discoverXBackendPersistence(ctx context.Context, provider str
 		return false, nil
 	}
 	return err == nil, err
+}
+
+var errServiceSessionPersistenceAncestor = errors.New("waiting for the Gateway ancestor of the Service session persistence policy")
+
+func validServiceSessionPersistence(settings cloud.ServiceSessionPersistence, grpc bool) bool {
+	if settings.Header != nil {
+		return settings.CookieName == "" && settings.CookiePath == nil && settings.CookieDeadline == nil && settings.Header.Valid() && (!grpc || settings.Header.ValidForGRPC())
+	}
+	return cloud.ValidHTTPSessionCookieName(settings.CookieName) &&
+		(settings.CookiePath == nil || cloud.ValidHTTPSessionCookiePath(*settings.CookiePath)) &&
+		(settings.CookieDeadline == nil || settings.CookieDeadline.Valid())
+}
+
+func poolHasManagedSessionPersistence(current observedRouteGraph) bool {
+	return current.pool != nil && (slices.Contains(current.pool.Tags, xBackendHeaderTag) ||
+		slices.ContainsFunc(current.pool.Tags, isXBackendCookieTag))
+}
+
+func (route desiredRoute) managesSessionPersistence(current observedRouteGraph) bool {
+	return route.xBackend || route.spec.ServiceSessionPersistence != nil || poolHasManagedSessionPersistence(current)
 }
 
 // Prepare persistence against the effective provider and retain the policy
@@ -127,9 +147,56 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 	})
 	permanentPools := make(map[string][]*desiredRoute)
 	var withdrawal *graphMutation
+	prepare := func(routeIndex int, part *desiredRoute, current *observedRouteGraph, positivelyWeighted bool) {
+		part.headerReadbackPending = false
+		if part.sessionHeader != nil {
+			part.sessionHeaderCapability = headerCapability()
+			part.headerReadbackPending = current == nil || !part.activeHeaderMatches(*current)
+		} else if current != nil && part.managesSessionPersistence(*current) {
+			part.headerReadbackPending = enrolledHeader(*current)
+		}
+		part.cookieReadbackPending, part.cookiePathReadbackPending = false, false
+		if part.sessionCookieName != "" {
+			part.sessionCookieCapability = capability(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))
+		}
+		switch {
+		case part.sessionCookiePath != nil:
+			part.cookiePathReadbackPending = current == nil || !part.activeCookieMatches(*current)
+		case current != nil && part.managesSessionPersistence(*current) && current.pool != nil:
+			part.cookiePathReadbackPending = !part.cookiePathMatches(*current) || slices.Contains(current.pool.Tags, xBackendCookiePathTag)
+		}
+		if part.sessionCookieDeadline != nil {
+			if part.sessionCookieDeadline.Permanent {
+				part.cookieReadbackPending = part.cookiePathReadbackPending || current == nil ||
+					!part.activeCookieMatches(*current) || !part.cookieDeadlineMatches(*current)
+				if len(part.policies) != 0 || positivelyWeighted {
+					scope := part.sessionCookieDeadline.Scope
+					permanentPools[scope] = append(permanentPools[scope], part)
+				}
+			} else {
+				if current != nil && current.pool != nil {
+					part.cookieReadbackPending = current.pool.ProvisioningStatus != "ACTIVE" || !part.cookieDeadlineMatches(*current) ||
+						current.pool.Persistence != (pools.SessionPersistence{Type: httpCookiePersistence, CookieName: part.sessionCookieName})
+				}
+			}
+		}
+		if current == nil || withdrawal != nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+			return
+		}
+		if step, _ := planXBackendPersistence(*part, *current); step != nil &&
+			(step.kind == routeMutationClearPoolMembers ||
+				step.poolPersistence != nil && *step.poolPersistence == (pools.SessionPersistence{}) &&
+					(!step.retry || current.pool.AdminStateUp && len(current.members) != 0)) {
+			withdrawal = &graphMutation{kind: graphRouteMutation, routeIndex: routeIndex, backendKey: part.backendKey,
+				route: *step, withdrawHTTPPolicy: true, message: step.message()}
+		}
+	}
 	for i := range desired.routes {
 		if desired.spec.Routes[i].Disposition != cloud.GraphEnsure {
 			continue
+		}
+		if len(desired.routes[i].httpParts) == 0 {
+			prepare(i, &desired.routes[i], &actual.routes[i], false)
 		}
 		targets := make(map[string]bool)
 		demand := weightedBackendDemand(desired.routes[i])
@@ -137,53 +204,12 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 			part := &desired.routes[i].httpParts[j]
 			targets[part.backendKey] = true
 			current := actual.routes[i].httpParts[part.backendKey]
-			part.headerReadbackPending = false
-			if part.sessionHeader != nil {
-				part.sessionHeaderCapability = headerCapability()
-				part.headerReadbackPending = current == nil || !part.activeHeaderMatches(*current)
-			} else if part.xBackend && current != nil {
-				part.headerReadbackPending = enrolledHeader(*current)
-			}
-			part.cookieReadbackPending, part.cookiePathReadbackPending = false, false
-			if part.sessionCookieName != "" {
-				part.sessionCookieCapability = capability(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))
-			}
-			switch {
-			case part.sessionCookiePath != nil:
-				part.cookiePathReadbackPending = current == nil || !part.activeCookieMatches(*current)
-			case part.xBackend && current != nil && current.pool != nil:
-				part.cookiePathReadbackPending = !part.cookiePathMatches(*current) || slices.Contains(current.pool.Tags, xBackendCookiePathTag)
-			}
-			if part.sessionCookieDeadline != nil {
-				if part.sessionCookieDeadline.Permanent {
-					part.cookieReadbackPending = part.cookiePathReadbackPending || current == nil ||
-						!part.activeCookieMatches(*current) || !part.cookieDeadlineMatches(*current)
-					if len(part.policies) != 0 || demand[part.backendKey] > 0 {
-						scope := part.sessionCookieDeadline.Scope
-						permanentPools[scope] = append(permanentPools[scope], part)
-					}
-				} else {
-					if current != nil && current.pool != nil {
-						part.cookieReadbackPending = current.pool.ProvisioningStatus != "ACTIVE" || !part.cookieDeadlineMatches(*current) ||
-							current.pool.Persistence != (pools.SessionPersistence{Type: httpCookiePersistence, CookieName: part.sessionCookieName})
-					}
-				}
-			}
-			if current == nil || withdrawal != nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
-				continue
-			}
-			if step, _ := planXBackendPersistence(*part, *current); step != nil &&
-				(step.kind == routeMutationClearPoolMembers ||
-					step.poolPersistence != nil && *step.poolPersistence == (pools.SessionPersistence{}) &&
-						(!step.retry || current.pool.AdminStateUp && len(current.members) != 0)) {
-				withdrawal = &graphMutation{kind: graphRouteMutation, routeIndex: i, backendKey: part.backendKey,
-					route: *step, withdrawHTTPPolicy: true, message: step.message()}
-			}
+			prepare(i, part, current, demand[part.backendKey] > 0)
 		}
 		if withdrawal == nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
 			for _, key := range slices.Sorted(maps.Keys(actual.routes[i].httpParts)) {
 				old := actual.routes[i].httpParts[key]
-				if targets[key] || old.pool == nil || !enrolledHeader(*old) && !slices.ContainsFunc(old.pool.Tags, isXBackendCookieTag) {
+				if targets[key] || old.pool == nil || !enrolledHeader(*old) && !poolHasManagedSessionPersistence(*old) {
 					continue
 				}
 				// A rejected weighted target is absent from the desired graph.
@@ -196,7 +222,7 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 			}
 		}
 	}
-	// Each positive use of a Permanent cookie shares the XBackend's scope.
+	// Each positive use of a Permanent cookie shares the backend object's scope.
 	// Do not report it or admit new members until every pool confirms it.
 	for _, peers := range permanentPools {
 		if slices.ContainsFunc(peers, func(part *desiredRoute) bool { return part.cookieReadbackPending }) {
@@ -220,7 +246,7 @@ func isXBackendCookieTag(tag string) bool {
 }
 
 func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*routeMutation, error) {
-	if !desired.xBackend {
+	if !desired.managesSessionPersistence(observed) {
 		return nil, nil
 	}
 	wanted := pools.SessionPersistence{}

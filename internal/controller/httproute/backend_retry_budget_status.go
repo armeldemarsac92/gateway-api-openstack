@@ -36,6 +36,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -87,22 +88,24 @@ func (r *backendRetryBudgetStatusReconciler) observeRetryPolicy(ctx context.Cont
 	if policies.Continue != "" {
 		return nil, errors.New("incomplete Service retry policy list")
 	}
+	persistence := backendPolicyPersistence(policy)
+	persistenceCapability := r.routes.xBackendPersistenceCapability(ctx)
 	availability := sync.OnceValues(func() (bool, error) {
 		if !r.routes.Config.BackendRetryBudgetEnabled() || r.routes.BackendRetryBudgetAvailable == nil {
 			return false, nil
 		}
 		return r.routes.BackendRetryBudgetAvailable(ctx)
 	})
-	targets := make(map[types.NamespacedName]metav1.Condition)
+	targets := make(map[types.NamespacedName]retryPolicyTarget)
 	status := make(map[retryPolicyAncestor]metav1.Condition)
 	for _, ref := range policy.Spec.TargetRefs {
 		ancestor := retryPolicyAncestor{group: string(ref.Group), kind: string(ref.Kind), namespace: policy.Namespace, name: string(ref.Name)}
 		if ref.Group != "" || ref.Kind != "Service" {
-			status[ancestor] = retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "This controller supports retry constraints for core Services")
+			status[ancestor] = retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "This controller supports backend traffic policies for core Services")
 			continue
 		}
 		key := types.NamespacedName{Namespace: policy.Namespace, Name: string(ref.Name)}
-		condition, err := r.observeRetryPolicyTarget(ctx, policy, policies.Items, key, availability)
+		condition, err := r.observeRetryPolicyTarget(ctx, policy, policies.Items, key, availability, persistenceCapability)
 		if err != nil {
 			return nil, err
 		}
@@ -134,14 +137,19 @@ func (r *backendRetryBudgetStatusReconciler) observeRetryPolicy(ctx context.Cont
 			continue
 		}
 		conditions := make([]metav1.Condition, 0, len(consumers))
-		for key := range consumers {
+		for key, consumer := range consumers {
 			used[key] = true
-			conditions = append(conditions, targets[key])
+			target := targets[key]
+			if target.persistence.Status == metav1.ConditionTrue {
+				target.persistence = r.servicePersistenceConsumerCondition(policy, target.persistence, gateway, consumer, persistence)
+			}
+			conditions = append(conditions, target.condition(policy))
 		}
 		key := retryPolicyAncestor{group: gatewayv1.GroupName, kind: "Gateway", namespace: gateway.Namespace, name: gateway.Name}
 		status[key] = retryPolicyGatewayCondition(policy, conditions)
 	}
-	for key, condition := range targets {
+	for key, target := range targets {
+		condition := target.condition(policy)
 		// Missing targets have no resolved consumer. Keep their direct status
 		// even when other targets participate in a Gateway.
 		if !used[key] && condition.Status != metav1.ConditionTrue {
@@ -151,41 +159,123 @@ func (r *backendRetryBudgetStatusReconciler) observeRetryPolicy(ctx context.Cont
 	return status, nil
 }
 
-func (r *backendRetryBudgetStatusReconciler) observeRetryPolicyTarget(ctx context.Context, policy *gatewayx.XBackendTrafficPolicy, peers []gatewayx.XBackendTrafficPolicy, key types.NamespacedName, availability func() (bool, error)) (metav1.Condition, error) {
+type retryPolicyTarget struct {
+	rejected    metav1.Condition
+	retry       metav1.Condition
+	persistence metav1.Condition
+}
+
+func (target retryPolicyTarget) condition(policy *gatewayx.XBackendTrafficPolicy) metav1.Condition {
+	if target.rejected.Status != "" {
+		return target.rejected
+	}
+	retry, persistence := target.retry, target.persistence
+	switch {
+	case retry.Status == "" && persistence.Status == "":
+		return retryPolicyCondition(policy, metav1.ConditionTrue, string(gatewayv1.PolicyReasonAccepted), "The Service policy is accepted for HTTP-family backends")
+	case retry.Status == "":
+		return persistence
+	case persistence.Status == "":
+		return retry
+	case retry.Status == metav1.ConditionTrue || persistence.Status == metav1.ConditionTrue:
+		return retryPolicyCondition(policy, metav1.ConditionTrue, string(gatewayv1.PolicyReasonAccepted), retry.Message+". "+persistence.Message)
+	case retry.Status == metav1.ConditionUnknown || persistence.Status == metav1.ConditionUnknown:
+		return retryPolicyCondition(policy, metav1.ConditionUnknown, "Pending", retry.Message+". "+persistence.Message)
+	default:
+		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), retry.Message+". "+persistence.Message)
+	}
+}
+
+func (r *backendRetryBudgetStatusReconciler) observeRetryPolicyTarget(ctx context.Context, policy *gatewayx.XBackendTrafficPolicy, peers []gatewayx.XBackendTrafficPolicy, key types.NamespacedName, availability func() (bool, error), persistenceCapability func(gatewayv1.SessionPersistence) cloud.SessionPersistenceIssue) (retryPolicyTarget, error) {
 	var service corev1.Service
+	var target retryPolicyTarget
 	err := r.routes.APIReader.Get(ctx, key, &service)
 	switch {
 	case apierrors.IsNotFound(err) || err == nil && !service.DeletionTimestamp.IsZero():
-		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonTargetNotFound), "The target Service does not exist"), nil
+		target.rejected = retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonTargetNotFound), "The target Service does not exist")
+		return target, nil
 	case err != nil:
-		return metav1.Condition{}, err
+		return target, err
 	}
 	winner := retryBudgetPolicyForService(peers, key.Name)
 	if winner == nil || winner.UID != policy.UID || winner.Generation != policy.Generation {
-		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonConflicted), "The target Service has an older or lexically prior XBackendTrafficPolicy"), nil
-	}
-	if _, valid := serviceRetryBudget(policy.Spec.RetryConstraint, service.UID); !valid {
-		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "The Service retry constraint is outside Octavia's supported range"), nil
-	}
-	// Report the deprecated field explicitly while it remains in the v1.7 API.
-	legacyPersistence := policy.Spec.SessionPersistence != nil //nolint:staticcheck // The deprecated field is still accepted by the API.
-	if policy.Spec.RetryConstraint == nil && legacyPersistence {
-		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "This controller does not support sessionPersistence on XBackendTrafficPolicy"), nil
+		target.rejected = retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonConflicted), "The target Service has an older or lexically prior XBackendTrafficPolicy")
+		return target, nil
 	}
 	if policy.Spec.RetryConstraint != nil {
-		available, err := availability()
-		if err != nil {
-			return retryPolicyCondition(policy, metav1.ConditionUnknown, "Pending", "Waiting for Octavia retry budget capability discovery"), nil
-		}
-		if !available {
-			return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "Service retry budgets require controller opt-in and OpenStack Amphora support"), nil
+		target.retry = serviceRetryBudgetCondition(policy, service.UID, availability)
+	}
+	if persistence := backendPolicyPersistence(policy); persistence != nil {
+		target.persistence = r.servicePersistenceCondition(policy, service.UID, *persistence, persistenceCapability)
+	}
+	return target, nil
+}
+
+func serviceRetryBudgetCondition(policy *gatewayx.XBackendTrafficPolicy, uid types.UID, availability func() (bool, error)) metav1.Condition {
+	if _, valid := serviceRetryBudget(policy.Spec.RetryConstraint, uid); !valid {
+		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "The Service retry constraint is outside Octavia's supported range")
+	}
+	available, err := availability()
+	switch {
+	case err != nil:
+		return retryPolicyCondition(policy, metav1.ConditionUnknown, "Pending", "Waiting for Octavia retry budget capability discovery")
+	case !available:
+		return retryPolicyCondition(policy, metav1.ConditionFalse, string(gatewayv1.PolicyReasonInvalid), "Service retry budgets require controller opt-in and OpenStack Amphora support")
+	default:
+		return retryPolicyCondition(policy, metav1.ConditionTrue, string(gatewayv1.PolicyReasonAccepted), "The Service retry constraint is accepted")
+	}
+}
+
+func (r *backendRetryBudgetStatusReconciler) servicePersistenceCondition(policy *gatewayx.XBackendTrafficPolicy, uid types.UID, spec gatewayv1.SessionPersistence, capability func(gatewayv1.SessionPersistence) cloud.SessionPersistenceIssue) metav1.Condition {
+	const invalid = string(gatewayv1.PolicyReasonInvalid)
+	if !r.routes.Config.XBackendSessionPersistenceEnabled() {
+		return retryPolicyCondition(policy, metav1.ConditionFalse, invalid, "Service session persistence requires --octavia-xbackend-session-persistence")
+	}
+	if _, diagnostic := model.ServiceSessionPersistence(spec, uid); diagnostic != nil {
+		return retryPolicyCondition(policy, metav1.ConditionFalse, invalid, diagnostic.Message)
+	}
+	status, _, explanation := sessionPersistenceCondition("Service", metav1.ConditionTrue, "", "", capability(spec))
+	switch status {
+	case metav1.ConditionFalse:
+		return retryPolicyCondition(policy, status, invalid, explanation)
+	case metav1.ConditionUnknown:
+		return retryPolicyCondition(policy, status, "Pending", explanation)
+	default:
+		return retryPolicyCondition(policy, status, string(gatewayv1.PolicyReasonAccepted), "Service session persistence is accepted")
+	}
+}
+
+type retryPolicyConsumer struct {
+	httpPrimary bool
+	grpcPrimary bool
+}
+
+func (r *backendRetryBudgetStatusReconciler) servicePersistenceConsumerCondition(policy *gatewayx.XBackendTrafficPolicy, accepted metav1.Condition, gateway *gatewayv1.Gateway, consumer retryPolicyConsumer, persistence *gatewayv1.SessionPersistence) metav1.Condition {
+	const invalid = string(gatewayv1.PolicyReasonInvalid)
+	if !consumer.httpPrimary && !consumer.grpcPrimary {
+		return retryPolicyCondition(policy, metav1.ConditionFalse, invalid, "Service session persistence requires a primary forwarding backend")
+	}
+	if !controller.HasGatewayTopologyBinding(r.routes.Config, gateway) {
+		return retryPolicyCondition(policy, metav1.ConditionUnknown, "Pending", "Waiting for the Gateway member topology")
+	}
+	topology, err := controller.StoredGatewayTopology(r.routes.Config, gateway)
+	if err != nil {
+		return retryPolicyCondition(policy, metav1.ConditionUnknown, "Pending", "Waiting for the Gateway member topology")
+	}
+	if topology.Topology.MemberMode != cloud.MemberModeEndpoint {
+		return retryPolicyCondition(policy, metav1.ConditionFalse, invalid, "Service session persistence requires Endpoint member mode")
+	}
+	if consumer.grpcPrimary && model.IsHeaderSessionPersistence(*persistence) {
+		header := cloud.HTTPSessionHeaderPersistence{Name: string(persistence.Header.Name)}
+		if !header.ValidForGRPC() {
+			const detail = "GRPCRoute session persistence requires a custom ASCII metadata key without the -bin suffix"
+			if !consumer.httpPrimary {
+				return retryPolicyCondition(policy, metav1.ConditionFalse, invalid, detail)
+			}
+			accepted.Message = "Service session persistence is accepted for HTTPRoute consumers. " + detail
 		}
 	}
-	message := "The Service policy is accepted for HTTP-family backends"
-	if legacyPersistence {
-		message += ". Session persistence is unsupported"
-	}
-	return retryPolicyCondition(policy, metav1.ConditionTrue, string(gatewayv1.PolicyReasonAccepted), message), nil
+	return accepted
 }
 
 func retryPolicyCondition(policy *gatewayx.XBackendTrafficPolicy, status metav1.ConditionStatus, reason, message string) metav1.Condition {
@@ -204,7 +294,7 @@ func retryPolicyGatewayCondition(policy *gatewayx.XBackendTrafficPolicy, conditi
 	return last
 }
 
-func (r *backendRetryBudgetStatusReconciler) retryPolicyGateways(ctx context.Context, candidates []gatewayv1.HTTPRoute, targets map[types.NamespacedName]metav1.Condition) (map[types.NamespacedName]*gatewayv1.Gateway, error) {
+func (r *backendRetryBudgetStatusReconciler) retryPolicyGateways(ctx context.Context, candidates []gatewayv1.HTTPRoute, targets map[types.NamespacedName]retryPolicyTarget) (map[types.NamespacedName]*gatewayv1.Gateway, error) {
 	result := make(map[types.NamespacedName]*gatewayv1.Gateway)
 	for i := range candidates {
 		route := &candidates[i]
@@ -225,7 +315,7 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyGateways(ctx context.Con
 	return result, nil
 }
 
-func routeUsesRetryPolicyTarget(route *gatewayv1.HTTPRoute, targets map[types.NamespacedName]metav1.Condition) bool {
+func routeUsesRetryPolicyTarget(route *gatewayv1.HTTPRoute, targets map[types.NamespacedName]retryPolicyTarget) bool {
 	for key := range routeBackendTLSServices(route) {
 		if _, ok := targets[key]; ok {
 			return true
@@ -234,7 +324,7 @@ func routeUsesRetryPolicyTarget(route *gatewayv1.HTTPRoute, targets map[types.Na
 	return false
 }
 
-func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, targets map[types.NamespacedName]metav1.Condition) (map[types.NamespacedName]bool, error) {
+func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, targets map[types.NamespacedName]retryPolicyTarget) (map[types.NamespacedName]retryPolicyConsumer, error) {
 	admission, err := r.routes.observeRouteGraphAdmission(ctx, gateway, routes, nil)
 	if err != nil {
 		return nil, err
@@ -253,7 +343,7 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Co
 		return nil, err
 	}
 	inputs.admission = admission
-	consumers := make(map[types.NamespacedName]bool)
+	consumers := make(map[types.NamespacedName]retryPolicyConsumer)
 	for i := range candidates {
 		route := &candidates[i]
 		matches, rules, err := r.routes.lowerableRouteRules(route, inputs, admission.eligible[routeKey(route)].listeners)
@@ -266,7 +356,20 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Co
 		}
 		for backend := range activeRetryBudgetBackends(matches, rules, retryBudgetTransportSelectable) {
 			if _, targeted := targets[backend.Service]; targeted {
-				consumers[backend.Service] = true
+				if _, present := consumers[backend.Service]; !present {
+					consumers[backend.Service] = retryPolicyConsumer{}
+				}
+			}
+		}
+		for backend := range activeServiceBackends(matches, rules, retryBudgetTransportSelectable, false) {
+			if _, targeted := targets[backend.Service]; targeted {
+				consumer := consumers[backend.Service]
+				if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
+					consumer.grpcPrimary = true
+				} else {
+					consumer.httpPrimary = true
+				}
+				consumers[backend.Service] = consumer
 			}
 		}
 	}

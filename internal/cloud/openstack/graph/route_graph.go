@@ -1063,6 +1063,8 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 	switch {
 	case step != nil:
 		return []routeMutation{*step}, routeStateFromObservation(actual), nil
+	case err == nil && desired.spec.ServiceSessionPersistencePending:
+		return nil, routeStateFromObservation(actual), errServiceSessionPersistenceAncestor
 	case err == nil:
 		return buildRouteEnsureBackendPlan(desired, actual, batchActivations)
 	case errors.Is(err, errXBackendCookiePermanentReadback):
