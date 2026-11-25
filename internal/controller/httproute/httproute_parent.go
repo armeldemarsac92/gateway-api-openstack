@@ -49,6 +49,13 @@ type routeParentObservation struct {
 }
 
 func (r *Reconciler) managedParents(ctx context.Context, route *gatewayv1.HTTPRoute) ([]managedRouteParent, error) {
+	if r.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+		// The cache cannot establish that default discovery is complete.
+		if r.APIReader == nil {
+			return nil, controller.ErrAPIReaderRequired
+		}
+		return r.managedParentsWithReader(ctx, r.APIReader, route)
+	}
 	return r.managedParentsWithReader(ctx, r.Client, route)
 }
 
@@ -65,7 +72,15 @@ func (r *Reconciler) managedParentsWithReader(
 }
 
 func (r *Reconciler) observeRouteParents(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute) ([]routeParentObservation, error) {
-	parents := make([]routeParentObservation, 0, len(route.Spec.ParentRefs))
+	var defaults []gatewayv1.ParentReference
+	if r.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+		var err error
+		defaults, err = controller.DefaultGatewayParents(ctx, reader, route.Namespace, route.Spec.CommonRouteSpec)
+		if err != nil {
+			return nil, err
+		}
+	}
+	parents := make([]routeParentObservation, 0, len(route.Spec.ParentRefs)+len(defaults))
 	for _, parentRef := range route.Spec.ParentRefs {
 		if !controller.IsGatewayParentRef(parentRef) && (model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || model.ListenerSetRefKey(parentRef, route.Namespace).Name == "") {
 			continue
@@ -73,6 +88,16 @@ func (r *Reconciler) observeRouteParents(ctx context.Context, reader client.Read
 		parent, err := r.observeRouteParent(ctx, reader, route.Namespace, parentRef)
 		if err != nil {
 			return nil, err
+		}
+		parents = append(parents, parent)
+	}
+	for _, ref := range defaults {
+		parent, err := r.observeRouteParent(ctx, reader, route.Namespace, ref)
+		if err != nil {
+			return nil, err
+		}
+		if _, eligible := model.DefaultGatewayParent(route.Spec.CommonRouteSpec, route.Namespace, parent.gateway); !eligible {
+			return nil, errHTTPRouteChanged
 		}
 		parents = append(parents, parent)
 	}
@@ -151,6 +176,11 @@ func (r *Reconciler) parentsForGateway(ctx context.Context, reader client.Reader
 		}
 		parent.gateway = gateway
 		selected = append(selected, parent.managedRouteParent)
+	}
+	if r.Config.DefaultGatewaysEnabled() {
+		if ref, ok := model.DefaultGatewayParent(route.Spec.CommonRouteSpec, route.Namespace, gateway); ok {
+			selected = append(selected, managedRouteParent{ref: ref, gateway: gateway})
+		}
 	}
 	return selected, nil
 }
@@ -255,6 +285,21 @@ func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, parent m
 		return nil, rejection
 	}
 	return selected, nil
+}
+
+// AdmitsListener evaluates an unreported HTTP or gRPC parent against the same
+// rule profile and listener constraints used when the Route publishes Accepted.
+func (r *Reconciler) AdmitsListener(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, ref gatewayv1.ParentReference, listener *gatewayv1.Listener, namespaces []corev1.Namespace) bool {
+	if !r.structurallySupportedRoute(route) {
+		return false
+	}
+	parent := managedRouteParent{ref: ref, gateway: gateway}
+	candidates, err := routeParentCandidates(route, parent, []*gatewayv1.Listener{listener})
+	if err != nil {
+		return false
+	}
+	_, err = r.selectRouteAttachments(route, parent, candidates, namespaces)
+	return err == nil
 }
 
 func readRouteNamespaces(ctx context.Context, reader client.Reader, candidates []*gatewayv1.Listener, routeNamespace string) ([]corev1.Namespace, error) {

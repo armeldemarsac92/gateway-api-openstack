@@ -59,8 +59,9 @@ func Compile(input Input) (Gateway, error) {
 			return Gateway{}, fmt.Errorf("duplicate route input %s", key)
 		}
 		seenRoutes[key] = true
+		refs := EffectiveParentRefs(route.Spec.CommonRouteSpec, route.Namespace, input.Gateway, input.DefaultGateways)
 		var parents []int
-		for index, parent := range route.Spec.ParentRefs {
+		for index, parent := range refs {
 			_, delegated := setListeners[ListenerSetRefKey(parent, route.Namespace)]
 			if targetsGateway(parent, route.Namespace, input.Gateway) || kind == HTTPRouteKind && delegated {
 				parents = append(parents, index)
@@ -71,13 +72,17 @@ func Compile(input Input) (Gateway, error) {
 		}
 		compiled := compileRoute(route, input)
 		for _, index := range parents {
-			ref := route.Spec.ParentRefs[index]
+			ref := refs[index]
 			key := ListenerSetRefKey(ref, route.Namespace)
 			sections, listeners, namespace := input.Gateway.Spec.Listeners, gatewayListeners, input.Gateway.Namespace
 			if key.Name != "" {
 				sections, listeners, namespace = input.ListenerSetSections[key], setListeners[key], key.Namespace
 			}
-			parent := attachParent(input, route, index, sections, listeners, namespace)
+			specIndex := index
+			if index == len(route.Spec.ParentRefs) {
+				specIndex = -1
+			}
+			parent := attachParent(input, route, ref, specIndex, sections, listeners, namespace)
 			if len(compiled.Diagnostics) != 0 {
 				parent.State = AttachmentRejected
 				parent.Diagnostics = append(parent.Diagnostics, compiled.Diagnostics...)
@@ -196,8 +201,10 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	}
 	slices.Sort(result.Hostnames)
 	result.Hostnames = slices.Compact(result.Hostnames)
-	if route.Spec.UseDefaultGateways != "" && route.Spec.UseDefaultGateways != "None" {
-		result.Diagnostics = append(result.Diagnostics, *unsupported("default Gateway attachment is not implemented", ScopeRoute))
+	switch route.Spec.UseDefaultGateways {
+	case "", gatewayv1.GatewayDefaultScopeNone, gatewayv1.GatewayDefaultScopeAll:
+	default:
+		result.Diagnostics = append(result.Diagnostics, *unsupported(fmt.Sprintf("unsupported default Gateway scope %q", route.Spec.UseDefaultGateways), ScopeRoute))
 	}
 	supportedRules := 0
 	for i, rule := range route.Spec.Rules {

@@ -256,6 +256,62 @@ func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 	}
 }
 
+func TestDefaultGatewaysReceiveRouteEventsAndReportScope(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = "experimental"
+	first := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "one", Generation: 2},
+		Spec:       gatewayv1.GatewaySpec{DefaultScope: gatewayv1.GatewayDefaultScopeAll},
+	}
+	second := first.DeepCopy()
+	second.Name = "two"
+	direct := first.DeepCopy()
+	direct.Name = "direct"
+	direct.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+	kube := rawIndexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(&gatewayv1.Gateway{}).
+		WithObjects(first, second, direct).Build()
+	r := newTestReconciler(Reconciler{Config: cfg, Client: kube}, nil)
+	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "edge"}, Spec: gatewayv1.HTTPRouteSpec{
+		CommonRouteSpec: gatewayv1.CommonRouteSpec{UseDefaultGateways: gatewayv1.GatewayDefaultScopeAll,
+			ParentRefs: []gatewayv1.ParentReference{{Name: "direct"}}},
+	}}
+	requests := r.gatewayRequestsForRoute(t.Context(), route)
+	want := []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(direct)}, {NamespacedName: client.ObjectKeyFromObject(first)},
+		{NamespacedName: client.ObjectKeyFromObject(second)}}
+	if !slices.Equal(requests, want) {
+		t.Fatalf("default and explicit Gateway requests = %v, want %v", requests, want)
+	}
+	route.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeNone
+	if got := r.gatewayRequestsForRoute(t.Context(), route); !slices.Equal(got, want[:1]) {
+		t.Fatalf("opted-out route still enqueues default Gateways: %v", got)
+	}
+	for _, scope := range []gatewayv1.GatewayDefaultScope{gatewayv1.GatewayDefaultScopeAll, gatewayv1.GatewayDefaultScopeNone} {
+		var current gatewayv1.Gateway
+		key := client.ObjectKeyFromObject(first)
+		if err := kube.Get(t.Context(), key, &current); err != nil {
+			t.Fatal(err)
+		}
+		current.Spec.DefaultScope = scope
+		if err := kube.Update(t.Context(), &current); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.patchGateway(t.Context(), &gatewayScope{gateway: &current, original: current.DeepCopy(), managed: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), key, &current); err != nil {
+			t.Fatal(err)
+		}
+		condition := meta.FindStatusCondition(current.Status.Conditions, "DefaultGateway")
+		if scope == gatewayv1.GatewayDefaultScopeAll {
+			if condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != current.Generation {
+				t.Fatalf("Gateway did not report its default scope: %+v", condition)
+			}
+		} else if condition != nil {
+			t.Fatalf("Gateway still reports its withdrawn default scope: %+v", condition)
+		}
+	}
+}
+
 func TestGatewayRequestsForGatewayClass(t *testing.T) {
 	matchingGateway := &gatewayv1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge"},

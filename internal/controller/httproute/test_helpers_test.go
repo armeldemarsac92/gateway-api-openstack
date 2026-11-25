@@ -56,8 +56,6 @@ var (
 	SetCondition = controller.SetCondition
 )
 
-var requiredGatewayAPICRDs = (controller.Config{}).GatewayAPICRDNames()
-
 type recordingProvider struct {
 	gatewaySpecs     []cloud.GatewaySpec
 	gatewayResult    *cloud.GatewayResult
@@ -230,7 +228,7 @@ func (b *controllerTestClientBuilder) Build() client.WithWatch {
 		b.builder = b.builder.WithObjects(testClassParameters())
 	}
 	if !b.hasGatewayAPICRDs {
-		b.builder = b.builder.WithObjects(supportedGatewayAPICRDs()...)
+		b.builder = b.builder.WithObjects(supportedGatewayAPICRDs(b.config)...)
 	}
 	return b.builder.Build()
 }
@@ -248,10 +246,15 @@ func rawIndexedFakeClientBuilder(scheme *runtime.Scheme, config Config) *fake.Cl
 	return builder
 }
 
-func supportedGatewayAPICRDs() []client.Object {
-	definitions := make([]client.Object, 0, len(requiredGatewayAPICRDs))
-	for _, name := range requiredGatewayAPICRDs {
-		definitions = append(definitions, gatewayAPICRD(name, gatewayconsts.BundleVersion))
+func supportedGatewayAPICRDs(config Config) []client.Object {
+	names := config.GatewayAPICRDNames()
+	definitions := make([]client.Object, 0, len(names))
+	for _, name := range names {
+		definition := gatewayAPICRD(name, gatewayconsts.BundleVersion)
+		if config.GatewayAPIChannel != "" {
+			definition.Annotations[gatewayconsts.ChannelAnnotation] = config.GatewayAPIChannel
+		}
+		definitions = append(definitions, definition)
 	}
 	return definitions
 }
@@ -261,9 +264,10 @@ func gatewayAPICRD(name, bundleVersion string) *apiextensionsv1.CustomResourceDe
 	if bundleVersion != "" {
 		annotations[gatewayconsts.BundleVersionAnnotation] = bundleVersion
 	}
+	_, group, _ := strings.Cut(name, ".")
 	return &apiextensionsv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations},
-		Spec:       apiextensionsv1.CustomResourceDefinitionSpec{Group: gatewayv1.GroupName},
+		Spec:       apiextensionsv1.CustomResourceDefinitionSpec{Group: group},
 	}
 }
 

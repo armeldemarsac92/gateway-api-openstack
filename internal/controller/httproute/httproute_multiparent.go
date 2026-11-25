@@ -105,19 +105,7 @@ func (r *Reconciler) reconcileRouteParents(ctx context.Context, route *gatewayv1
 		}
 	}
 
-	var result ctrl.Result
-	var reconcileErr error
-	for _, identity := range cleanup {
-		progress, err := r.detachGatewayBinding(ctx, route, route.DeepCopy(), identity)
-		if err != nil {
-			scope := &httpRouteScope{route: route}
-			progress, err = r.handleRouteFinalizationFailure(ctx, scope, identity, err)
-			err = errors.Join(err, r.patchHTTPRoute(ctx, scope))
-		}
-		result = mergeRouteResult(result, progress)
-		reconcileErr = errors.Join(reconcileErr, err)
-	}
-
+	result, reconcileErr := r.detachRouteParents(ctx, route, cleanup)
 	for _, group := range groups {
 		if _, blocked := detaching[client.ObjectKeyFromObject(group.gateway)]; blocked {
 			// Cleanup updates the binding metadata and enqueues the route again.
@@ -129,6 +117,22 @@ func (r *Reconciler) reconcileRouteParents(ctx context.Context, route *gatewayv1
 		result = mergeRouteResult(result, progress)
 	}
 	return result, reconcileErr
+}
+
+func (r *Reconciler) detachRouteParents(ctx context.Context, route *gatewayv1.HTTPRoute, identities []cloud.Identity) (ctrl.Result, error) {
+	var result ctrl.Result
+	var cleanupErr error
+	for _, identity := range identities {
+		progress, err := r.detachGatewayBinding(ctx, route, route.DeepCopy(), identity)
+		if err != nil {
+			scope := &httpRouteScope{route: route}
+			progress, err = r.handleRouteFinalizationFailure(ctx, scope, identity, err)
+			err = errors.Join(err, r.patchHTTPRoute(ctx, scope))
+		}
+		result = mergeRouteResult(result, progress)
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+	return result, cleanupErr
 }
 
 func (r *Reconciler) reconcileRouteParentGroup(ctx context.Context, scope *httpRouteScope, parents []managedRouteParent) (ctrl.Result, error) {

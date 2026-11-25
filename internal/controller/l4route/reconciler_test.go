@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -324,6 +325,11 @@ func routeFixture() (*gatewayv1.Gateway, *gatewayv1.GatewayClass, *gatewayv1.TCP
 
 func testReconciler(t *testing.T, objects ...client.Object) *Reconciler {
 	t.Helper()
+	return testReconcilerForChannel(t, "standard", objects...)
+}
+
+func testReconcilerForChannel(t *testing.T, channel string, objects ...client.Object) *Reconciler {
+	t.Helper()
 	scheme := runtime.NewScheme()
 	for _, register := range []func(*runtime.Scheme) error{corev1.AddToScheme, discoveryv1.AddToScheme, gatewayv1.Install, apiextensionsv1.AddToScheme} {
 		if err := register(scheme); err != nil {
@@ -331,9 +337,15 @@ func testReconciler(t *testing.T, objects ...client.Object) *Reconciler {
 		}
 	}
 	config := controller.Config{ControllerName: "example.com/openstack", ClusterID: "cluster", OpenStackProjectID: "project"}
+	if channel != "standard" {
+		config.GatewayAPIChannel = channel
+		if err := gatewayx.Install(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, name := range config.GatewayAPICRDNames() {
 		objects = append(objects, &apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{
-			Name: name, Annotations: map[string]string{gatewayconsts.ChannelAnnotation: "standard", gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion},
+			Name: name, Annotations: map[string]string{gatewayconsts.ChannelAnnotation: channel, gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion},
 		}})
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}).WithObjects(objects...)

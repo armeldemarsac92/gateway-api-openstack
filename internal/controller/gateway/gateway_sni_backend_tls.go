@@ -71,23 +71,33 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 	if err != nil {
 		return nil, err
 	}
-	peers := map[types.NamespacedName][]gatewayv1.TLSRoute{}
 	candidates := map[types.NamespacedName]bool{}
+	includeDefaults := false
 	for _, route := range routes {
-		if len(route.Spec.ParentRefs) != 1 || !route.DeletionTimestamp.IsZero() {
+		if !route.DeletionTimestamp.IsZero() || !r.Config.DefaultGatewaysEnabled() && len(route.Spec.ParentRefs) != 1 {
 			continue
 		}
-		ref := route.Spec.ParentRefs[0]
-		if !controller.IsGatewayParentRef(ref) {
-			continue
-		}
-		parent := types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)}
-		peers[parent] = append(peers[parent], route)
 		for key := range TLSRouteBackendServiceRefs(&route) {
-			if slices.Contains(targets, key) {
-				candidates[parent] = true
-				break
+			if !slices.Contains(targets, key) {
+				continue
 			}
+			for _, ref := range route.Spec.ParentRefs {
+				if controller.IsGatewayParentRef(ref) {
+					parent := types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)}
+					candidates[parent] = true
+				}
+			}
+			includeDefaults = includeDefaults || route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll
+			break
+		}
+	}
+	if r.Config.DefaultGatewaysEnabled() && includeDefaults {
+		parents, err := controller.DefaultGatewayParents(ctx, r.APIReader, "", gatewayv1.CommonRouteSpec{UseDefaultGateways: gatewayv1.GatewayDefaultScopeAll})
+		if err != nil {
+			return nil, err
+		}
+		for _, ref := range parents {
+			candidates[types.NamespacedName{Namespace: string(*ref.Namespace), Name: string(ref.Name)}] = true
 		}
 	}
 	if len(candidates) == 0 {
@@ -131,7 +141,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 			continue
 		}
 		snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listeners[0], listeners: listeners}
-		observation, err := r.admitSNIRoutes(ctx, snapshot, peers[key])
+		observation, err := r.admitSNIRoutes(ctx, snapshot, routes)
 		if err != nil {
 			return nil, err
 		}

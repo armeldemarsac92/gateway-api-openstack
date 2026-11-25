@@ -125,7 +125,7 @@ func (r *backendRetryBudgetStatusReconciler) observeRetryPolicy(ctx context.Cont
 	used := make(map[types.NamespacedName]bool)
 	setParents := make(map[types.NamespacedName]types.NamespacedName)
 	for _, gateway := range gateways {
-		peers, err := r.routes.filterGatewayGraphRoutes(ctx, routes, controller.GatewayIdentity(r.routes.Config, gateway), setParents)
+		peers, err := r.routes.filterGatewayGraphRoutes(ctx, routes, controller.GatewayIdentity(r.routes.Config, gateway), gateway, setParents)
 		if err != nil {
 			return nil, err
 		}

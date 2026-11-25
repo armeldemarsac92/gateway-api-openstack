@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -37,8 +38,39 @@ func targetsGateway(parent gatewayv1.ParentReference, namespace string, gateway 
 	return namespace == gateway.Namespace && string(parent.Name) == gateway.Name
 }
 
-func attachParent(input Input, route *gatewayv1.HTTPRoute, parentIndex int, sections []gatewayv1.Listener, listeners []Listener, parentNamespace string) ParentAttachment {
-	parent := route.Spec.ParentRefs[parentIndex]
+// DefaultGatewayParent returns the implicit, unscoped reference requested by both
+// the Route and the Gateway. Explicit section and port references retain their
+// own attachment decisions. Listener admission still applies to every reference.
+func DefaultGatewayParent(spec gatewayv1.CommonRouteSpec, routeNamespace string, gateway *gatewayv1.Gateway) (gatewayv1.ParentReference, bool) {
+	if spec.UseDefaultGateways != gatewayv1.GatewayDefaultScopeAll || gateway == nil || !gateway.DeletionTimestamp.IsZero() ||
+		gateway.Spec.DefaultScope != gatewayv1.GatewayDefaultScopeAll {
+		return gatewayv1.ParentReference{}, false
+	}
+	for _, ref := range spec.ParentRefs {
+		if ref.SectionName == nil && ref.Port == nil && targetsGateway(ref, routeNamespace, gateway) {
+			return gatewayv1.ParentReference{}, false
+		}
+	}
+	// The API server defaults these fields on status.parents. A synthesized
+	// reference must compare equal to the status read after a checkpoint.
+	return gatewayv1.ParentReference{
+		Group: ptr.To(gatewayv1.Group(gatewayv1.GroupName)), Kind: ptr.To(gatewayv1.Kind("Gateway")),
+		Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace)),
+	}, true
+}
+
+// EffectiveParentRefs returns the declared references plus this Gateway's
+// implicit reference, if enabled. Callers must treat the slice as read-only.
+func EffectiveParentRefs(spec gatewayv1.CommonRouteSpec, namespace string, gateway *gatewayv1.Gateway, defaults bool) []gatewayv1.ParentReference {
+	if defaults {
+		if parent, ok := DefaultGatewayParent(spec, namespace, gateway); ok {
+			return append(slices.Clip(spec.ParentRefs), parent)
+		}
+	}
+	return spec.ParentRefs
+}
+
+func attachParent(input Input, route *gatewayv1.HTTPRoute, parent gatewayv1.ParentReference, parentIndex int, sections []gatewayv1.Listener, listeners []Listener, parentNamespace string) ParentAttachment {
 	routeKind := HTTPProfileRouteKind(route)
 	result := ParentAttachment{Index: parentIndex, Reference: *parent.DeepCopy(), State: AttachmentRejected}
 	for i := range sections {

@@ -17,11 +17,13 @@ limitations under the License.
 package httproute
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -29,7 +31,10 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -552,6 +557,112 @@ func TestHTTPAndGRPCRouteMultipleGatewayLifecycle(t *testing.T) {
 	}
 }
 
+func TestHTTPAndGRPCRouteDefaultGatewayLifecycle(t *testing.T) {
+	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
+		t.Run(string(kind), func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+			class, first, http, service, endpoints := endpointRouteFixture(t)
+			first.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+			second := first.DeepCopy()
+			second.Namespace, second.Name, second.UID = "other-namespace", "other", "other-uid"
+			second.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{
+				Namespaces: &gatewayv1.RouteNamespaces{
+					From:     ptr.To(gatewayv1.NamespacesFromSelector),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"allowed": "true"}},
+				},
+			}
+			foreignClass := class.DeepCopy()
+			foreignClass.Name, foreignClass.Spec.ControllerName = "foreign", "example.com/foreign"
+			foreignGateway := first.DeepCopy()
+			foreignGateway.Name, foreignGateway.UID = "foreign", "foreign-uid"
+			foreignGateway.Spec.GatewayClassName = gatewayv1.ObjectName(foreignClass.Name)
+			meshRef := gatewayv1.ParentReference{Group: ptr.To(gatewayv1.Group("")), Kind: ptr.To(gatewayv1.Kind("Service")), Name: "mesh"}
+			meshStatus := gatewayv1.RouteParentStatus{
+				ParentRef: meshRef, ControllerName: "example.com/mesh",
+				Conditions: []metav1.Condition{controller.Condition("Accepted", metav1.ConditionTrue, "Accepted", "Mesh status", http.Generation)},
+			}
+			http.Spec.ParentRefs = []gatewayv1.ParentReference{meshRef}
+			http.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+			http.Status.Parents = []gatewayv1.RouteParentStatus{meshStatus}
+			var route client.Object = http
+			if kind == model.GRPCRouteKind {
+				cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+				service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+				grpc := &gatewayv1.GRPCRoute{ObjectMeta: http.ObjectMeta, Status: gatewayv1.GRPCRouteStatus{RouteStatus: http.Status.RouteStatus}}
+				grpc.Spec.CommonRouteSpec = http.Spec.CommonRouteSpec
+				grpc.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("backend")}
+				route = grpc
+			}
+			namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: http.Namespace, UID: "routes-namespace-uid", Labels: map[string]string{"allowed": "true"}}}
+			scheme := testScheme(t)
+			require.NoError(t, gatewayx.Install(scheme))
+			builder := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(route, first, second).
+				WithObjects(class, foreignClass, first, second, foreignGateway, route, service, endpoints, namespace)
+			kube := builder.Build()
+			provider := &recordingProvider{}
+			r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider).forRouteKind(kind)
+			req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+			reconcile := func(times int) map[string]gatewayv1.RouteParentStatus {
+				t.Helper()
+				for range times {
+					_, err := r.Reconcile(ctx, req)
+					require.NoError(t, err)
+				}
+				require.NoError(t, kube.Get(ctx, req.NamespacedName, route))
+				spec, statuses := controller.RouteSpecAndParentStatuses(route)
+				require.Equal(t, []gatewayv1.ParentReference{meshRef}, spec.ParentRefs)
+				parents := map[string]gatewayv1.RouteParentStatus{}
+				for _, parent := range statuses {
+					if parent.ControllerName == meshStatus.ControllerName {
+						require.Equal(t, meshStatus, parent)
+						continue
+					}
+					require.Equal(t, cfg.ControllerName, parent.ControllerName)
+					require.NotNil(t, parent.ParentRef.Namespace)
+					parents[string(*parent.ParentRef.Namespace)+"/"+string(parent.ParentRef.Name)] = parent
+				}
+				require.Len(t, statuses, len(parents)+1)
+				return parents
+			}
+			firstKey, secondKey := client.ObjectKeyFromObject(first), client.ObjectKeyFromObject(second)
+			firstID, secondID := controller.RouteIdentity(cfg, first, route), controller.RouteIdentity(cfg, second, route)
+			require.Equal(t, []ctrl.Request{req}, r.enqueueHTTPRoutesForGateway(ctx, first))
+			explicitPeer := mapperTestHTTPRoute(first.Namespace, "peer", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(first.Name)}, "backend")
+			require.Equal(t, []ctrl.Request{req}, r.enqueueHTTPRoutePeers(ctx, explicitPeer))
+			parents := reconcile(2)
+			require.Len(t, parents, 2)
+			for _, key := range []client.ObjectKey{firstKey, secondKey} {
+				require.True(t, meta.IsStatusConditionTrue(parents[key.String()].Conditions, cfg.Domain()+"/Programmed"), "Gateway %s status: %v", key, parents)
+			}
+			require.True(t, slices.ContainsFunc(provider.routeSpecs, func(spec cloud.RouteSpec) bool { return spec.Identity == firstID }))
+			require.True(t, slices.ContainsFunc(provider.routeSpecs, func(spec cloud.RouteSpec) bool { return spec.Identity == secondID }))
+
+			require.NoError(t, kube.Get(ctx, firstKey, first))
+			first.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+			first.Generation++
+			require.NoError(t, kube.Update(ctx, first))
+			parents = reconcile(2)
+			require.Len(t, parents, 1)
+			require.True(t, meta.IsStatusConditionTrue(parents[secondKey.String()].Conditions, cfg.Domain()+"/Programmed"))
+			require.Equal(t, []cloud.Identity{firstID}, provider.deletedRoutes)
+
+			require.NoError(t, kube.Get(ctx, client.ObjectKeyFromObject(namespace), namespace))
+			namespace.Labels = nil
+			require.NoError(t, kube.Update(ctx, namespace))
+			require.Equal(t, []ctrl.Request{req}, r.enqueueHTTPRoutesForNamespace(ctx, namespace))
+			parents = reconcile(3)
+			require.Len(t, parents, 1)
+			rejection := meta.FindStatusCondition(parents[secondKey.String()].Conditions, string(gatewayv1.RouteConditionAccepted))
+			require.NotNil(t, rejection)
+			require.Equal(t, metav1.ConditionFalse, rejection.Status)
+			require.Equal(t, string(gatewayv1.RouteReasonNotAllowedByListeners), rejection.Reason)
+			require.Equal(t, []cloud.Identity{firstID, secondID}, provider.deletedRoutes)
+		})
+	}
+}
+
 func TestReplacementGatewayWaitsForCleanupOfPreviousUID(t *testing.T) {
 	cfg := testConfig()
 	class, previous, route, service, endpoints := endpointRouteFixture(t)
@@ -646,4 +757,43 @@ func TestReplacementGatewayWaitsForCleanupOfPreviousUID(t *testing.T) {
 	if err != nil || len(bindings) != 1 || bindings[0].Identity.GatewayUID != string(sibling.UID) {
 		t.Fatalf("cleanup should remove only the previous UID, got %v, %v", bindings, err)
 	}
+}
+
+func TestDefaultDiscoveryFailureCompletesOnlyPreviouslyDetachingBinding(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	class, first, route, service, endpoints := endpointRouteFixture(t)
+	second := first.DeepCopy()
+	second.Name, second.UID = "second", "second-gateway"
+	route.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(second.Name)}}
+	r := Reconciler{Config: cfg, Coordinator: &graph.Coordinator{}}
+	require.NoError(t, r.applyRouteBinding(route, first))
+	require.NoError(t, r.applyRouteBinding(route, second))
+	firstID, secondID := controller.RouteIdentity(cfg, first, route), controller.RouteIdentity(cfg, second, route)
+	require.NoError(t, controller.MarkRouteGatewayDetaching(cfg, route, firstID))
+	scheme := testScheme(t)
+	require.NoError(t, gatewayx.Install(scheme))
+	kube := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(route).WithObjects(class, first, second, route, service, endpoints).Build()
+	discoveryErr := errors.New("default Gateway inventory is temporarily unavailable")
+	r.Client, r.APIReader = kube, interceptor.NewClient(kube, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, gateways := list.(*gatewayv1.GatewayList); gateways {
+				return discoveryErr
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(r, provider)
+	key := client.ObjectKeyFromObject(route)
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.ErrorIs(t, err, discoveryErr)
+	require.Equal(t, []cloud.Identity{firstID}, provider.deletedRoutes)
+	require.NoError(t, kube.Get(t.Context(), key, route))
+	bindings, err := controller.StoredRouteGatewayBindings(cfg, route)
+	require.NoError(t, err)
+	require.Len(t, bindings, 1)
+	require.Equal(t, secondID, bindings[0].Identity)
+	require.Equal(t, controller.RouteAttached, bindings[0].Lifecycle)
 }

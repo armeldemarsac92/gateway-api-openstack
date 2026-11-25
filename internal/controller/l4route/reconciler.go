@@ -56,6 +56,7 @@ type Reconciler struct {
 }
 
 type routePlan struct {
+	parent        routeParent
 	parents       []routeParent
 	resolved      metav1.Condition
 	programmed    metav1.Condition
@@ -84,40 +85,142 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	route := viewRoute(object)
-	binding, bound, err := r.routeBinding(route)
+	bindings, err := r.routeBindings(route)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if !route.GetDeletionTimestamp().IsZero() || route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
-		if !bound {
-			return ctrl.Result{}, nil
+	var result ctrl.Result
+	for _, binding := range bindings {
+		if route.GetDeletionTimestamp().IsZero() && binding.Lifecycle != controller.RouteDetaching {
+			continue
 		}
-		return r.detach(ctx, route, binding)
+		outcome, detachErr := r.detach(ctx, route, binding)
+		result = mergeResult(result, outcome)
+		err = errors.Join(err, detachErr)
 	}
-	plan, err := r.planRoute(ctx, route, binding, bound)
-	if err != nil {
-		return ctrl.Result{}, err
+	if !route.GetDeletionTimestamp().IsZero() {
+		return result, err
 	}
+	keys, discoveryErr := r.routeGatewayKeys(ctx, route, bindings)
+	err = errors.Join(err, discoveryErr)
+	var plans []routePlan
+	for _, key := range keys {
+		parents, gatewayUID, parentErr := r.managedParents(ctx, route, key)
+		if parentErr != nil {
+			err = errors.Join(err, parentErr)
+		}
+		var binding controller.RouteGatewayBinding
+		blocked := false
+		replaced := false
+		for _, candidate := range bindings {
+			identity := candidate.Identity
+			if identity.GatewayNamespace != key.Namespace || identity.GatewayName != key.Name {
+				continue
+			}
+			sameUID := identity.GatewayUID == gatewayUID
+			replaced = replaced || gatewayUID != "" && !sameUID
+			if candidate.Lifecycle == controller.RouteDetaching {
+				blocked = true
+				continue
+			}
+			if sameUID && len(parents) != 0 {
+				binding = candidate
+				continue
+			}
+			if parentErr != nil && (gatewayUID == "" || sameUID) {
+				continue
+			}
+			// A withdrawn, deleted or replaced Gateway still owns its old
+			// forwarding fragment until that fragment is deleted.
+			outcome, detachErr := r.detach(ctx, route, candidate)
+			result = mergeResult(result, outcome)
+			err = errors.Join(err, detachErr)
+			blocked = true
+		}
+		if blocked {
+			if !replaced {
+				plans = append(plans, routePlan{parents: parents})
+			}
+			continue
+		}
+		if parentErr != nil {
+			plans = append(plans, r.keepParentStatuses(route, key))
+			continue
+		}
+		plan, planErr := r.planParents(ctx, route, parents, binding)
+		if planErr != nil {
+			err = errors.Join(err, planErr)
+			plans = append(plans, routePlan{parents: parents})
+			continue
+		}
+		outcome, reconcileErr := r.reconcilePlan(ctx, route, binding, &plan)
+		result = mergeResult(result, outcome)
+		err = errors.Join(err, reconcileErr, plan.readError)
+		if errors.Is(reconcileErr, controller.ErrGraphInputChanged) || errors.Is(reconcileErr, controller.ErrUnsupportedGatewayAPIVersion) {
+			plan = routePlan{parents: parents}
+		}
+		plans = append(plans, plan)
+	}
+	return result, errors.Join(err, r.patchStatuses(ctx, route, plans...))
+}
+
+func (r *Reconciler) routeGatewayKeys(ctx context.Context, route *transportRoute, bindings []controller.RouteGatewayBinding) ([]client.ObjectKey, error) {
+	var keys []client.ObjectKey
+	for _, ref := range route.parentRefs {
+		if controller.IsGatewayParentRef(ref) {
+			keys = append(keys, gatewayKey(route, ref))
+		}
+	}
+	var err error
+	if r.Config.DefaultGatewaysEnabled() && route.commonSpec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+		var defaults []gatewayv1.ParentReference
+		defaults, err = controller.DefaultGatewayParents(ctx, r.APIReader, route.GetNamespace(), route.commonSpec)
+		for _, ref := range defaults {
+			keys = append(keys, gatewayKey(route, ref))
+		}
+	}
+	for _, binding := range bindings {
+		keys = append(keys, client.ObjectKey{Namespace: binding.Identity.GatewayNamespace, Name: binding.Identity.GatewayName})
+	}
+	for _, status := range route.status.Parents {
+		if status.ControllerName == r.Config.ControllerName && controller.IsGatewayParentRef(status.ParentRef) {
+			keys = append(keys, gatewayKey(route, status.ParentRef))
+		}
+	}
+	seen := make(map[client.ObjectKey]bool, len(keys))
+	return slices.DeleteFunc(keys, func(key client.ObjectKey) bool {
+		duplicate := seen[key]
+		seen[key] = true
+		return duplicate
+	}), err
+}
+
+func (r *Reconciler) reconcilePlan(ctx context.Context, route *transportRoute, binding controller.RouteGatewayBinding, plan *routePlan) (ctrl.Result, error) {
 	if plan.detach {
 		return r.detach(ctx, route, binding)
 	}
-	result := ctrl.Result{RequeueAfter: plan.requeue}
-	if plan.desired != nil {
-		if !bound {
-			return r.bind(ctx, route, plan.desired.Identity)
-		}
-		if r.currentTarget(route, plan.parents[0].ref, plan.target) == nil {
-			return ctrl.Result{Requeue: true}, r.checkpointTarget(ctx, route, binding, plan.target)
-		}
-		result, err = r.ensure(ctx, route, &plan)
-		if errors.Is(err, controller.ErrGraphInputChanged) || errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
-			return result, err
-		}
+	if plan.desired == nil {
+		return ctrl.Result{RequeueAfter: plan.requeue}, nil
 	}
-	if plan.requeue != 0 && (result.RequeueAfter == 0 || plan.requeue < result.RequeueAfter) {
-		result.RequeueAfter = plan.requeue
+	if binding.Identity.GatewayUID == "" {
+		return r.bind(ctx, route, plan.desired.Identity)
 	}
-	return result, errors.Join(err, plan.readError, r.patchStatuses(ctx, route, plan))
+	if !r.targetCheckpointed(route, plan, binding.Forwarding) {
+		return ctrl.Result{Requeue: true}, r.checkpointTarget(ctx, route, binding.Identity, plan.target)
+	}
+	result, err := r.ensure(ctx, route, plan, binding.Forwarding)
+	return mergeResult(result, ctrl.Result{RequeueAfter: plan.requeue}), err
+}
+
+func mergeResult(result, other ctrl.Result) ctrl.Result {
+	result.Requeue = result.Requeue || other.Requeue
+	if other.RequeueAfter != 0 && (result.RequeueAfter == 0 || other.RequeueAfter < result.RequeueAfter) {
+		result.RequeueAfter = other.RequeueAfter
+	}
+	if result.Requeue {
+		result.RequeueAfter = 0
+	}
+	return result
 }
 
 func (r *Reconciler) tcpConnectionRejectionEnabled() bool {
@@ -136,36 +239,59 @@ func (r *Reconciler) udpPacketDropEnabled(gateway *gatewayv1.Gateway, topology c
 }
 
 func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, binding cloud.Identity, bound bool) (routePlan, error) {
-	plan := routePlan{}
-	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", fmt.Sprintf("%s forwarding has not been programmed", r.protocol()))
-	plan.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionUnknown, "Pending", "Backend references have not been resolved")
-	if bound && !routeStillReferences(route, binding) {
-		plan.detach = true
-		return plan, nil
+	parents, gatewayUID, err := r.managedParents(ctx, route, client.ObjectKey{Namespace: binding.GatewayNamespace, Name: binding.GatewayName})
+	if bound && gatewayUID != "" && binding.GatewayUID != gatewayUID {
+		return routePlan{detach: true}, nil
 	}
-	var err error
-	plan.parents, err = r.managedParents(ctx, route)
 	if err != nil {
 		return routePlan{}, err
 	}
-	if len(plan.parents) == 0 {
+	checkpoint := controller.RouteGatewayBinding{}
+	if bound {
+		checkpoint, err = controller.StoredRouteGatewayBinding(r.Config, route.Object, binding)
+		if err != nil {
+			return routePlan{}, err
+		}
+		if checkpoint.Identity != binding {
+			return routePlan{}, controller.ErrGraphInputChanged
+		}
+	}
+	return r.planParents(ctx, route, parents, checkpoint)
+}
+
+func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, parents []routeParent, binding controller.RouteGatewayBinding) (routePlan, error) {
+	bound := binding.Identity.GatewayUID != ""
+	plan := routePlan{parents: parents}
+	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", fmt.Sprintf("%s forwarding has not been programmed", r.protocol()))
+	plan.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionUnknown, "Pending", "Backend references have not been resolved")
+	if len(parents) == 0 {
 		plan.detach = bound
 		return plan, nil
 	}
-	if len(route.parentRefs) != 1 {
+	if !r.Config.DefaultGatewaysEnabled() && len(route.parentRefs) != 1 {
 		for i := range plan.parents {
 			plan.parents[i].listeners = nil
 			plan.parents[i].rejected = model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("%s forwarding supports exactly one Gateway parentRef", r.protocol())}
 		}
+		plan.detach = bound
 		return plan, nil
 	}
-	parent := plan.parents[0]
-	if bound && (len(parent.listeners) == 0 || !controller.SameGatewayIdentity(binding, controller.RouteIdentity(r.Config, parent.gateway, route))) {
+	parent := parents[0]
+	parent.listeners = nil
+	for _, selected := range parents {
+		for _, listener := range selected.listeners {
+			if !slices.Contains(parent.listeners, listener) {
+				parent.listeners = append(parent.listeners, listener)
+			}
+		}
+	}
+	plan.parent = parent
+	if bound && (len(parent.listeners) == 0 || !controller.SameGatewayIdentity(binding.Identity, controller.RouteIdentity(r.Config, parent.gateway, route))) {
 		plan.detach = true
 		return plan, nil
 	}
 	if bound {
-		routePort := controller.ScopedRouteAnchor(r.Config, route, r.protocol())
+		routePort := binding.Anchor
 		if routePort != 0 && (parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(routePort) ||
 			parent.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != string(r.protocol())) {
 			if err := controller.ValidateGatewayBinding(r.Config, parent.gateway); err != nil {
@@ -205,6 +331,13 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 			}
 			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "NotSelected", message)
 			plan.detach = bound
+		} else {
+			for _, selected := range parents {
+				if parentWonPort(selected, plan.listenerPorts) {
+					plan.parent.ref = selected.ref
+					break
+				}
+			}
 		}
 	}
 	if plan.detach {
@@ -282,7 +415,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		return routePlan{}, err
 	}
 	if err != nil || !controller.GatewayClassSupportsInstalledVersion(parent.class) {
-		err := r.planVersionSkew(ctx, route, &plan, backends, rejectWeight, bound)
+		err := r.planVersionSkew(ctx, route, &plan, backends, rejectWeight, binding)
 		return plan, err
 	}
 	if len(parent.listeners) == 0 || plan.programmed.Reason == "NotSelected" {
@@ -353,7 +486,7 @@ func (r *Reconciler) wonListenerPorts(ctx context.Context, gateway *gatewayv1.Ga
 	var ports []int
 	namespaces := make(routeNamespaceCache)
 	for _, listener := range listeners {
-		selected, err := r.selectedRoute(ctx, gateway, listener, listenerCandidates(gateway, listener, routes), namespaces)
+		selected, err := r.selectedRoute(ctx, gateway, listener, r.listenerCandidates(gateway, listener, routes), namespaces)
 		if err != nil {
 			return nil, err
 		}
@@ -363,15 +496,6 @@ func (r *Reconciler) wonListenerPorts(ctx context.Context, gateway *gatewayv1.Ga
 	}
 	slices.Sort(ports)
 	return ports, nil
-}
-
-func routeStillReferences(route *transportRoute, identity cloud.Identity) bool {
-	if len(route.parentRefs) != 1 {
-		return false
-	}
-	ref := route.parentRefs[0]
-	key := gatewayKey(route, ref)
-	return controller.IsGatewayParentRef(ref) && key.Namespace == identity.GatewayNamespace && key.Name == identity.GatewayName
 }
 
 // gatewayTopology requires the current transport listener and checkpointed topology.
@@ -514,12 +638,12 @@ func (r *Reconciler) backendUnavailableShare(ctx context.Context, route *transpo
 	return nil, nil, diagnostic, nil
 }
 
-func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *routePlan) (ctrl.Result, error) {
+func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *routePlan, checkpoint controller.RouteGatewayTarget) (ctrl.Result, error) {
 	if r.Writer == nil {
 		return ctrl.Result{}, errors.New("gateway graph writer is required")
 	}
 	identity := plan.desired.Identity
-	request := route.graphRequest(identity, graph.Ensure, plan.parents[0].gateway)
+	request := route.graphRequest(identity, graph.Ensure, plan.parent.gateway)
 	if r.protocol() == gatewayv1.TCPProtocolType && len(plan.desired.ScopedListenerPorts) != 0 {
 		request.ForwardingTarget = plan.target
 	}
@@ -548,15 +672,19 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 		return ctrl.Result{}, err
 	}
 	if component.Outcome.State == cloud.OutcomeProgressing {
-		target := r.currentTarget(route, plan.parents[0].ref, plan.target)
-		if !component.ObservationDeferred || target == nil || target.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) {
+		if !component.ObservationDeferred || !r.retainObservedProgrammed(route, plan, checkpoint) {
 			message := controller.ProviderProgressMessage(component.Outcome, fmt.Sprintf("Octavia is programming the %s forwarding configuration", r.protocol()))
 			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", message)
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(component.Outcome, route.GetUID())}, nil
 	}
+	if checkpoint.Value != "" && !checkpoint.Observed {
+		if err := r.recordObservedTarget(ctx, route, identity, checkpoint); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	plan.targetStatus = routeCondition(route, r.forwardingTargetType(), metav1.ConditionTrue, "Observed", plan.target)
-	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionTrue, "Programmed", fmt.Sprintf("Octavia programmed the %s forwarding configuration", r.protocol()))
+	plan.programmed = r.programmedCondition(route)
 	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, route.GetUID())}, nil
 }
 

@@ -181,7 +181,7 @@ func (r *Reconciler) applyRouteBinding(route *gatewayv1.HTTPRoute, gateway *gate
 	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType {
 		binding.Anchor = port
 	}
-	return controller.ApplyHTTPRouteGatewayBinding(r.Config, route, bindings, binding)
+	return controller.ApplyRouteGatewayBinding(r.Config, route, bindings, binding)
 }
 
 func (r *Reconciler) clearRouteBinding(route *gatewayv1.HTTPRoute) {

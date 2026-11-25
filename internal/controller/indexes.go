@@ -39,6 +39,12 @@ const (
 	IndexGatewayClassByParameters = "spec.openStackParameters"
 	// IndexGatewayByClass indexes Gateways by GatewayClass name.
 	IndexGatewayByClass = "spec.gatewayClassName"
+	// IndexGatewayByDefaultScope finds Gateways that opt into implicit attachment.
+	IndexGatewayByDefaultScope = "spec.defaultScope"
+	// IndexRouteByDefaultGateways finds Routes that request the matching scope.
+	IndexRouteByDefaultGateways = "spec.useDefaultGateways"
+	// IndexRouteAtParentStatusLimit finds Routes that can omit an admitted parent.
+	IndexRouteAtParentStatusLimit = "status.parentLimitReached"
 	// IndexHTTPRouteByParentGateway indexes HTTPRoutes by parent Gateway key.
 	IndexHTTPRouteByParentGateway = "spec.parentGateway"
 	// IndexHTTPRouteByListenerSet indexes HTTPRoutes by their declared ListenerSet parents.
@@ -172,12 +178,7 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				if !ok {
 					return nil
 				}
-				keys, _ := RouteBoundGatewayKeys(config, route)
-				var index []string
-				for _, key := range keys {
-					index = append(index, ObjectKeyString(key))
-				}
-				return index
+				return boundGatewayKeys(config, route)
 			},
 		},
 		{
@@ -262,10 +263,7 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				return l4BackendKeys(object, true)
 			}},
 			controllerFieldIndex{object: route, field: IndexL4RouteByBoundGateway, extract: func(object client.Object) []string {
-				if key := boundGatewayKey(config, object); key != "" {
-					return []string{key}
-				}
-				return nil
+				return boundGatewayKeys(config, object)
 			}},
 		)
 	}
@@ -328,6 +326,34 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			return slices.Compact(keys)
 		}})
 	}
+	if config.DefaultGatewaysEnabled() {
+		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.Gateway{}, field: IndexGatewayByDefaultScope, extract: func(object client.Object) []string {
+			gateway := object.(*gatewayv1.Gateway)
+			if gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll && gateway.DeletionTimestamp.IsZero() {
+				return []string{string(gateway.Spec.DefaultScope)}
+			}
+			return nil
+		}})
+		kinds := []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}, &gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}}
+		if config.TLSRoutesEnabled() {
+			kinds = append(kinds, &gatewayv1.TLSRoute{})
+		}
+		for _, kind := range kinds {
+			indexes = append(indexes, controllerFieldIndex{object: kind, field: IndexRouteByDefaultGateways, extract: func(object client.Object) []string {
+				spec, _ := RouteSpecAndParentStatuses(object)
+				if spec != nil && spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+					return []string{string(spec.UseDefaultGateways)}
+				}
+				return nil
+			}}, controllerFieldIndex{object: kind, field: IndexRouteAtParentStatusLimit, extract: func(object client.Object) []string {
+				_, parents := RouteSpecAndParentStatuses(object)
+				if len(parents) >= RouteParentStatusLimit {
+					return []string{"true"}
+				}
+				return nil
+			}})
+		}
+	}
 	return indexes
 }
 
@@ -336,22 +362,31 @@ func PodLabelIndexKey(key, value string) string {
 	return key + "=" + value
 }
 
-// RouteParents returns the declared and reported parents of a supported Route.
-func RouteParents(object client.Object) ([]gatewayv1.ParentReference, []gatewayv1.RouteParentStatus, bool) {
+// RouteSpecAndParentStatuses returns the common attachment fields of a supported Route.
+func RouteSpecAndParentStatuses(object client.Object) (*gatewayv1.CommonRouteSpec, []gatewayv1.RouteParentStatus) {
 	switch route := object.(type) {
 	case *gatewayv1.HTTPRoute:
-		return route.Spec.ParentRefs, route.Status.Parents, true
+		return &route.Spec.CommonRouteSpec, route.Status.Parents
 	case *gatewayv1.GRPCRoute:
-		return route.Spec.ParentRefs, route.Status.Parents, true
+		return &route.Spec.CommonRouteSpec, route.Status.Parents
 	case *gatewayv1.TCPRoute:
-		return route.Spec.ParentRefs, route.Status.Parents, true
+		return &route.Spec.CommonRouteSpec, route.Status.Parents
 	case *gatewayv1.UDPRoute:
-		return route.Spec.ParentRefs, route.Status.Parents, true
+		return &route.Spec.CommonRouteSpec, route.Status.Parents
 	case *gatewayv1.TLSRoute:
-		return route.Spec.ParentRefs, route.Status.Parents, true
+		return &route.Spec.CommonRouteSpec, route.Status.Parents
 	default:
+		return nil, nil
+	}
+}
+
+// RouteParents returns the declared and reported parents of a supported Route.
+func RouteParents(object client.Object) ([]gatewayv1.ParentReference, []gatewayv1.RouteParentStatus, bool) {
+	spec, statuses := RouteSpecAndParentStatuses(object)
+	if spec == nil {
 		return nil, nil, false
 	}
+	return spec.ParentRefs, statuses, true
 }
 
 // ObjectKeyString returns the stable namespace and name representation used by
@@ -485,15 +520,13 @@ func l4BackendKeys(object client.Object, namespacesOnly bool) []string {
 	return sortedIndexKeys(keys)
 }
 
-func boundGatewayKey(config Config, route client.Object) string {
-	annotations := route.GetAnnotations()
-	namespace := annotations[config.RouteGatewayNamespaceAnnotation()]
-	name := annotations[config.RouteGatewayNameAnnotation()]
-	uid := annotations[config.RouteGatewayUIDAnnotation()]
-	if namespace == "" || name == "" || uid == "" {
-		return ""
+func boundGatewayKeys(config Config, route client.Object) []string {
+	keys, _ := RouteBoundGatewayKeys(config, route)
+	var index []string
+	for _, key := range keys {
+		index = append(index, ObjectKeyString(key))
 	}
-	return ObjectKeyString(types.NamespacedName{Namespace: namespace, Name: name})
+	return index
 }
 
 func sortedIndexKeys(keys map[string]struct{}) []string {

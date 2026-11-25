@@ -42,7 +42,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	if r.APIReader == nil {
 		return graph.RouteInputs{}, controller.ErrAPIReaderRequired
 	}
-	routes, err := r.liveGraphRoutes(ctx, request.Identity)
+	routes, err := r.liveGraphRoutes(ctx, request.Identity, gateway)
 	if err != nil {
 		return graph.RouteInputs{}, err
 	}
@@ -184,7 +184,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		}
 	}
 	input.Validate = func(ctx context.Context) error {
-		current, err := r.liveGraphRoutes(ctx, request.Identity)
+		current, err := r.liveGraphRoutes(ctx, request.Identity, gateway)
 		if err != nil {
 			return err
 		}
@@ -217,12 +217,12 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	return input, nil
 }
 
-func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identity) ([]gatewayv1.HTTPRoute, error) {
+func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identity, gateway *gatewayv1.Gateway) ([]gatewayv1.HTTPRoute, error) {
 	routes, err := r.listLiveHTTPFamilyRoutes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return r.filterGatewayGraphRoutes(ctx, routes, identity, make(map[types.NamespacedName]types.NamespacedName))
+	return r.filterGatewayGraphRoutes(ctx, routes, identity, gateway, make(map[types.NamespacedName]types.NamespacedName))
 }
 
 func (r *Reconciler) listLiveHTTPFamilyRoutes(ctx context.Context) ([]gatewayv1.HTTPRoute, error) {
@@ -237,7 +237,7 @@ func (r *Reconciler) listLiveHTTPFamilyRoutes(ctx context.Context) ([]gatewayv1.
 	return slices.Concat(http, grpc), nil
 }
 
-func (r *Reconciler) filterGatewayGraphRoutes(ctx context.Context, routes []gatewayv1.HTTPRoute, identity cloud.Identity, setParents map[types.NamespacedName]types.NamespacedName) ([]gatewayv1.HTTPRoute, error) {
+func (r *Reconciler) filterGatewayGraphRoutes(ctx context.Context, routes []gatewayv1.HTTPRoute, identity cloud.Identity, gateway *gatewayv1.Gateway, setParents map[types.NamespacedName]types.NamespacedName) ([]gatewayv1.HTTPRoute, error) {
 	gatewayKey := types.NamespacedName{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}
 	result := make([]gatewayv1.HTTPRoute, 0)
 	for _, route := range routes {
@@ -246,6 +246,12 @@ func (r *Reconciler) filterGatewayGraphRoutes(ctx context.Context, routes []gate
 			continue
 		}
 		// An unbound candidate can change route selection while a graph is built.
+		if r.Config.DefaultGatewaysEnabled() {
+			if _, ok := model.DefaultGatewayParent(route.Spec.CommonRouteSpec, route.Namespace, gateway); ok {
+				result = append(result, route)
+				continue
+			}
+		}
 		for _, parent := range route.Spec.ParentRefs {
 			target, err := gatewayKeyForRouteParent(ctx, r.APIReader, &route, parent, setParents)
 			if err != nil {

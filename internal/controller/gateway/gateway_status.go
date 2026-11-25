@@ -580,39 +580,92 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 		if !route.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
-		refs, parents, _ := controller.RouteParents(route)
+		spec, parents := controller.RouteSpecAndParentStatuses(route)
+		if spec == nil {
+			return nil
+		}
 		routeNamespace := route.GetNamespace()
+		refs := model.EffectiveParentRefs(*spec, routeNamespace, gateway, r.Config.DefaultGatewaysEnabled())
 		var hostnames []gatewayv1.Hostname
 		var httpKind gatewayv1.Kind
+		var routeKind gatewayv1.Kind
 		switch typed := route.(type) {
 		case *gatewayv1.HTTPRoute:
 			hostnames, httpKind = typed.Spec.Hostnames, model.HTTPRouteKind
 		case *gatewayv1.GRPCRoute:
 			hostnames, httpKind = typed.Spec.Hostnames, model.GRPCRouteKind
+		case *gatewayv1.TCPRoute:
+			routeKind = "TCPRoute"
+		case *gatewayv1.UDPRoute:
+			routeKind = "UDPRoute"
+		case *gatewayv1.TLSRoute:
+			routeKind = tlsRouteKind
+		}
+		if httpKind != "" {
+			routeKind = httpKind
+		}
+		candidates := parents
+		var unreportedHTTP *gatewayv1.HTTPRoute
+		singleTransportParent := (routeKind == "TCPRoute" || routeKind == "UDPRoute") && len(spec.ParentRefs) == 1
+		if (r.Config.DefaultGatewaysEnabled() || singleTransportParent) && len(parents) >= controller.RouteParentStatusLimit {
+			candidates = slices.Clip(parents)
+			for _, ref := range refs {
+				if !parentRefTargetsGateway(routeNamespace, ref, gateway) || slices.ContainsFunc(parents, func(parent gatewayv1.RouteParentStatus) bool {
+					return parent.ControllerName == r.Config.ControllerName && controller.ParentRefsEqual(parent.ParentRef, routeNamespace, ref, routeNamespace)
+				}) {
+					continue
+				}
+				candidates = append(candidates, gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: r.Config.ControllerName})
+			}
+			if len(candidates) > len(parents) {
+				switch typed := route.(type) {
+				case *gatewayv1.HTTPRoute:
+					unreportedHTTP = typed
+				case *gatewayv1.GRPCRoute:
+					unreportedHTTP = model.ProjectGRPCRoute(typed)
+				}
+			}
 		}
 		counted := make(map[gatewayv1.SectionName]bool, len(listeners))
-		for _, parentStatus := range parents {
-			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
-			if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
-				!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
-					return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
-				}) {
-				continue
+		for i, parentStatus := range candidates {
+			reported := i < len(parents)
+			if reported {
+				accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
+				if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
+					!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
+						return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
+					}) {
+					continue
+				}
 			}
 			var matching []*gatewayv1.Listener
 			for _, listener := range listeners {
-				if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
+				if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) || !listenerAllowsRouteKind(*listener, routeKind) {
 					continue
 				}
-				if httpKind == model.GRPCRouteKind && listener.Protocol != gatewayv1.HTTPProtocolType {
+				if !reported && !listenerSupportsRouteKind(r.Config, *listener, gatewayv1.RouteGroupKind{Kind: routeKind}) {
 					continue
 				}
-				if httpKind != "" && (!listenerAllowsRouteKind(*listener, httpKind) || len(model.IntersectHostnames(listener.Hostname, hostnames)) == 0) {
+				if httpKind == model.GRPCRouteKind && (listener.Protocol != gatewayv1.HTTPProtocolType || listener.Filters != nil && len(listener.Filters.Requests) != 0) {
+					continue
+				}
+				if httpKind != "" && len(model.IntersectHostnames(listener.Hostname, hostnames)) == 0 {
 					continue
 				}
 				if tlsRoute, ok := route.(*gatewayv1.TLSRoute); ok {
-					hostnames, err := intersectSNIHostnames(listener, tlsRoute, allowsSNISuffix(r.Config, listener))
-					if err != nil || len(hostnames) == 0 || !listenerAllowsRouteKind(*listener, tlsRouteKind) {
+					if !reported {
+						entry := sniRouteStatus{route: tlsRoute, parents: []gatewayv1.ParentReference{parentStatus.ParentRef}}
+						if err := r.admitSNIRoute(ctx, &gatewayMutationSnapshot{gateway: gateway, listener: listener}, &entry); err != nil {
+							return err
+						}
+						if entry.acceptedReason != gatewayv1.RouteReasonAccepted {
+							continue
+						}
+						matching = append(matching, listener)
+						continue
+					}
+					names, err := intersectSNIHostnames(listener, tlsRoute, allowsSNISuffix(r.Config, listener))
+					if err != nil || len(names) == 0 {
 						continue
 					}
 				}
@@ -629,9 +682,18 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 						namespaces[routeNamespace] = []corev1.Namespace{*namespace}
 					}
 				}
-				if model.AllowsRouteNamespace(listener, gateway.Namespace, routeNamespace, namespaces[routeNamespace]) {
-					matching = append(matching, listener)
+				if !model.AllowsRouteNamespace(listener, gateway.Namespace, routeNamespace, namespaces[routeNamespace]) {
+					continue
 				}
+				if !reported && unreportedHTTP != nil {
+					if r.AdmitsHTTPRouteListener == nil {
+						return fmt.Errorf("HTTPRoute admission is required to count a parent omitted from route status")
+					}
+					if !r.AdmitsHTTPRouteListener(unreportedHTTP, gateway, parentStatus.ParentRef, listener, namespaces[routeNamespace]) {
+						continue
+					}
+				}
+				matching = append(matching, listener)
 			}
 			if httpKind == model.GRPCRouteKind && len(matching) > 1 {
 				if slices.ContainsFunc(matching[1:], func(listener *gatewayv1.Listener) bool {
@@ -679,18 +741,37 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 		routes = &gatewayv1.HTTPRouteList{}
 		index = controller.IndexHTTPRouteByStatusGateway
 	}
-	if err := r.List(ctx, routes, client.MatchingFields{index: gatewayKey}); err != nil {
-		return attachedGatewayRoutes{}, err
+	countIndexed := func(list client.ObjectList) error {
+		queries := []client.MatchingFields{{index: gatewayKey}}
+		if r.Config.DefaultGatewaysEnabled() {
+			queries = append(queries, client.MatchingFields{controller.IndexRouteAtParentStatusLimit: "true"})
+		} else if index == controller.IndexL4RouteByStatusGateway {
+			queries = append(queries, client.MatchingFields{controller.IndexL4RouteByParentGateway: gatewayKey})
+		}
+		seen := make(map[client.ObjectKey]bool)
+		for _, query := range queries {
+			if err := r.List(ctx, list, query); err != nil {
+				return err
+			}
+			if err := meta.EachListItem(list, func(object runtime.Object) error {
+				key := client.ObjectKeyFromObject(object.(client.Object))
+				if seen[key] {
+					return nil
+				}
+				seen[key] = true
+				return countRoute(object)
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	if err := meta.EachListItem(routes, countRoute); err != nil {
+	if err := countIndexed(routes); err != nil {
 		return attachedGatewayRoutes{}, err
 	}
 	if r.Config.GRPCExactMethodEnabled() && index == controller.IndexHTTPRouteByStatusGateway {
 		grpc := &gatewayv1.GRPCRouteList{}
-		if err := r.List(ctx, grpc, client.MatchingFields{index: gatewayKey}); err != nil {
-			return attachedGatewayRoutes{}, err
-		}
-		if err := meta.EachListItem(grpc, countRoute); err != nil {
+		if err := countIndexed(grpc); err != nil {
 			return attachedGatewayRoutes{}, err
 		}
 	}

@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -31,6 +32,10 @@ import (
 
 func routeCondition(route *transportRoute, typ string, status metav1.ConditionStatus, reason, message string) metav1.Condition {
 	return controller.Condition(typ, status, reason, message, route.GetGeneration())
+}
+
+func (r *Reconciler) programmedCondition(route *transportRoute) metav1.Condition {
+	return routeCondition(route, "Programmed", metav1.ConditionTrue, "Programmed", fmt.Sprintf("Octavia programmed the %s forwarding configuration", r.protocol()))
 }
 
 func (p *routePlan) setResolvedRefs(route *transportRoute, diagnostic *model.Diagnostic) {
@@ -63,7 +68,7 @@ func (r *Reconciler) currentParentCondition(route *transportRoute, ref gatewayv1
 }
 
 func (r *Reconciler) retainProgrammedCondition(route *transportRoute, plan *routePlan) bool {
-	condition := r.currentParentCondition(route, plan.parents[0].ref, r.Config.Domain()+"/Programmed")
+	condition := r.currentParentCondition(route, plan.parent.ref, r.Config.Domain()+"/Programmed")
 	if condition == nil {
 		return false
 	}
@@ -71,43 +76,72 @@ func (r *Reconciler) retainProgrammedCondition(route *transportRoute, plan *rout
 	return true
 }
 
-func (r *Reconciler) patchStatuses(ctx context.Context, route *transportRoute, plan routePlan) error {
+func (r *Reconciler) keepParentStatuses(route *transportRoute, key client.ObjectKey) routePlan {
+	var plan routePlan
+	for _, previous := range route.status.Parents {
+		if previous.ControllerName == r.Config.ControllerName && controller.IsGatewayParentRef(previous.ParentRef) && gatewayKey(route, previous.ParentRef) == key {
+			plan.parents = append(plan.parents, routeParent{ref: previous.ParentRef})
+		}
+	}
+	return plan
+}
+
+func parentWonPort(parent routeParent, ports []int) bool {
+	return slices.ContainsFunc(parent.listeners, func(listener *gatewayv1.Listener) bool {
+		return slices.Contains(ports, int(listener.Port))
+	})
+}
+
+func (r *Reconciler) patchStatuses(ctx context.Context, route *transportRoute, plans ...routePlan) error {
+	return r.updateStatuses(ctx, route, false, plans)
+}
+
+func (r *Reconciler) patchParentStatuses(ctx context.Context, route *transportRoute, plan routePlan) error {
+	return r.updateStatuses(ctx, route, true, []routePlan{plan})
+}
+
+func (r *Reconciler) updateStatuses(ctx context.Context, route *transportRoute, partial bool, plans []routePlan) error {
 	base := route.copyObject()
 	previousParents := viewRoute(base).status.Parents
 	parents := slices.DeleteFunc(route.status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
-		return parent.ControllerName == r.Config.ControllerName
+		if parent.ControllerName != r.Config.ControllerName {
+			return false
+		}
+		return !partial || slices.ContainsFunc(plans[0].parents, func(current routeParent) bool {
+			return controller.ParentRefsEqual(parent.ParentRef, route.GetNamespace(), current.ref, route.GetNamespace())
+		})
 	})
-	for _, parent := range plan.parents {
-		status := gatewayv1.RouteParentStatus{ParentRef: parent.ref, ControllerName: r.Config.ControllerName}
-		for _, previous := range previousParents {
-			if previous.ControllerName == status.ControllerName && controller.ParentRefsEqual(previous.ParentRef, route.GetNamespace(), status.ParentRef, route.GetNamespace()) {
-				status.Conditions = slices.Clone(previous.Conditions)
-				break
+	var retained, added []gatewayv1.RouteParentStatus
+	for _, plan := range plans {
+		for _, parent := range plan.parents {
+			var previous *gatewayv1.RouteParentStatus
+			for i := range previousParents {
+				entry := &previousParents[i]
+				if entry.ControllerName == r.Config.ControllerName && controller.ParentRefsEqual(entry.ParentRef, route.GetNamespace(), parent.ref, route.GetNamespace()) {
+					previous = entry
+					break
+				}
+			}
+			if plan.resolved.Type == "" {
+				if previous != nil {
+					retained = append(retained, *previous)
+				}
+				continue
+			}
+			status := r.parentStatus(route, plan, parent, previous)
+			if previous != nil {
+				retained = append(retained, status)
+			} else {
+				added = append(added, status)
 			}
 		}
-		message := fmt.Sprintf("The %s listener accepts this route", r.protocol())
-		if len(parent.listeners) > 1 {
-			message = fmt.Sprintf("The selected %s listeners accept this route", r.protocol())
-		}
-		accepted := routeCondition(route, "Accepted", metav1.ConditionTrue, "Accepted", message)
-		programmed := plan.programmed
-		if len(parent.listeners) == 0 {
-			accepted = routeCondition(route, "Accepted", metav1.ConditionFalse, parent.rejected.Reason, parent.rejected.Message)
-			programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, parent.rejected.Reason, parent.rejected.Message)
-		}
-		programmed.Type = r.Config.Domain() + "/Programmed"
-		controller.SetCondition(&status.Conditions, accepted)
-		controller.SetCondition(&status.Conditions, plan.resolved)
-		controller.SetCondition(&status.Conditions, programmed)
-		if plan.detach {
-			meta.RemoveStatusCondition(&status.Conditions, r.forwardingTargetType())
-		} else if plan.targetStatus.Type != "" {
-			controller.SetCondition(&status.Conditions, plan.targetStatus)
-		}
-		parents = append(parents, status)
 	}
+	remaining := max(0, controller.RouteParentStatusLimit-len(parents))
+	parents = append(parents, retained[:min(remaining, len(retained))]...)
+	remaining = max(0, controller.RouteParentStatusLimit-len(parents))
+	parents = append(parents, added[:min(remaining, len(added))]...)
 	route.status.Parents = parents
-	if len(previousParents) == len(route.status.Parents) && slices.EqualFunc(previousParents, route.status.Parents, func(previous, current gatewayv1.RouteParentStatus) bool {
+	if slices.EqualFunc(previousParents, route.status.Parents, func(previous, current gatewayv1.RouteParentStatus) bool {
 		return previous.ControllerName == current.ControllerName &&
 			controller.ParentRefsEqual(previous.ParentRef, route.GetNamespace(), current.ParentRef, route.GetNamespace()) &&
 			slices.Equal(previous.Conditions, current.Conditions)
@@ -115,4 +149,34 @@ func (r *Reconciler) patchStatuses(ctx context.Context, route *transportRoute, p
 		return nil
 	}
 	return r.Status().Patch(ctx, route.Object, controller.OptimisticMergeFrom(base))
+}
+
+func (r *Reconciler) parentStatus(route *transportRoute, plan routePlan, parent routeParent, previous *gatewayv1.RouteParentStatus) gatewayv1.RouteParentStatus {
+	status := gatewayv1.RouteParentStatus{ParentRef: parent.ref, ControllerName: r.Config.ControllerName}
+	if previous != nil {
+		status.Conditions = slices.Clone(previous.Conditions)
+	}
+	message := fmt.Sprintf("The %s listener accepts this route", r.protocol())
+	if len(parent.listeners) > 1 {
+		message = fmt.Sprintf("The selected %s listeners accept this route", r.protocol())
+	}
+	accepted := routeCondition(route, "Accepted", metav1.ConditionTrue, "Accepted", message)
+	programmed := plan.programmed
+	won := parentWonPort(parent, plan.listenerPorts)
+	if len(parent.listeners) == 0 {
+		accepted = routeCondition(route, "Accepted", metav1.ConditionFalse, parent.rejected.Reason, parent.rejected.Message)
+		programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, parent.rejected.Reason, parent.rejected.Message)
+	} else if len(plan.listenerPorts) != 0 && !won {
+		programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "NotSelected", fmt.Sprintf("An older %s takes precedence on each selected listener", r.kind()))
+	}
+	programmed.Type = r.Config.Domain() + "/Programmed"
+	controller.SetCondition(&status.Conditions, accepted)
+	controller.SetCondition(&status.Conditions, plan.resolved)
+	controller.SetCondition(&status.Conditions, programmed)
+	if plan.detach || !won && len(plan.listenerPorts) != 0 {
+		meta.RemoveStatusCondition(&status.Conditions, r.forwardingTargetType())
+	} else if won && plan.targetStatus.Type != "" {
+		controller.SetCondition(&status.Conditions, plan.targetStatus)
+	}
+	return status
 }

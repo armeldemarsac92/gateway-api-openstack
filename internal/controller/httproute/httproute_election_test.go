@@ -30,11 +30,45 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func TestImplicitGRPCRouteCompetesWithExplicitHTTPRouteInLiveGraph(t *testing.T) {
+	f, _, grpc := newRouteElectionFixture(t)
+	f.gateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	grpc.Spec.ParentRefs = nil
+	grpc.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+	f.create(t, grpc)
+	observe := func() routeGraphAdmission {
+		t.Helper()
+		admission, err := f.reconciler.liveRouteGraphAdmission(t.Context(), f.gateway, f.route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return admission
+	}
+	httpKey, grpcKey := routeKey(f.route), routeKey(model.ProjectGRPCRoute(grpc))
+	standard := observe()
+	if _, eligible := standard.eligible[grpcKey]; eligible || len(standard.rejectedSections[httpKey]) != 0 {
+		t.Fatalf("Standard applied the implicit route: %+v", standard)
+	}
+	f.reconciler.Config.GatewayAPIChannel = features.FeatureChannelExperimental
+	experimental := observe()
+	if _, eligible := experimental.eligible[grpcKey]; !eligible {
+		t.Fatalf("Experimental omitted the unbound default route from election: %+v", experimental)
+	}
+	if want := []model.ListenerSection{{Name: f.gateway.Spec.Listeners[0].Name}}; !slices.Equal(experimental.rejectedSections[httpKey], want) {
+		t.Fatalf("HTTPRoute rejected sections = %v, want %v", experimental.rejectedSections[httpKey], want)
+	}
+}
 
 func TestHTTPRouteProfileElectionFencesProviderAndParentStatus(t *testing.T) {
 	for _, stage := range []graph.Stage{graph.StageLockWait, graph.StageProvider} {

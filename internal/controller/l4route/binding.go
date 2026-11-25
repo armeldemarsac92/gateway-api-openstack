@@ -35,25 +35,33 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
-func (r *Reconciler) routeBinding(route *transportRoute) (cloud.Identity, bool, error) {
-	identity, present, err := controller.StoredRouteIdentity(r.Config, route.Object)
+func (r *Reconciler) routeBindings(route *transportRoute) ([]controller.RouteGatewayBinding, error) {
+	bindings, err := controller.StoredRouteGatewayBindings(r.Config, route.Object)
 	if err != nil {
-		return cloud.Identity{}, false, errors.Join(cloud.ErrOwnershipConflict, err)
+		return nil, errors.Join(cloud.ErrOwnershipConflict, err)
 	}
-	if !present {
+	if len(bindings) == 0 {
 		if controller.RouteHasControllerBinding(r.Config, route) || route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] != "" {
-			return cloud.Identity{}, false, fmt.Errorf("%w: %s %s has an incomplete lifecycle checkpoint", cloud.ErrOwnershipConflict, r.kind(), client.ObjectKeyFromObject(route))
+			return nil, fmt.Errorf("%w: %s %s has an incomplete lifecycle checkpoint", cloud.ErrOwnershipConflict, r.kind(), client.ObjectKeyFromObject(route))
 		}
-		return cloud.Identity{}, false, nil
+		return nil, nil
 	}
-	lifecycle := route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()]
-	if !controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-		route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
-		route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
-		(lifecycle != controller.RouteAttached && lifecycle != controller.RouteDetaching) {
-		return cloud.Identity{}, false, fmt.Errorf("%w: %s %s lacks a complete lifecycle checkpoint", cloud.ErrOwnershipConflict, r.kind(), client.ObjectKeyFromObject(route))
+	for _, binding := range bindings {
+		if !controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) || !binding.ExplicitScope ||
+			(binding.Lifecycle != controller.RouteAttached && binding.Lifecycle != controller.RouteDetaching) {
+			return nil, fmt.Errorf("%w: %s %s lacks a complete lifecycle checkpoint", cloud.ErrOwnershipConflict, r.kind(), client.ObjectKeyFromObject(route))
+		}
 	}
-	return identity, true, nil
+	return bindings, nil
+}
+
+func boundGateway(bindings []controller.RouteGatewayBinding, identity cloud.Identity) controller.RouteGatewayBinding {
+	for _, binding := range bindings {
+		if controller.SameGatewayIdentity(binding.Identity, identity) {
+			return binding
+		}
+	}
+	return controller.RouteGatewayBinding{}
 }
 
 func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identity cloud.Identity) (ctrl.Result, error) {
@@ -66,36 +74,48 @@ func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identit
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if controller.RouteHasControllerBinding(r.Config, current) {
+	bindings, err := r.routeBindings(current)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if boundGateway(bindings, identity).Identity == identity {
 		return ctrl.Result{}, controller.ErrGraphInputChanged
 	}
-	first, err := r.planRoute(ctx, current, cloud.Identity{}, false)
+	first, err := r.planRoute(ctx, current, identity, false)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	second, err := r.planRoute(ctx, current, cloud.Identity{}, false)
+	second, err := r.planRoute(ctx, current, identity, false)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if first.desired == nil || first.desired.Identity != identity || first.target != second.target || !slices.Equal(first.listenerPorts, second.listenerPorts) ||
-		revisionOf(first.parents[0].class) != revisionOf(second.parents[0].class) ||
-		!sameGatewayRevision(r.Config, first.parents[0].gateway, second.parents[0].gateway) {
+	if first.desired == nil || second.desired == nil || first.desired.Identity != identity || second.desired.Identity != identity ||
+		first.target != second.target || !slices.Equal(first.listenerPorts, second.listenerPorts) ||
+		revisionOf(first.parent.class) != revisionOf(second.parent.class) ||
+		!sameGatewayRevision(r.Config, first.parent.gateway, second.parent.gateway) {
 		return ctrl.Result{}, controller.ErrGraphInputChanged
 	}
 	// Set the admitted target before binding. A route that binds again
 	// cannot use a prior binding's Programmed or ForwardingTarget status.
 	first.targetStatus = routeCondition(current, r.forwardingTargetType(), metav1.ConditionFalse, "Pending", first.target)
-	if err := r.patchStatuses(ctx, current, first); err != nil {
+	if err := r.patchParentStatuses(ctx, current, first); err != nil {
 		return ctrl.Result{}, err
 	}
 	base := current.copyObject()
-	controller.ApplyRouteBinding(r.Config, current, identity)
+	binding := controller.RouteGatewayBinding{Identity: identity, Lifecycle: controller.RouteAttached}
 	if len(first.desired.ScopedListenerPorts) != 0 {
-		controller.SealRouteAnchor(r.Config, current.Object, identity, first.desired.GatewayRequirements.ListenerPort)
+		binding.Anchor = first.desired.GatewayRequirements.ListenerPort
+	}
+	if r.needsDurableTarget(current) {
+		binding.Forwarding = controller.RouteGatewayTarget{Value: first.target, Generation: current.GetGeneration()}
+	}
+	if err := controller.ApplyRouteGatewayBinding(r.Config, current.Object, bindings, binding); err != nil {
+		return ctrl.Result{}, err
 	}
 	if err := r.Patch(ctx, current.Object, controller.OptimisticMergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
 	}
+	*expected = *current
 	return ctrl.Result{Requeue: true}, nil
 }
 
@@ -111,8 +131,9 @@ func (r *Reconciler) liveRoute(ctx context.Context, expected *transportRoute) (*
 	return current, nil
 }
 
-func (r *Reconciler) detach(ctx context.Context, route *transportRoute, identity cloud.Identity) (ctrl.Result, error) {
-	if route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+func (r *Reconciler) detach(ctx context.Context, route *transportRoute, binding controller.RouteGatewayBinding) (ctrl.Result, error) {
+	identity := binding.Identity
+	if binding.Lifecycle != controller.RouteDetaching {
 		return ctrl.Result{Requeue: true}, r.checkpointDetach(ctx, route, identity)
 	}
 	if r.Writer == nil {
@@ -151,16 +172,16 @@ func (r *Reconciler) checkpointDetach(ctx context.Context, expected *transportRo
 	if err != nil {
 		return err
 	}
-	binding, present, err := r.routeBinding(route)
+	bindings, err := r.routeBindings(route)
 	if err != nil {
 		return err
 	}
-	if !present || binding != identity {
+	binding := boundGateway(bindings, identity)
+	if binding.Identity != identity || binding.Lifecycle != controller.RouteAttached {
 		return controller.ErrGraphInputChanged
 	}
-	var plan routePlan
 	if route.GetDeletionTimestamp().IsZero() {
-		plan, err = r.planRoute(ctx, route, identity, true)
+		plan, err := r.planRoute(ctx, route, identity, true)
 		if err != nil {
 			return err
 		}
@@ -169,13 +190,15 @@ func (r *Reconciler) checkpointDetach(ctx context.Context, expected *transportRo
 		}
 	}
 	base := route.copyObject()
-	route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] = controller.RouteDetaching
+	binding.Lifecycle = controller.RouteDetaching
+	binding.Forwarding = controller.RouteGatewayTarget{}
+	if err := controller.ApplyRouteGatewayBinding(r.Config, route.Object, bindings, binding); err != nil {
+		return err
+	}
 	if err := r.Patch(ctx, route.Object, controller.OptimisticMergeFrom(base)); err != nil {
 		return err
 	}
-	if route.GetDeletionTimestamp().IsZero() {
-		return r.patchStatuses(ctx, route, plan)
-	}
+	*expected = *route
 	return nil
 }
 
@@ -189,16 +212,23 @@ func (r *Reconciler) clearBinding(ctx context.Context, expected *transportRoute,
 	if err != nil {
 		return err
 	}
-	binding, present, err := r.routeBinding(route)
+	bindings, err := r.routeBindings(route)
 	if err != nil {
 		return err
 	}
-	if !present || binding != identity || route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+	binding := boundGateway(bindings, identity)
+	if binding.Identity != identity || binding.Lifecycle != controller.RouteDetaching {
 		return controller.ErrGraphInputChanged
 	}
 	base := route.copyObject()
-	controller.ClearRouteBinding(r.Config, route)
-	return r.Patch(ctx, route.Object, controller.OptimisticMergeFrom(base))
+	if err := controller.RemoveRouteGatewayBinding(r.Config, route.Object, bindings, identity); err != nil {
+		return err
+	}
+	if err := r.Patch(ctx, route.Object, controller.OptimisticMergeFrom(base)); err != nil {
+		return err
+	}
+	*expected = *route
+	return nil
 }
 
 func sameGatewayRevision(config controller.Config, left, right *gatewayv1.Gateway) bool {

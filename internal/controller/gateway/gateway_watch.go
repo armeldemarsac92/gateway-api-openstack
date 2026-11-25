@@ -45,11 +45,11 @@ import (
 )
 
 func (r *Reconciler) gatewayRequestsForRoute(ctx context.Context, route client.Object) []reconcile.Request {
-	parents, statuses, ok := controller.RouteParents(route)
-	if !ok {
+	spec, statuses := controller.RouteSpecAndParentStatuses(route)
+	if spec == nil {
 		return nil
 	}
-	keys := make(map[types.NamespacedName]struct{}, len(parents)+len(statuses)+1)
+	keys := make(map[types.NamespacedName]struct{}, len(spec.ParentRefs)+len(statuses)+1)
 	addParent := func(parentRef gatewayv1.ParentReference) {
 		if !controller.IsGatewayParentRef(parentRef) || parentRef.Name == "" {
 			if key := model.ListenerSetRefKey(parentRef, route.GetNamespace()); key.Name != "" {
@@ -68,8 +68,18 @@ func (r *Reconciler) gatewayRequestsForRoute(ctx context.Context, route client.O
 		}
 		keys[types.NamespacedName{Namespace: gatewayNamespace, Name: string(parentRef.Name)}] = struct{}{}
 	}
-	for _, parentRef := range parents {
+	for _, parentRef := range spec.ParentRefs {
 		addParent(parentRef)
+	}
+	if r.Config.DefaultGatewaysEnabled() && spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll {
+		var gateways gatewayv1.GatewayList
+		if err := r.List(ctx, &gateways, client.MatchingFields{controller.IndexGatewayByDefaultScope: string(spec.UseDefaultGateways)}); err != nil {
+			log.FromContext(ctx).Error(err, "Could not list default Gateways for Route", "route", client.ObjectKeyFromObject(route))
+		} else {
+			for i := range gateways.Items {
+				keys[client.ObjectKeyFromObject(&gateways.Items[i])] = struct{}{}
+			}
+		}
 	}
 	for _, parentStatus := range statuses {
 		if parentStatus.ControllerName != r.Config.ControllerName {

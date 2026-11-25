@@ -140,7 +140,7 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			listeners = supported
 			namespaces := make(routeNamespaceCache)
 			for _, listener := range listeners {
-				candidates := listenerCandidates(gateway, listener, routes)
+				candidates := r.listenerCandidates(gateway, listener, routes)
 				election := listenerElection{port: int(listener.Port)}
 				for _, candidate := range candidates {
 					election.candidates = append(election.candidates, routeCandidateRevision{
@@ -164,29 +164,36 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 	trigger := r.requestRoute(request)
 	requestedIndex := -1
 	type winningNode struct {
-		index int
-		route *transportRoute
+		index      int
+		route      *transportRoute
+		checkpoint controller.RouteGatewayTarget
 	}
 	var winningNodes []winningNode
 	peerAttached := false
 	for _, route := range routes {
-		if !controller.RouteClaimsGateway(r.Config, route, request.Identity) {
+		if !controller.RouteClaimsGateway(r.Config, route.Object, request.Identity) {
 			continue
 		}
-		identity, present, err := r.routeBinding(route)
+		bindings, err := r.routeBindings(route)
 		if err != nil {
 			return snapshot, err
 		}
-		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
+		binding := boundGateway(bindings, request.Identity)
+		identity := binding.Identity
+		if identity.GatewayUID == "" {
 			return snapshot, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, r.kind())
 		}
-		if scoped && controller.ScopedRouteAnchor(r.Config, route, r.protocol()) != anchor {
+		if scoped && binding.Anchor != anchor {
 			return snapshot, fmt.Errorf("%w: %s does not carry the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict, r.kind())
 		}
 		requested := trigger != nil && route.GetUID() == trigger.GetUID()
 		if requested {
+			expectedBinding, err := controller.StoredRouteGatewayBinding(r.Config, trigger.Object, request.Identity)
+			if err != nil {
+				return snapshot, err
+			}
 			if request.Identity != identity || !sameRouteRevision(route, trigger) || route.GetResourceVersion() != trigger.GetResourceVersion() ||
-				controller.ScopedRouteAnchor(r.Config, route, r.protocol()) != controller.ScopedRouteAnchor(r.Config, trigger, r.protocol()) {
+				binding != expectedBinding {
 				return snapshot, controller.ErrGraphInputChanged
 			}
 			requestedIndex = len(snapshot.nodes)
@@ -194,14 +201,13 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		node := cloud.RouteGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.RouteSpec{
 			Identity: identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: string(r.protocol())},
 		}}
-		lifecycle := route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()]
 		switch {
-		case lifecycle == controller.RouteDetaching:
+		case binding.Lifecycle == controller.RouteDetaching:
 			if request.Action == graph.Ensure || request.Action == graph.DeleteRoute && requested {
 				node.Disposition = cloud.GraphDelete
 			}
 		case len(winners[route.GetUID()]) != 0 && route.GetDeletionTimestamp().IsZero():
-			winningNodes = append(winningNodes, winningNode{index: len(snapshot.nodes), route: route})
+			winningNodes = append(winningNodes, winningNode{index: len(snapshot.nodes), route: route, checkpoint: binding.Forwarding})
 		default:
 			peerAttached = true
 		}
@@ -219,7 +225,8 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		winningNodes = nil
 	}
 	for _, winner := range winningNodes {
-		spec, target, backends, err := r.observeRouteBackend(ctx, winner.route, observedGateway, listeners[0], winners[winner.route.GetUID()])
+		ports := winners[winner.route.GetUID()]
+		spec, target, backends, err := r.observeRouteBackend(ctx, winner.route, observedGateway, listeners[0], ports)
 		if err != nil {
 			return snapshot, err
 		}
@@ -228,14 +235,23 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			continue
 		}
 		node := &snapshot.nodes[winner.index]
-		if r.hasCurrentBackendTarget(winner.route, winner.route.parentRefs[0], target) {
+		checkpoint := winner.checkpoint
+		currentTarget := checkpoint.Generation == winner.route.GetGeneration() && matchesBackendTarget(checkpoint.Value, target)
+		if checkpoint.Value == "" {
+			currentTarget = slices.ContainsFunc(r.gatewayRefs(winner.route, observedGateway), func(ref gatewayv1.ParentReference) bool {
+				return r.hasCurrentBackendTarget(winner.route, ref, target) && slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
+					return slices.Contains(ports, int(listener.Port)) && parentSelects(ref, listener)
+				})
+			})
+		}
+		if currentTarget {
 			if winner.index == requestedIndex && request.ForwardingTarget != "" && request.ForwardingTarget != target {
 				return snapshot, controller.ErrGraphInputChanged
 			}
 			node.Disposition = cloud.GraphEnsure
 			node.Spec = *spec
 			node.RetainScopedListenerPorts = nil
-		} else if scoped && r.protocol() == gatewayv1.TCPProtocolType && r.hasPreviousObservedBackendTarget(winner.route, target) {
+		} else if scoped && r.protocol() == gatewayv1.TCPProtocolType && r.hasPreviousObservedBackendTarget(winner.route, target, checkpoint) {
 			// A selector edit can carry forward existing edges. The provider
 			// must confirm the old pool matches the freshly authorized backend.
 			node.Spec = *spec

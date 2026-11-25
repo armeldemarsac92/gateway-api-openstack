@@ -50,7 +50,8 @@ type nodeServiceObservation struct {
 func (inputs *nodeEventInputs) hasNodePortParent(ctx context.Context, r *Reconciler, route *gatewayv1.HTTPRoute) (bool, error) {
 	// Routes with different reference sets cannot share an eligibility result.
 	var key string
-	if len(route.Spec.ParentRefs) == 1 {
+	usesDefaults := r.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll
+	if len(route.Spec.ParentRefs) == 1 && !usesDefaults {
 		if keys := controller.ParentGatewayKeys(route); len(keys) != 0 {
 			key = "Gateway/" + keys[0]
 		} else if set := model.ListenerSetRefKey(route.Spec.ParentRefs[0], route.Namespace); set.Name != "" && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
