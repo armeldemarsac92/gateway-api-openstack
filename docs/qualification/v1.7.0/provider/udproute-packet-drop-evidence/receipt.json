@@ -1,0 +1,1247 @@
+{
+  "subject": "Weighted UDPRoute on a single IPv4 Amphora and Kubernetes kind",
+  "registeredUpstreamCase": false,
+  "controller": {
+    "sourceRevision": "4418c52adff866a90d05fa8061c5405d5569bda3",
+    "manifestDigest": "sha256:c71e7700b47706a0aed9a747fab2d07414d233a895497ce7e63a282894405f11",
+    "managerSHA256": "b32a708649daac7626d184242d98a26b6f16c4203123be942335898fd0e9699b",
+    "ociArchiveSHA256": "bfec5facffe4a34f220aee14853d06e5cc42ddf90e9d030b0cc3e3f8ed092e9e",
+    "platform": "linux/amd64",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "regionalDeploymentVerified": false,
+  "channels": {
+    "standard": {
+      "rawReceiptSHA256": "d7b589ddc593de4babe7914bafeef7f553e8832b2538cd971ebfe7b971ee05c6",
+      "runnerExit": 0,
+      "startedAt": "2026-11-25T07:14:00.798+00:00",
+      "finishedAt": "2026-11-25T07:17:00.167+00:00",
+      "gatewayAPI": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "channel": "standard",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "echoBinarySHA256": "c0287b64dac7b71a2eb58fb4331406db0b5b9633f291e5843a9de4c149cf78c1",
+      "routeWeights": [
+        3,
+        1
+      ],
+      "routeIdentity": {
+        "control": {
+          "uidSHA256": "0e51eb0717c964dbd667448eaadd6ae66824b67323f41f6bab9df4cff299eec1",
+          "generation": 1,
+          "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b"
+        },
+        "udp-weighted": {
+          "uidSHA256": "5f409cf22b816681a67092a29e168a23717d8f6cd404c1f9fe5e38b1ac62609e",
+          "generation": 1,
+          "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9"
+        }
+      },
+      "grantUIDChanged": true,
+      "phases": {
+        "baseline": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 3,
+              "foreign": 1
+            },
+            "fraction": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "guardConfigSHA256": "44ebf7e549ca1b06686e4bb4f04b63e12eb12b4537bf6f6ce0c229d195cf5d82",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "foreign": 16,
+            "primary": 48
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 16,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 16,
+            "primary": 48
+          },
+          "sampleSHA256": "e9d4388d3d993a449c77e05e54ab9712381d757e4e9af294bad82a9ceba91645",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1
+        },
+        "withdrawal": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 1
+            },
+            "fraction": {
+              "denominator": 4,
+              "numerator": 1
+            },
+            "guardConfigSHA256": "c65d5a7f4c2a4cabf48be94fe4aab9567d4ed93280f6d4c02cf2225d701e154e",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            }
+          },
+          "replies": {
+            "primary": 48,
+            "timeout": 16
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 0,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 16
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 0,
+            "primary": 48
+          },
+          "sampleSHA256": "fe4e6112ddaa085cd857983b60b75dd1b7baf12c835ccb42df21390b728baaae",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "existingTupleAfterWithdrawal": {
+            "totals": {
+              "primary": 12,
+              "timeout": 4
+            },
+            "weightedDrop": 4,
+            "foreignReceived": 0
+          },
+          "transition": {
+            "firstConvergedReadMs": 10970.9,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "primary": 41,
+              "foreign": 6,
+              "timeout": 55
+            },
+            "siblingOutcomes": {
+              "control": 102
+            },
+            "samplesSHA256": "172fc82fda8768aa713c66f436878e85d26f8ec0f78d284d9ce3bf5ee128eaf9"
+          }
+        },
+        "restored": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 3,
+              "foreign": 1
+            },
+            "fraction": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "guardConfigSHA256": "ebfa49987a9229b23398f6b7ae338d3afc491bba9babc998042799f1c46d75a7",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "foreign": 16,
+            "primary": 48
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 16,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 16,
+            "primary": 48
+          },
+          "sampleSHA256": "60e9608f467536cbbb2c044bf81668696c563af17e9c1f9b784991a9b0d83235",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "transition": {
+            "firstConvergedReadMs": 20715.7,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "primary": 16,
+              "timeout": 64
+            },
+            "siblingOutcomes": {
+              "control": 80
+            },
+            "samplesSHA256": "e26be2186beacd36b4bb2b55ce203befa5a8a31c1868f1f874ab6c35ec35a140"
+          }
+        },
+        "without-endpoints": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 1
+            },
+            "fraction": {
+              "denominator": 4,
+              "numerator": 1
+            },
+            "guardConfigSHA256": "c65d5a7f4c2a4cabf48be94fe4aab9567d4ed93280f6d4c02cf2225d701e154e",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "primary": 48,
+            "timeout": 16
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 0,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 16
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 0,
+            "primary": 48
+          },
+          "sampleSHA256": "6787666acb7af437fdffa947875a92c9dbedb8cbe11cf5b7a83fb2a787189761",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "existingTupleAfterWithdrawal": {
+            "totals": {
+              "primary": 12,
+              "timeout": 4
+            },
+            "weightedDrop": 4,
+            "foreignReceived": 0
+          },
+          "transition": {
+            "firstConvergedReadMs": 10079.0,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "foreign": 7,
+              "primary": 46,
+              "timeout": 54
+            },
+            "siblingOutcomes": {
+              "control": 107
+            },
+            "samplesSHA256": "49f847d32d4491dd61b75778228a33983cffc4c44e827194c677a37fb859a482"
+          }
+        },
+        "restored-endpoints": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 3,
+              "foreign": 1
+            },
+            "fraction": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "guardConfigSHA256": "093fabe77235d308e37044df1aec4abaf07f9edd29e817cc72c1029fd940f5cf",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "foreign": 16,
+            "primary": 48
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 16,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 16,
+            "primary": 48
+          },
+          "sampleSHA256": "dd5819412c966d74d1f43baca9d516a6e28ba688dcca11997edb7c5c23188f59",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "transition": {
+            "firstConvergedReadMs": 8556.5,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "primary": 73,
+              "timeout": 42,
+              "foreign": 22
+            },
+            "siblingOutcomes": {
+              "control": 137
+            },
+            "samplesSHA256": "8485952a326b9cc57ff145a9c6b68655951ab16934e88d4fcc84502efd858cee"
+          }
+        },
+        "route-deleted": {
+          "activeTargetPool": null,
+          "replies": {
+            "timeout": 64
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 0,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 64,
+            "primary": 0,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 0,
+            "primary": 0
+          },
+          "sampleSHA256": "04633d281a42e60afa43faf6dbc09040aabcca7308059a5efc450b10bd1ed2da",
+          "targetRouteConditions": null,
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 0,
+          "siblingAttachedRoutes": 1,
+          "transition": {
+            "firstConvergedReadMs": 10123.7,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "primary": 7,
+              "foreign": 2,
+              "timeout": 68
+            },
+            "siblingOutcomes": {
+              "control": 77
+            },
+            "samplesSHA256": "854ba4c8ad9357d1cee9d2acd3f71bd298374cf4ea2204a0a3f2b2eb1c401d3f"
+          }
+        }
+      },
+      "poolIDSHA256": "6f86c12f2e5828bd9df89931dcc66321bc5c40ca2f4de377b541a3b6f8835fe8",
+      "listenerIDSHA256": "67d3dbfe737f2a625c46e37923108a945a11612f247e5fde3ac7f10526f07f5d",
+      "fixture": [
+        "Real kind kube-apiserver, EndpointSlices, ReferenceGrants and controller ServiceAccount.",
+        "Local public Octavia WSGI and installed SQLite models. Keystone, Neutron, RPC transport, Amphora inventory and ordinary CRUD completion are fixtures.",
+        "Persistent UDP member batches use the installed RPC endpoint and TaskFlow worker and use the real Amphora REST driver over HTTP tunneled in SSH.",
+        "Guest uses the installed Flask agent, systemd, Keepalived, IPVS and nftables. Manual veth plumbing connects the namespace directly to the real kind Pod network. Post-network-plug confirms the preattached fixture subnet.",
+        "The IPv4 scenario separately records one existing socket after withdrawals. Deployed OpenStack, mTLS, Amphora image packaging and SELinux, VRRP, upgrade and conformance suites are outside scope."
+      ]
+    },
+    "experimental": {
+      "rawReceiptSHA256": "f37e2c66b88fde3219a50447c7b935e34c13dbd5f03679d0842c40354f453bb4",
+      "runnerExit": 0,
+      "startedAt": "2026-11-25T07:19:36.090+00:00",
+      "finishedAt": "2026-11-25T07:22:06.457+00:00",
+      "gatewayAPI": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "channel": "experimental",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "echoBinarySHA256": "c0287b64dac7b71a2eb58fb4331406db0b5b9633f291e5843a9de4c149cf78c1",
+      "routeWeights": [
+        3,
+        1
+      ],
+      "routeIdentity": {
+        "control": {
+          "uidSHA256": "b5d830681b24de535506dad5acbe690580f3b6d605d8d719c7f1847ffa809019",
+          "generation": 1,
+          "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b"
+        },
+        "udp-weighted": {
+          "uidSHA256": "af55c2c94a1073c105019ffb6f7f06f2ef9f7342202dade02c978e756a4b10e1",
+          "generation": 1,
+          "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9"
+        }
+      },
+      "grantUIDChanged": true,
+      "phases": {
+        "baseline": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 3,
+              "foreign": 1
+            },
+            "fraction": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "guardConfigSHA256": "dcc8949abf39fd04c22958c5dc89b8437059404ffac42ae94967b1bfe0c065a2",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "foreign": 16,
+            "primary": 48
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 16,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 16,
+            "primary": 48
+          },
+          "sampleSHA256": "e9d4388d3d993a449c77e05e54ab9712381d757e4e9af294bad82a9ceba91645",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1
+        },
+        "withdrawal": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 1
+            },
+            "fraction": {
+              "denominator": 4,
+              "numerator": 1
+            },
+            "guardConfigSHA256": "68de59ea23fb364a2631ef9b07ae0181a6b5ddd88a800831cc6796f7c360ce0e",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            }
+          },
+          "replies": {
+            "primary": 48,
+            "timeout": 16
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 0,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 16
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 0,
+            "primary": 48
+          },
+          "sampleSHA256": "21b568fd8bff8c89d38a8c2fdf6604c2e4188067964d7654f4070f4853775b1f",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "existingTupleAfterWithdrawal": {
+            "totals": {
+              "primary": 12,
+              "timeout": 4
+            },
+            "weightedDrop": 4,
+            "foreignReceived": 0
+          },
+          "transition": {
+            "firstConvergedReadMs": 14792.0,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "primary": 69,
+              "foreign": 23,
+              "timeout": 43
+            },
+            "siblingOutcomes": {
+              "control": 135
+            },
+            "samplesSHA256": "6aa7538a773e79cf58917bd63675f1097eac0f3c3737b82aacb42b6facfa6661"
+          }
+        },
+        "restored": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 3,
+              "foreign": 1
+            },
+            "fraction": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "guardConfigSHA256": "b2c9ec250d012c7b6d34d105386bed48f5d384b5dc23c9dc1c93b0ed7a76756c",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "foreign": 16,
+            "primary": 48
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 16,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 16,
+            "primary": 48
+          },
+          "sampleSHA256": "60e9608f467536cbbb2c044bf81668696c563af17e9c1f9b784991a9b0d83235",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "transition": {
+            "firstConvergedReadMs": 10109.6,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "timeout": 45,
+              "primary": 66,
+              "foreign": 19
+            },
+            "siblingOutcomes": {
+              "control": 130
+            },
+            "samplesSHA256": "b3fcc63c4cba1a93a6f1f7faea644370b836d21dc4c356abb9b2328704f5ae3c"
+          }
+        },
+        "without-endpoints": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 1
+            },
+            "fraction": {
+              "denominator": 4,
+              "numerator": 1
+            },
+            "guardConfigSHA256": "68de59ea23fb364a2631ef9b07ae0181a6b5ddd88a800831cc6796f7c360ce0e",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "primary": 48,
+            "timeout": 16
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 0,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 16
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 0,
+            "primary": 48
+          },
+          "sampleSHA256": "22b092100940591c95ef5dcf946052691a539f9f3ea7dbfacdbcbdb324bad4fb",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "existingTupleAfterWithdrawal": {
+            "totals": {
+              "primary": 12,
+              "timeout": 4
+            },
+            "weightedDrop": 4,
+            "foreignReceived": 0
+          },
+          "transition": {
+            "firstConvergedReadMs": 9695.4,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "foreign": 6,
+              "primary": 48,
+              "timeout": 54
+            },
+            "siblingOutcomes": {
+              "control": 108
+            },
+            "samplesSHA256": "bea1cd66a987ad6be309f2ed30a97e6f97911bc780993205d231055cbe7280a0"
+          }
+        },
+        "restored-endpoints": {
+          "activeTargetPool": {
+            "memberWeights": {
+              "primary": 3,
+              "foreign": 1
+            },
+            "fraction": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "guardConfigSHA256": "48c48ae23d5d4ec74b3836ee5cbf5b19cdfaebcfc819a440a63ab5ea7c980d58",
+            "resolvedReference": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            }
+          },
+          "replies": {
+            "foreign": 16,
+            "primary": 48
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 16,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 0,
+            "primary": 48,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 16,
+            "primary": 48
+          },
+          "sampleSHA256": "2d8d94d87d8bb5288b4da31929cbc3ba8a1d73e68ab90dc24e44d492c4a44779",
+          "targetRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 1,
+          "siblingAttachedRoutes": 1,
+          "transition": {
+            "firstConvergedReadMs": 10548.1,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "timeout": 51,
+              "primary": 50,
+              "foreign": 14
+            },
+            "siblingOutcomes": {
+              "control": 115
+            },
+            "samplesSHA256": "78476f6578a487e0b4d9d166a18efaabb374c75247afc6daacd41e7da2be08f0"
+          }
+        },
+        "route-deleted": {
+          "activeTargetPool": null,
+          "replies": {
+            "timeout": 64
+          },
+          "controlReplies": {
+            "control": 16
+          },
+          "kernelCounters": {
+            "control": 16,
+            "foreign": 0,
+            "ingress_control": 16,
+            "ingress_target": 64,
+            "invalidDrop": 0,
+            "localDrop": 0,
+            "native_input": 64,
+            "primary": 0,
+            "weightedDrop": 0
+          },
+          "podReceives": {
+            "control": 16,
+            "foreign": 0,
+            "primary": 0
+          },
+          "sampleSHA256": "04633d281a42e60afa43faf6dbc09040aabcca7308059a5efc450b10bd1ed2da",
+          "targetRouteConditions": null,
+          "siblingRouteConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "targetAttachedRoutes": 0,
+          "siblingAttachedRoutes": 1,
+          "transition": {
+            "firstConvergedReadMs": 10250.2,
+            "scope": "Consecutive samples across the mutation and observation interval",
+            "targetOutcomes": {
+              "primary": 9,
+              "foreign": 3,
+              "timeout": 67
+            },
+            "siblingOutcomes": {
+              "control": 79
+            },
+            "samplesSHA256": "dff6403ebb1101a447f1cd5c5134041811fa5ba3dfe74869d49f37db88adf98a"
+          }
+        }
+      },
+      "poolIDSHA256": "8f023a5929a8ee5ddc3e230b9874cc6b8ddab405dbbbe0f4db5472f68e880feb",
+      "listenerIDSHA256": "98f9c4ca6204f865f32b778901ecb7ad24aa1940bafc7ddcf0a9058070e7c830",
+      "fixture": [
+        "Real kind kube-apiserver, EndpointSlices, ReferenceGrants and controller ServiceAccount.",
+        "Local public Octavia WSGI and installed SQLite models. Keystone, Neutron, RPC transport, Amphora inventory and ordinary CRUD completion are fixtures.",
+        "Persistent UDP member batches use the installed RPC endpoint and TaskFlow worker and use the real Amphora REST driver over HTTP tunneled in SSH.",
+        "Guest uses the installed Flask agent, systemd, Keepalived, IPVS and nftables. Manual veth plumbing connects the namespace directly to the real kind Pod network. Post-network-plug confirms the preattached fixture subnet.",
+        "The IPv4 scenario separately records one existing socket after withdrawals. Deployed OpenStack, mTLS, Amphora image packaging and SELinux, VRRP, upgrade and conformance suites are outside scope."
+      ]
+    }
+  },
+  "octavia": {
+    "revision": "f7c1840992252516982f4a08bb82f5c3b1d5ae70",
+    "wheel": "octavia-19.0.1.dev69-py3-none-any.whl",
+    "sha256": "44602522f946789a2f2925c4ec944663b299c6a0dcc230e19f37b785a2f34a91",
+    "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-udp-packet-drop-f7c184099225"
+  },
+  "octaviaLib": {
+    "revision": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+    "wheel": "octavia_lib-3.12.1.dev19-py3-none-any.whl",
+    "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d"
+  }
+}
