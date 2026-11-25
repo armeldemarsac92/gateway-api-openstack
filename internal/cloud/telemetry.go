@@ -19,6 +19,8 @@ package cloud
 import (
 	"bytes"
 	"cmp"
+	"crypto/sha256"
+	hexencoding "encoding/hex"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -28,6 +30,63 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 )
+
+// TelemetryExporterHeader is written only to the collector's OTLP requests.
+type TelemetryExporterHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type TelemetryExporterHeaders []TelemetryExporterHeader
+
+var exporterHeaderValue = regexp.MustCompile(`^[!-~]+([ \t][!-~]+)*$`)
+
+// CanonicalTelemetryExporterHeaders validates this Gateway API list-map and
+// orders it by case-insensitive field name before the provider sees it.
+func CanonicalTelemetryExporterHeaders(input TelemetryExporterHeaders) (TelemetryExporterHeaders, bool) {
+	if len(input) == 0 {
+		return nil, true
+	}
+	if len(input) > 16 {
+		return nil, false
+	}
+	headers := make(TelemetryExporterHeaders, 0, len(input))
+	seen := make(map[string]bool, len(input))
+	for _, h := range input {
+		if !httpHeaderName.MatchString(h.Name) {
+			return nil, false
+		}
+		h.Name = strings.ToLower(h.Name)
+		if seen[h.Name] {
+			continue
+		}
+		if len(h.Value) > 4096 || !exporterHeaderValue.MatchString(h.Value) {
+			return nil, false
+		}
+		switch h.Name {
+		case "host", "connection", "content-length", "content-type", "content-encoding", "transfer-encoding",
+			"te", "trailer", "upgrade", "proxy-connection", "keep-alive", "expect":
+			return nil, false
+		}
+		seen[h.Name] = true
+		headers = append(headers, h)
+	}
+	slices.SortFunc(headers, func(a, b TelemetryExporterHeader) int { return cmp.Compare(a.Name, b.Name) })
+	return headers, true
+}
+
+// Digest matches Octavia's public readback for a canonical header set. NUL
+// separates fields and values and is excluded from both by the schema.
+func (headers TelemetryExporterHeaders) Digest() string {
+	if len(headers) == 0 {
+		return ""
+	}
+	hash := sha256.New()
+	for _, header := range headers {
+		hash.Write([]byte(header.Name + "\x00" + header.Value + "\x00"))
+	}
+	return hexencoding.EncodeToString(hash.Sum(nil))
+}
 
 type TelemetryAttribute struct {
 	Name         string `json:"name"`

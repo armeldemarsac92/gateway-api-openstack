@@ -149,6 +149,24 @@ func TestTelemetryPolicyPrecedenceAndStatus(t *testing.T) {
 	require.Equal(t, []gatewayv1.PolicyAncestorStatus{foreign}, young.Status.Ancestors)
 }
 
+func TestTelemetryExporterHeadersSelectFirstCaseInsensitiveName(t *testing.T) {
+	headers, valid := telemetryExporterHeaders([]gatewayv1.HTTPHeader{
+		{Name: "X-Label", Value: "one"}, {Name: "X-Data", Value: "dataset"}, {Name: "x-label", Value: "two"},
+	})
+	require.True(t, valid)
+	require.Equal(t, cloud.TelemetryExporterHeaders{{Name: "x-data", Value: "dataset"}, {Name: "x-label", Value: "one"}}, headers)
+}
+
+func TestTelemetryExporterHeadersRejectInvalidPolicyValues(t *testing.T) {
+	for _, headers := range [][]gatewayv1.HTTPHeader{
+		{{Name: "Host", Value: "collector.example"}},
+		{{Name: "X-Label", Value: "invalid  whitespace"}},
+	} {
+		_, ok := telemetryExporterHeaders(headers)
+		require.False(t, ok)
+	}
+}
+
 func TestTelemetrySamplingDefaultsAndInvalidFractions(t *testing.T) {
 	tracing := gatewayx.TracingConfig{}
 	full := cloud.TelemetryRate{Numerator: 1, Denominator: 1}
@@ -201,6 +219,7 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 		Provider: gatewayx.TracingProvider{BackendRef: gatewayv1.BackendObjectReference{Name: gatewayv1.ObjectName(service.Name),
 			Namespace: ptr.To(gatewayv1.Namespace(service.Namespace)), Port: ptr.To(gatewayv1.PortNumber(8443))}},
 	}
+	policy.Spec.Tracing.Provider.Headers = []gatewayv1.HTTPHeader{{Name: "X-Collector-Label", Value: "wire-one"}}
 	grant := &gatewayv1.ReferenceGrant{
 		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "collector"},
 		Spec: gatewayv1.ReferenceGrantSpec{
@@ -259,6 +278,7 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.12", Port: 9443}}, calls[1].Members)
 	require.Equal(t, "edge.apps", calls[1].ServiceName)
 	require.Equal(t, "Edge request", calls[1].SpanName)
+	require.Equal(t, cloud.TelemetryExporterHeaders{{Name: "x-collector-label", Value: "wire-one"}}, calls[1].Headers)
 	require.Equal(t, []cloud.TelemetryAttribute{
 		{Name: "code", SourceType: "Attribute", AttributeKey: "http.response.status_code"},
 		{Name: "environment", SourceType: "Literal", LiteralValue: "test"},

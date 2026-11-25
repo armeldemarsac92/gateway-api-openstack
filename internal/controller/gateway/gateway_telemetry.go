@@ -157,12 +157,13 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 	}
 	sampling, valid := telemetrySampling(tracing)
 	attributes, validAttributes := telemetryAttributes(tracing.Attributes)
+	headers, validHeaders := telemetryExporterHeaders(tracing.Provider.Headers)
 	if !valid {
 		observation.rejected = telemetryIssue{"UnsupportedValue", "Invalid tracing sampling fraction or parent-based sampling configuration"}
 	} else if !validAttributes {
 		observation.rejected = telemetryIssue{"UnsupportedValue", "The tracing policy contains an unsupported span attribute"}
-	} else if len(tracing.Provider.Headers) != 0 {
-		observation.rejected = telemetryIssue{"UnsupportedValue", "Octavia tracing does not support custom provider headers"}
+	} else if !validHeaders {
+		observation.rejected = telemetryIssue{"UnsupportedValue", "The tracing policy contains an unsupported collector request header"}
 	}
 	if (tracing.ServiceName != "" && (len(tracing.ServiceName) > 253 || !telemetryServiceName.MatchString(tracing.ServiceName))) ||
 		(tracing.SpanName != "" && (len(tracing.SpanName) > 256 || !telemetrySpanName.MatchString(tracing.SpanName))) {
@@ -184,6 +185,7 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 	if err == nil && observation.unresolved.reason == "" && observation.rejected.reason == "" && desired != nil {
 		desired.Sampling = sampling
 		desired.Attributes = attributes
+		desired.Headers = headers
 		sets, err := r.ObserveListenerSets(ctx, r.APIReader, gateway)
 		if err != nil {
 			return observation, err
@@ -200,6 +202,14 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 		}
 	}
 	return observation, err
+}
+
+func telemetryExporterHeaders(input []gatewayv1.HTTPHeader) (cloud.TelemetryExporterHeaders, bool) {
+	headers := make(cloud.TelemetryExporterHeaders, 0, len(input))
+	for _, h := range input {
+		headers = append(headers, cloud.TelemetryExporterHeader{Name: string(h.Name), Value: h.Value})
+	}
+	return cloud.CanonicalTelemetryExporterHeaders(headers)
 }
 
 func telemetryAttributes(attrs []gatewayx.Attribute) ([]cloud.TelemetryAttribute, bool) {

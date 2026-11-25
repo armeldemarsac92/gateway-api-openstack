@@ -19,11 +19,14 @@ package octavia
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
 	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -33,21 +36,25 @@ const (
 	GatewayCapabilityListenerOTLPTracing        = "listener_otlp_tracing_v1"
 	GatewayCapabilityListenerOTLPSampling       = "listener_otlp_sampling_v1"
 	GatewayCapabilityListenerOTLPSpanAttributes = "listener_otlp_span_attributes_v1"
+	GatewayCapabilityListenerOTLPExportHeaders  = "listener_otlp_export_headers_v1"
 )
 
 type ListenerOTLPTracing struct {
-	CollectorPoolID string                     `json:"collector_pool_id"`
-	ServiceName     string                     `json:"service_name"`
-	SpanName        string                     `json:"span_name"`
-	Sampling        *cloud.TelemetrySampling   `json:"sampling,omitempty"`
-	Attributes      []cloud.TelemetryAttribute `json:"attributes,omitempty"`
+	CollectorPoolID string                         `json:"collector_pool_id"`
+	ServiceName     string                         `json:"service_name"`
+	SpanName        string                         `json:"span_name"`
+	Sampling        *cloud.TelemetrySampling       `json:"sampling,omitempty"`
+	Attributes      []cloud.TelemetryAttribute     `json:"attributes,omitempty"`
+	Headers         cloud.TelemetryExporterHeaders `json:"headers,omitempty"`
 }
 
 type ListenerOTLPTracingObservation struct {
-	Value           *ListenerOTLPTracing
-	Readable        bool
-	Status          string
-	StatusMalformed bool
+	Value            *ListenerOTLPTracing
+	Readable         bool
+	Status           string
+	StatusMalformed  bool
+	HeadersSHA256    string
+	HeadersMalformed bool
 }
 
 func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingObservation {
@@ -62,8 +69,10 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 	// A malformed extension must leave the collector identity available for withdrawal.
 	var wire *struct {
 		ListenerOTLPTracing
-		RawSampling   json.RawMessage `json:"sampling"`
-		RawAttributes json.RawMessage `json:"attributes"`
+		RawSampling     json.RawMessage `json:"sampling"`
+		RawAttributes   json.RawMessage `json:"attributes"`
+		RawHeaders      json.RawMessage `json:"headers"`
+		RawHeaderDigest json.RawMessage `json:"headers_sha256"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -77,6 +86,18 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 			return observed
 		}
 		observed.Value = value
+		// A projected write value must never come back from the public API.
+		if wire.RawHeaders != nil {
+			observed.HeadersMalformed = true
+			return observed
+		}
+		if wire.RawHeaderDigest != nil {
+			if err := json.Unmarshal(wire.RawHeaderDigest, &observed.HeadersSHA256); err != nil ||
+				len(observed.HeadersSHA256) != sha256.Size*2 || strings.Trim(observed.HeadersSHA256, "0123456789abcdef") != "" {
+				observed.HeadersMalformed = true
+				return observed
+			}
+		}
 		if len(wire.RawAttributes) != 0 {
 			var valid bool
 			value.Attributes, valid = decodeTelemetryAttributes(wire.RawAttributes)
@@ -141,6 +162,9 @@ func (update listenerOTLPTracingUpdate) ToListenerUpdateMap() (map[string]any, e
 
 func (s *Service) SetListenerOTLPTracing(ctx context.Context, listenerID string, value *ListenerOTLPTracing, tags []string) error {
 	_, err := listeners.Update(ctx, s.client, listenerID, listenerOTLPTracingUpdate{value, tags}).Extract()
+	if value != nil && len(value.Headers) != 0 {
+		return apierrors.RedactOctaviaMutation(err, "update Octavia collector request headers")
+	}
 	return err
 }
 
