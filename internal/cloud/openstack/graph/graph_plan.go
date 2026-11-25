@@ -254,12 +254,17 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				ensureHold = err.Error()
 			} else if errors.Is(err, errRequestMirrorsUnverified) {
 				ensureHold = err.Error()
+			} else if errors.Is(err, errBackendRetryBudgetAncestor) || errors.Is(err, errBackendRetryBudgetCapability) || errors.Is(err, errBackendRetryBudgetReadback) {
+				ensureHold = err.Error()
 			} else if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
 			if withdrawBackendTransport && len(routePlan) == 0 {
-				_, ensureHold = httpMemberWithdrawal(observed)
-				canRestoreTraffic = canRestoreTraffic && ensureHold == ""
+				_, transportHold := httpMemberWithdrawal(observed)
+				if ensureHold == "" {
+					ensureHold = transportHold
+				}
+				canRestoreTraffic = canRestoreTraffic && transportHold == ""
 			}
 			if route.h2cTLSConflict(observed) {
 				routeResult.UnsupportedBackendProtocol = "Octavia pool uses TLS, which prevents cleartext HTTP/2"
@@ -791,7 +796,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		seen[owner] = true
 		independentListener := blockedHTTPPolicy && first.listenerID != "" && sibling.listenerID != "" && first.listenerID != sibling.listenerID
 		switch sibling.route.kind {
-		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
+		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationSetBackendRetryBudget, routeMutationCreateMember, routeMutationUpdateMember:
 		default:
 			if !independentListener || !isHTTPPolicyMutation(sibling.route.kind) {
 				continue

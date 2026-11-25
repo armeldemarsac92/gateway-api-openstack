@@ -399,6 +399,14 @@ func (s routeReconcileStatus) withBackendTLSAncestor(slot backendtls.AncestorSlo
 	return s
 }
 
+func (s routeReconcileStatus) withRetryBudgetAncestorLimit(full bool) routeReconcileStatus {
+	if full && s.programmed == metav1.ConditionTrue {
+		s.programmed, s.programmedReason, s.programmedMessage = metav1.ConditionFalse, "BackendRetryBudgetAncestorLimit",
+			"An XBackendTrafficPolicy used by this route has no room for this Gateway in its ancestor status"
+	}
+	return s
+}
+
 func unsupportedGatewayAPIVersionRouteStatus() routeReconcileStatus {
 	return routeReconcileStatus{
 		accepted:          metav1.ConditionUnknown,

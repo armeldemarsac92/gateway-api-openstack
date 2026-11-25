@@ -99,27 +99,28 @@ func (rule desiredRule) matchesKey(key string) bool {
 }
 
 type desiredRoute struct {
-	identity               Identity
-	spec                   cloud.RouteSpec
-	members                []cloud.Member
-	healthMonitor          cloud.HealthMonitorConfig
-	policies               []desiredPolicy
-	hostnameRuleValue      string
-	httpParts              []desiredRoute
-	mirrorAvailability     requestMirrorAvailability
-	backendKey             string
-	unavailable            bool
-	redirect               bool
-	redirectMatches        []cloud.HTTPPathMatch
-	redirectIssue          error
-	fixedResponse          bool
-	weightedTargets        []desiredHTTPWeightedTarget
-	targetsPending         bool
-	zeroWeightOnly         bool
-	mirrorOnly             bool
-	grpcFailurePoolID      string
-	weightedAuthorizations map[string]map[string]int
-	backendTLS             backendTLSPlan
+	identity                    Identity
+	spec                        cloud.RouteSpec
+	members                     []cloud.Member
+	healthMonitor               cloud.HealthMonitorConfig
+	policies                    []desiredPolicy
+	hostnameRuleValue           string
+	httpParts                   []desiredRoute
+	mirrorAvailability          requestMirrorAvailability
+	backendKey                  string
+	unavailable                 bool
+	redirect                    bool
+	redirectMatches             []cloud.HTTPPathMatch
+	redirectIssue               error
+	fixedResponse               bool
+	weightedTargets             []desiredHTTPWeightedTarget
+	targetsPending              bool
+	zeroWeightOnly              bool
+	mirrorOnly                  bool
+	grpcFailurePoolID           string
+	weightedAuthorizations      map[string]map[string]int
+	backendTLS                  backendTLSPlan
+	backendRetryBudgetAvailable bool
 }
 
 func (r desiredRoute) protocol() string {
@@ -240,6 +241,9 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	var policies []desiredPolicy
 	var hostnameRuleValue string
 	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
+	if spec.BackendRetryBudget != nil && (protocol != cloud.ListenerProtocolHTTP || !spec.BackendRetryBudget.Valid()) {
+		return invalid(errors.New("backend retry budgets require a valid Service budget on an HTTP pool"))
+	}
 	if spec.BackendTLS != nil && protocol != cloud.ListenerProtocolHTTP {
 		return invalid(errors.New("BackendTLSPolicy requires an HTTP pool"))
 	}
@@ -382,6 +386,8 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		partSpec := spec
 		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules, partSpec.Members = nil, nil, nil, nil, backend.Members
 		partSpec.BackendH2C, partSpec.BackendTLS = backend.BackendH2C, backend.BackendTLS
+		partSpec.BackendRetryBudget = backend.BackendRetryBudget
+		partSpec.BackendRetryBudgetPending = backend.BackendRetryBudgetPending
 		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable)
 		if err != nil {
 			return desiredRoute{}, err
