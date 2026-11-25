@@ -85,7 +85,19 @@ func enrolledHeader(observed observedRouteGraph) bool {
 }
 
 func planXBackendPersistence(desired desiredRoute, observed observedRouteGraph) (*routeMutation, error) {
+	if desired.keepsInlineRefusal(observed) && slices.Contains(observed.pool.Tags, backendTLSRefusalTag) &&
+		(desired.backendTLS.denies() || desired.backendTLS.phase == backendTLSRelease) {
+		return nil, nil
+	}
 	if !desired.managesSessionPersistence(observed) {
+		return nil, nil
+	}
+	if desired.protectedInlinePersistence() && !desired.spec.BackendTLS.Denied &&
+		desired.backendTLS.phase != backendTLSVerified && !desired.backendTLS.stagesSystemCA() &&
+		(desired.sessionCookieName != "" && desired.sessionCookieCapability == xBackendCookieAvailable ||
+			desired.sessionHeader != nil && desired.sessionHeaderCapability == xBackendCookieAvailable) {
+		// Stage TLS on the closed pool before configuring affinity. Neither
+		// gate can admit members until both have been read back independently.
 		return nil, nil
 	}
 	if desired.sessionHeader != nil && observed.pool != nil && slices.ContainsFunc(observed.pool.Tags, isXBackendCookieTag) {
@@ -136,7 +148,7 @@ func planXBackendHeaderPersistence(desired desiredRoute, observed observedRouteG
 		return nil, errXBackendHeaderPersistence
 	}
 	if len(observed.members) != 0 {
-		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID, persistenceDrain: true}, nil
+		return desired.withdrawSessionPersistenceMembers(observed), nil
 	}
 	managed := slices.Contains(pool.Tags, xBackendHeaderTag)
 	cleared := observed.headerPersistence.Observed && !observed.headerPersistence.Invalid &&

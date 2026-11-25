@@ -122,8 +122,9 @@ func (*TLSAuthorizationChanged) Error() string {
 
 // RouteInputs contains the complete route set and its mutation fence.
 type RouteInputs struct {
-	Nodes    []cloud.RouteGraphNode
-	Validate func(context.Context) error
+	BackendTrustWithdrawalOnly bool
+	Nodes                      []cloud.RouteGraphNode
+	Validate                   func(context.Context) error
 	// RefreshAt schedules another observation of the complete Gateway graph.
 	RefreshAt time.Time
 }
@@ -167,6 +168,7 @@ func (sources RouteSources) ObserveRouteGraph(ctx context.Context, request Reque
 			return RouteInputs{}, err
 		}
 		combined.Nodes = append(combined.Nodes, input.Nodes...)
+		combined.BackendTrustWithdrawalOnly = combined.BackendTrustWithdrawalOnly || input.BackendTrustWithdrawalOnly
 		if !input.RefreshAt.IsZero() && (combined.RefreshAt.IsZero() || input.RefreshAt.Before(combined.RefreshAt)) {
 			combined.RefreshAt = input.RefreshAt
 		}
@@ -262,7 +264,7 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	}
 	identity := request.Identity
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
-	spec := cloud.GatewayGraphSpec{Identity: identity, Gateway: gateway.Node, Routes: routes.Nodes}
+	spec := cloud.GatewayGraphSpec{Identity: identity, Gateway: gateway.Node, Routes: routes.Nodes, BackendTrustWithdrawalOnly: routes.BackendTrustWithdrawalOnly}
 	gateway, routes, spec.HTTPSPolicyAuthority, err = w.observeHTTPSCleanupAuthority(ctx, request, identity, gateway, routes)
 	if err != nil {
 		return cloud.GatewayGraphResult{}, err
@@ -292,6 +294,9 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		if outcomeErr := result.Outcome.Validate(); outcomeErr != nil {
 			err = fmt.Errorf("validate Gateway graph outcome: %w", outcomeErr)
 		}
+	}
+	if routes.BackendTrustWithdrawalOnly {
+		err = errors.Join(err, backendtls.ErrClusterTrustBundleUnavailable)
 	}
 	w.observeStage(StageProvider, started, err)
 	if gateway.ReportRoutes != nil {
@@ -331,6 +336,9 @@ func (w *Writer) observeHTTPSCleanupAuthority(ctx context.Context, request Reque
 		return gateway, routes, nil, nil
 	}
 	current, err := w.Routes.ObserveRouteGraph(ctx, ensure, live.Object)
+	if current.BackendTrustWithdrawalOnly {
+		return gateway, routes, nil, backendtls.ErrClusterTrustBundleUnavailable
+	}
 	if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
 		return gateway, routes, nil, err
 	}
@@ -640,6 +648,9 @@ func (w *Writer) observeHTTPSWithdrawalAuthority(ctx context.Context, identity c
 		return input, nil, nil
 	}
 	routes, err := w.Routes.ObserveRouteGraph(ctx, request, live.Object)
+	if routes.BackendTrustWithdrawalOnly {
+		return input, nil, backendtls.ErrClusterTrustBundleUnavailable
+	}
 	if err == nil {
 		err = validateInputs(ctx, live, routes)
 	}

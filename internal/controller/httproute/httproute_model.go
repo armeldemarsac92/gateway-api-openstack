@@ -495,7 +495,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 }
 
 func (r *Reconciler) excludeIncompatibleInlineRules(route *gatewayv1.HTTPRoute, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, mode cloud.MemberMode) ([]routeLoweredMatch, []model.Rule, string) {
-	if !r.hasInlinePersistence(route) {
+	if !r.hasInlinePersistence(route) || mode == "" || mode == cloud.MemberModeEndpoint {
 		return matches, rules, ""
 	}
 	var dropped []string
@@ -504,7 +504,7 @@ func (r *Reconciler) excludeIncompatibleInlineRules(route *gatewayv1.HTTPRoute, 
 	for _, rule := range rules {
 		reject := slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool {
 			return backend.RouteSessionPersistence != nil && backend.Diagnostic == nil && backend.FilterDiagnostic == nil &&
-				backend.Weight > 0 && (mode != "" && mode != cloud.MemberModeEndpoint || backend.BackendTLS.Winner != nil)
+				backend.Weight > 0
 		})
 		if reject {
 			position := rule.Index
@@ -512,7 +512,7 @@ func (r *Reconciler) excludeIncompatibleInlineRules(route *gatewayv1.HTTPRoute, 
 				position = original[position]
 			}
 			dropped = append(dropped, droppedRule(route.Spec.Rules[position], position,
-				"rule sessionPersistence requires an Endpoint member pool with a cleartext HTTP or h2c backend"))
+				"rule sessionPersistence requires a Service Endpoint member pool"))
 			continue
 		}
 		admitted[rule.Index] = len(retained)
@@ -966,7 +966,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			XBackendClientCertificateReference: clientCertificate,
 		})
 	}
-	if !invalid && tls == nil && backend.Weight > 0 && backend.RouteSessionPersistence != nil {
+	if !invalid && (tls == nil || !tls.Denied) && backend.Weight > 0 && backend.RouteSessionPersistence != nil {
 		// An earlier zero-weight reference may already have created this pool.
 		spec.HTTPBackends[*result.index].ServiceSessionPersistence = backend.RouteSessionPersistence.Settings
 	}

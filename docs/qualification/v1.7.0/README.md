@@ -30,6 +30,8 @@ The [Magnum operator guide](magnum-operator.md) covers how to build the patch, s
 
 ## Profile records
 
+The first completed cell of the 22-cell common Gateway campaign passed 39 of 40 Standard GATEWAY-HTTP Core cases locally, with zero skips, on controller `13a6870cb63a` and Octavia `e62a57c49177`. All 33 hostname intersection requests passed before the case timed out during cleanup. [November 25, 2026 report and inputs](common-gateway/2026-11-25-first-cell/README.md)
+
 The signed controller `598db990b3ba` passed all 40 upstream GATEWAY-HTTP Core cases on each of two separate local clusters, Standard and Experimental, with zero Core skips. The fixtures used kind, the Octavia and Barbican APIs and native HAProxy. [Full and targeted reports with exact inputs](provider/unified-http-core-598db990b3ba/README.md)
 
 The signed controller `9388be4580dd` passed all 21 GATEWAY-TLS Core and all 21 GATEWAY-UDP Core cases on each v1.7.0 channel in disposable local kind clusters. Native HAProxy handled TLS passthrough and Keepalived with kernel IPVS forwarded UDP to Pods. [Original reports and fixture limits](provider/tls-udp-core.md)

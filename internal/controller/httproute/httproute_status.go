@@ -467,7 +467,9 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		return nil
 	}
 	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
-		return r.resolveGRPCRouteReferences(ctx, route, gateway, status)
+		projected := *route
+		projected.Spec.Rules, _ = r.projectedHTTPFilterRules(route)
+		return r.resolveGRPCRouteReferences(ctx, &projected, gateway, status)
 	}
 	grantsByNamespace, rejection, err := r.observeRouteBackendPermissions(ctx, route)
 	if err != nil {
@@ -604,7 +606,7 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 			Key:            types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name},
 			ControllerName: r.Config.ControllerName,
 		}
-		if err := graph.CollectBackendTLSInputs(ctx, r.APIReader, &input, ancestor, r.Config.ClusterTrustBundles); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, r.APIReader, &input, ancestor, r.Config.ClusterTrustBundles, r.supportsInlineEndpointRules(gateway)); err != nil {
 			return err
 		}
 		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, input.Routes, input)

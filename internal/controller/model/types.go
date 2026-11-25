@@ -69,6 +69,8 @@ type Input struct {
 	ReferenceGrants       []gatewayv1.ReferenceGrant
 
 	RouteSessionPersistence bool
+	// Preserve ordinary pools until the effective bundle can be read.
+	BackendTrustWithdrawalOnly bool `json:"-"`
 }
 
 // Source identifies the exact Kubernetes revision that contributed a model.
