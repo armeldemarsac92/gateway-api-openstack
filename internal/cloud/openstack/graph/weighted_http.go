@@ -37,6 +37,7 @@ type desiredHTTPWeightedTarget struct {
 	weight                  int
 	requestHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewrite       *cloud.HTTPURLRewrite
+	requestMirrors          []desiredHTTPMirror
 }
 
 type weightedHTTPPolicyPlan struct {
@@ -85,6 +86,15 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 				}
 				wanted.requestHeaderOperations, wanted.requestURLRewrite = target.RequestHeaderOperations, target.URLRewrite
 			}
+			if len(target.RequestMirrors) != 0 {
+				if target.BackendIndex == nil || target.Weight == 0 {
+					return invalid(errors.New("backendRef mirroring requires a positive forwarding target"))
+				}
+				wanted.requestMirrors, err = p.compileHTTPMirrors(spec, target.RequestMirrors)
+				if err != nil {
+					return invalid(err)
+				}
+			}
 			if target.BackendIndex != nil {
 				index := *target.BackendIndex
 				if index < 0 || index >= len(spec.HTTPBackends) || spec.HTTPBackends[index].InvalidReference {
@@ -107,7 +117,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 			// Capture just this match without forwarding to any declared Service.
 			part.weightedTargets = []desiredHTTPWeightedTarget{{backendKey: grpcFailurePoolKey, weight: 1}}
 		}
-		if err := p.buildHTTPMatchPolicies(&part, rule.Matches); err != nil {
+		if err := p.buildHTTPMatchPolicies(&part, rule.Matches, spec.HTTPBackends); err != nil {
 			return invalid(err)
 		}
 		parts = append(parts, part)
@@ -136,6 +146,7 @@ func fixedWeightedHTTPTarget(weight int) octavia.WeightedHTTPTarget {
 func weightedTargetsEqual(a, b octavia.WeightedHTTPTarget) bool {
 	return a.Weight == b.Weight && a.PoolID == b.PoolID &&
 		slices.Equal(a.RequestHeaderOperations, b.RequestHeaderOperations) && a.RequestURLRewrite.Equal(b.RequestURLRewrite) &&
+		slices.Equal(a.RequestMirrors, b.RequestMirrors) &&
 		(a.FixedResponse == nil && b.FixedResponse == nil ||
 			a.FixedResponse != nil && b.FixedResponse != nil && *a.FixedResponse == *b.FixedResponse)
 }
@@ -200,12 +211,13 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 		if allLocal {
 			policy.requestPolicy = nil
 		}
-		if allLocal && policy.requestURLRewrite != nil {
+		if allLocal && policy.requestURLRewrite != nil && len(policy.resolvedRequestMirrors) == 0 {
 			policy.localRewriteFallback = true
 			policy.requestURLRewrite = nil
 			policy.requestHeaderOperations = nil
 		}
 		serving := servingWeightedPoolIDs(*policy, observed.httpParts[part.backendKey], listenerID)
+		current := observedMirrorPolicy(observed.httpParts[part.backendKey], policy.role)
 		plan := &weightedHTTPPolicyPlan{pending: part.spec.GRPC && part.grpcFailurePoolID == ""}
 		for i, target := range part.weightedTargets {
 			resolved := octavia.WeightedHTTPTarget{Weight: target.weight}
@@ -217,6 +229,13 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 				if target.weight > 0 && !ready[target.backendKey] && !serving[resolved.PoolID] {
 					plan.pending = true
 				}
+			}
+			if resolved.PoolID != "" {
+				var currentMirrors []octavia.HTTPRequestMirror
+				if i < len(current.weightedTargets) && current.weightedTargets[i].PoolID == resolved.PoolID {
+					currentMirrors = current.weightedTargets[i].RequestMirrors
+				}
+				resolved.RequestMirrors = resolveHTTPMirrors(route, observed, target.requestMirrors, currentMirrors)
 			}
 			if resolved.PoolID == "" {
 				if part.spec.GRPC {
@@ -237,6 +256,12 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 		part.targetsPending = part.targetsPending || plan.pending
 	}
 	return part
+}
+
+func allWeightedTargetsFixed(targets []octavia.WeightedHTTPTarget) bool {
+	return len(targets) != 0 && !slices.ContainsFunc(targets, func(target octavia.WeightedHTTPTarget) bool {
+		return target.PoolID != "" || target.FixedResponse == nil
+	})
 }
 
 func observedGRPCFailurePoolID(route desiredRoute, observed observedRouteGraph) string {
@@ -303,15 +328,21 @@ func isObservedWeightedHTTPPolicy(policy observedRoutePolicy) bool {
 
 func observedWeightedPoolHolds(route observedRouteGraph) (map[string]bool, bool) {
 	var held map[string]bool
-	for _, part := range route.httpParts {
+	for _, part := range route.parts() {
 		for _, policy := range part.policies {
-			if !isObservedWeightedHTTPPolicy(policy) {
+			if !isObservedWeightedHTTPPolicy(policy) && !policy.hasRequestMirrors() {
 				continue
 			}
 			// An unsettled reload can still serve a previously observed
 			// target even when the list now has its replacement.
 			if policy.policy.ProvisioningStatus != "ACTIVE" {
 				return held, true
+			}
+			for _, mirror := range policy.allRequestMirrors() {
+				if held == nil {
+					held = make(map[string]bool)
+				}
+				held[mirror.PoolID] = true
 			}
 			for _, target := range policy.weightedTargets {
 				if target.PoolID != "" {
@@ -329,7 +360,15 @@ func observedWeightedPoolHolds(route observedRouteGraph) (map[string]bool, bool)
 func weightedBackendDemand(route desiredRoute) map[string]int {
 	demand := make(map[string]int)
 	for _, part := range route.httpParts {
+		for _, policy := range part.policies {
+			for _, mirror := range policy.requestMirrors {
+				demand[mirror.backendKey]++
+			}
+		}
 		for _, target := range part.weightedTargets {
+			for _, mirror := range target.requestMirrors {
+				demand[mirror.backendKey]++
+			}
 			if target.backendKey != "" {
 				demand[target.backendKey] += target.weight
 			}

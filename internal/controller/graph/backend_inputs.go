@@ -203,8 +203,8 @@ func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.Namespaced
 	references := map[types.NamespacedName]map[backendReferenceSource]struct{}{}
 	for _, route := range routes {
 		for _, rule := range route.Spec.Rules {
-			for _, reference := range rule.BackendRefs {
-				key, supported := model.BackendServiceReference(route.Namespace, reference.BackendObjectReference)
+			for _, reference := range model.HTTPServiceBackendReferences(rule, true) {
+				key, supported := model.BackendServiceReference(route.Namespace, reference)
 				if !supported {
 					continue
 				}

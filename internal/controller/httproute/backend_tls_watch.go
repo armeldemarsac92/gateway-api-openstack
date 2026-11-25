@@ -129,9 +129,8 @@ func (r *Reconciler) serviceConsumers(ctx context.Context, key types.NamespacedN
 func routeBackendTLSServices(route *gatewayv1.HTTPRoute) map[types.NamespacedName]struct{} {
 	keys := map[types.NamespacedName]struct{}{}
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			if key, supported := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference); supported &&
-				validBackendPort(backend.Port) && ptr.Deref(backend.Weight, 1) > 0 {
+		for _, backend := range model.HTTPServiceBackendReferences(rule, false) {
+			if key, supported := model.BackendServiceReference(route.Namespace, backend); supported && validBackendPort(backend.Port) {
 				keys[key] = struct{}{}
 			}
 		}

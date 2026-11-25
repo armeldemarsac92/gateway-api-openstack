@@ -278,6 +278,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	input.HTTPRequestRedirect = r.Config.HTTPRequestRedirect
 	input.HTTPRequestURLRewrite = r.Config.HTTPRequestURLRewrite
 	input.HTTPRequestPolicy = r.Config.HTTPRequestPolicy
+	input.HTTPRequestMirror = r.Config.HTTPRequestMirror
 	input.HTTPCORS = r.Config.HTTPCORS
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
@@ -342,8 +343,8 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	}
 	for _, route := range inputs.input.Routes {
 		for _, rule := range route.Spec.Rules {
-			for _, ref := range rule.BackendRefs {
-				key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
+			for _, ref := range model.HTTPServiceBackendReferences(rule, true) {
+				key, supported := model.BackendServiceReference(route.Namespace, ref)
 				if supported && model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, inputs.input.ReferenceGrants) !=
 					model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, current.ReferenceGrants) {
 					return errHTTPRouteChanged

@@ -234,6 +234,7 @@ type HTTPPathMatch struct {
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite               *HTTPURLRewrite       `json:",omitempty"`
 	RequestPolicy            *HTTPRequestPolicy    `json:",omitempty"`
+	RequestMirrors           []HTTPMirrorTarget    `json:",omitempty"`
 	CORS                     *HTTPCORS             `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
@@ -325,6 +326,7 @@ type HTTPWeightedTarget struct {
 	Weight                  int
 	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite              *HTTPURLRewrite       `json:",omitempty"`
+	RequestMirrors          []HTTPMirrorTarget    `json:",omitempty"`
 }
 
 // HTTPWeightedRule preserves backendRef order and owns the policies for its matches.

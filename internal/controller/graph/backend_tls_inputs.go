@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -48,11 +47,8 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 		route := &input.Routes[i]
 		kind := model.HTTPProfileRouteKind(route)
 		for _, rule := range route.Spec.Rules {
-			for _, backend := range rule.BackendRefs {
-				if ptr.Deref(backend.Weight, 1) == 0 && kind != model.GRPCRouteKind {
-					continue
-				}
-				key, serviceRef := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+			for _, backend := range model.HTTPServiceBackendReferences(rule, kind == model.GRPCRouteKind) {
+				key, serviceRef := model.BackendServiceReference(route.Namespace, backend)
 				if !serviceRef || !model.BackendReferenceAllowedFor(kind, route.Namespace, key, input.ReferenceGrants) {
 					continue
 				}
