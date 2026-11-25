@@ -1,0 +1,368 @@
+{
+  "gatewayAPI": {
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "version": "v1.7.0",
+    "channels": [
+      "standard",
+      "experimental"
+    ]
+  },
+  "controller": "920b54673d075dc34f71b09d40d4d8a55ae65668",
+  "image": "sha256:42271f4986a266c20077eed466c0b24be62a0d0195ccdd51556c76654cd9e15f",
+  "managerSHA256": "616a3caacc9705dc3b5bb328511f9c8c30c695105716e0d9beea1fb99c9fd394",
+  "octavia": "372effbead21f796cdf6ea06d68ee70390a4e148",
+  "octaviaLib": "71f0c094860ad040e7eed486d7220b964b295250",
+  "octaviaWheelSHA256": "f0e332fded098ee2ce1ca2429b0abe06e1c490ae278acdcbeb78e76301bc8f0c",
+  "octaviaLibWheelSHA256": "15ee1a1f19ecb8d368d9d31fb8b5ca832c455f9f7e2ec38efed4a896c394dfa8",
+  "haproxySHA256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+  "capability": "backend_tls_system_ca_v1",
+  "environment": "Disposable kind/KVM with real Kubernetes API, Pods, controller, Octavia REST, SQLAlchemy, Amphora stage and reload methods, HAProxy and Pod traffic. Keystone, Neutron, the Amphora transport and launch, load balancer inventory and some provisioning are local stand-ins. One standalone Amphora per channel.",
+  "precedingStandard": {
+    "controller": "3b8862d8057433b9abc60eef71468c1bc556137c",
+    "octavia": "833bce78f1464691ada7d5c143029bdd21356821",
+    "octaviaLib": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+    "policy": "False/Invalid",
+    "responses": [
+      503,
+      503,
+      503
+    ],
+    "originHits": 0,
+    "witness": [
+      200,
+      200,
+      200
+    ],
+    "scenarioExit": 0,
+    "wrapperExit": 127,
+    "wrapperExitDetail": "The launcher was edited in place while Bash was waiting on its child. The scenario, kind deletion and VM shutdown completed. The launcher resumed at a shifted byte offset and exited with ash: command not found."
+  },
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kindNode": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "fixtureBackendSHA256": "ee3e5f8548c01d1e36d5374f9d6e8577c58002ca3fc04b41f1e1e2a2bc57eb1e",
+      "systemCASHA256": "ef8fa0b8b688f14a315a1f85a6dfb98809e297e6f26fd9dcb0f135a487d18c7d",
+      "admission": {
+        "emptyPoolReload": "2026-11-25T12:37:15.523+00:00",
+        "activeGeneration": "fba26268f3a8466389eea1deb36a9e9e",
+        "emptyPoolRead": "2026-11-25T12:37:15.766+00:00",
+        "firstMemberSubmitted": "2026-11-25T12:37:15.919+00:00"
+      },
+      "origins": {
+        "trusted-origin": {
+          "observedLeafSHA256": "7a384557e328312bdf43a050e43f4a252ce8d02ca6d613436d21265ea8496723",
+          "issuerSHA256": "e3eca84ace1014bdc5ebf2c0bfee44b1bdd97fbf452d0074f3b51ae33f6ccba7",
+          "certificateDNSName": "system-origin.example.test"
+        },
+        "untrusted-origin": {
+          "observedLeafSHA256": "dee73790ef27f1f820e5b5986943b25cd58a445fd7cccca5e23f2c6b5a63b71b",
+          "issuerSHA256": "3bc91f6b5306a1fef08475a24e3901dd1dcf931565332e7428bc37776e7bed10",
+          "certificateDNSName": "system-origin.example.test"
+        },
+        "wrong-name-origin": {
+          "observedLeafSHA256": "3da2c2a5faac92cef62d8897cafe8bccac859a845e070fc8ea15a1470fc2e07d",
+          "issuerSHA256": "e3eca84ace1014bdc5ebf2c0bfee44b1bdd97fbf452d0074f3b51ae33f6ccba7",
+          "certificateDNSName": "other-origin.example.test"
+        }
+      },
+      "phases": [
+        {
+          "phase": "trusted",
+          "responses": [
+            200,
+            200,
+            200
+          ],
+          "applicationHits": {
+            "trusted-origin": 3,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "0693e237974189649737328ddb00f7cfc7de8cd971c2269740218b6352815a7a",
+          "appliedSystemCASHA256": "ef8fa0b8b688f14a315a1f85a6dfb98809e297e6f26fd9dcb0f135a487d18c7d",
+          "activeConfigSHA256": "aeb4e9e2c8a60931cf925fe980beb88d50054c67e003e613461a360132c002a4",
+          "activeGeneration": "c13b8970073549a3809fce9e29e54e1e",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        },
+        {
+          "phase": "untrusted-issuer",
+          "responses": [
+            503,
+            503,
+            503
+          ],
+          "applicationHits": {
+            "trusted-origin": 0,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "0693e237974189649737328ddb00f7cfc7de8cd971c2269740218b6352815a7a",
+          "appliedSystemCASHA256": "ef8fa0b8b688f14a315a1f85a6dfb98809e297e6f26fd9dcb0f135a487d18c7d",
+          "activeConfigSHA256": "61dcb12e3fbcf88c1c4c18bb136e71357c7283d36a7b0164924b8ec7cf8edeee",
+          "activeGeneration": "def5c675ccf4455498c8ba0089afabb7",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        },
+        {
+          "phase": "wrong-name",
+          "responses": [
+            503,
+            503,
+            503
+          ],
+          "applicationHits": {
+            "trusted-origin": 0,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "0693e237974189649737328ddb00f7cfc7de8cd971c2269740218b6352815a7a",
+          "appliedSystemCASHA256": "ef8fa0b8b688f14a315a1f85a6dfb98809e297e6f26fd9dcb0f135a487d18c7d",
+          "activeConfigSHA256": "2c88b6d54248d5b60e307dd30cc8fead60c17f6fbe736dff3673b6f84de5779e",
+          "activeGeneration": "75dae7d38a5044b7918423bd93d60dfd",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        },
+        {
+          "phase": "trusted-restored",
+          "responses": [
+            200,
+            200,
+            200
+          ],
+          "applicationHits": {
+            "trusted-origin": 3,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "0693e237974189649737328ddb00f7cfc7de8cd971c2269740218b6352815a7a",
+          "appliedSystemCASHA256": "ef8fa0b8b688f14a315a1f85a6dfb98809e297e6f26fd9dcb0f135a487d18c7d",
+          "activeConfigSHA256": "652db3bdcdb0b2e33c655cb25341b413619690d1c3153dc9606441ab7a9e60fd",
+          "activeGeneration": "3308cd76483245169ccc2d7cd8144e76",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        }
+      ]
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kindNode": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "fixtureBackendSHA256": "ee3e5f8548c01d1e36d5374f9d6e8577c58002ca3fc04b41f1e1e2a2bc57eb1e",
+      "systemCASHA256": "fb3b155120a5afcdc43c807239e47adbd1fd87c6481de0bbb03c88fe0d07bea2",
+      "admission": {
+        "emptyPoolReload": "2026-11-25T12:38:54.797+00:00",
+        "activeGeneration": "74ca8ea3ae9449f7bcbc9a2bee65b323",
+        "emptyPoolRead": "2026-11-25T12:38:55.083+00:00",
+        "firstMemberSubmitted": "2026-11-25T12:38:55.325+00:00"
+      },
+      "origins": {
+        "trusted-origin": {
+          "observedLeafSHA256": "c1380890eb241234f880695777f20ca43b16199bf085f12956fbafe71d80a2b9",
+          "issuerSHA256": "5678a17725e02d1d0bde59bff7899e7f29441857f0726df6d5087892a9e0547f",
+          "certificateDNSName": "system-origin.example.test"
+        },
+        "untrusted-origin": {
+          "observedLeafSHA256": "c21582501491c50d7a4ccb181f6624901a0cc5c1b4c7805661b95a898b262773",
+          "issuerSHA256": "5bd0b769063bd66784c1840150540a30df63f7472a9fbb750eaaf0a499cc99ad",
+          "certificateDNSName": "system-origin.example.test"
+        },
+        "wrong-name-origin": {
+          "observedLeafSHA256": "aaf32f1c890bd6f0d76bcd7e3eca16d9cbedbdcc71123fd5365d1ca45df07ec4",
+          "issuerSHA256": "5678a17725e02d1d0bde59bff7899e7f29441857f0726df6d5087892a9e0547f",
+          "certificateDNSName": "other-origin.example.test"
+        }
+      },
+      "phases": [
+        {
+          "phase": "trusted",
+          "responses": [
+            200,
+            200,
+            200
+          ],
+          "applicationHits": {
+            "trusted-origin": 3,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "4a96a7b58f354da70836a71bcf36a6ffabca84ea2a258d4a2234f57cff381115",
+          "appliedSystemCASHA256": "fb3b155120a5afcdc43c807239e47adbd1fd87c6481de0bbb03c88fe0d07bea2",
+          "activeConfigSHA256": "500dbe0e1e50d394dfae66cf71be3609c859ef0aca103c45cb67b4aec50687eb",
+          "activeGeneration": "155e031783de4d7d860d2255ac0ff0f9",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        },
+        {
+          "phase": "untrusted-issuer",
+          "responses": [
+            503,
+            503,
+            503
+          ],
+          "applicationHits": {
+            "trusted-origin": 0,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "4a96a7b58f354da70836a71bcf36a6ffabca84ea2a258d4a2234f57cff381115",
+          "appliedSystemCASHA256": "fb3b155120a5afcdc43c807239e47adbd1fd87c6481de0bbb03c88fe0d07bea2",
+          "activeConfigSHA256": "ca6f3b4ce35be3fd9450b3b27c51939de53bffb1a31430fff4a6db9fa4f7c3a1",
+          "activeGeneration": "51c2cb6f5e3a4e1e858affc41dfd26ff",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        },
+        {
+          "phase": "wrong-name",
+          "responses": [
+            503,
+            503,
+            503
+          ],
+          "applicationHits": {
+            "trusted-origin": 0,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "4a96a7b58f354da70836a71bcf36a6ffabca84ea2a258d4a2234f57cff381115",
+          "appliedSystemCASHA256": "fb3b155120a5afcdc43c807239e47adbd1fd87c6481de0bbb03c88fe0d07bea2",
+          "activeConfigSHA256": "2f9e7378f4eb3772807e82e7b634c90dcd763b8fc5ead24ead4e4d9cc2bc3527",
+          "activeGeneration": "08a9a747ef3f40538e3489b4acf13f12",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        },
+        {
+          "phase": "trusted-restored",
+          "responses": [
+            200,
+            200,
+            200
+          ],
+          "applicationHits": {
+            "trusted-origin": 3,
+            "untrusted-origin": 0,
+            "wrong-name-origin": 0
+          },
+          "witness": [
+            200,
+            200,
+            200
+          ],
+          "policy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "pool": "4a96a7b58f354da70836a71bcf36a6ffabca84ea2a258d4a2234f57cff381115",
+          "appliedSystemCASHA256": "fb3b155120a5afcdc43c807239e47adbd1fd87c6481de0bbb03c88fe0d07bea2",
+          "activeConfigSHA256": "d18e5ed3b35798bdfe1ec4d4b0eda6fd34506720226bd1e2eb218bdfae4cdcc2",
+          "activeGeneration": "fba8a175b0b24f0d99d59e263fcf416f",
+          "policySpecSHA256": "53ec4d6368f92a3385ffad3ce33af82a05f2274fd70dec5d59c0f2bd01c2ac2d",
+          "routeSpecSHA256": "cb0d8191683a1d889a23ec3f41ffbd28999a4a78becc35438a9416ede06d99d0"
+        }
+      ]
+    }
+  }
+}
