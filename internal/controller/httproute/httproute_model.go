@@ -105,6 +105,7 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 	kind := model.HTTPProfileRouteKind(route)
 	grpc := kind == model.GRPCRouteKind
 	partial := !grpc && hasProjectableHTTPFilters(route)
+	persistenceEnabled := r.Config.RouteSessionPersistenceEnabled()
 	var first error
 	var dropped []string
 	var valid []gatewayv1.HTTPRouteRule
@@ -113,8 +114,12 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 		if _, diagnostic := model.NormalizeHTTPRequestPolicy(rule, !grpc && r.Config.HTTPRequestPolicy); diagnostic != nil {
 			return nil, nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
 		}
-		persistence := model.ValidateRouteSessionPersistence(rule, kind, r.Config.RouteSessionPersistenceEnabled())
-		err := routeActionError(persistence)
+		weightedPersistence := len(rule.BackendRefs) > 1 && model.RouteRulePersistence(rule) != nil
+		err := routeActionError(model.ValidateRouteSessionPersistence(rule, kind, persistenceEnabled))
+		if err == nil && weightedPersistence && !r.Config.WeightedHTTPTargets {
+			err = newRouteBuildError(routeErrorUnsupported, "rule sessionPersistence with multiple backendRefs requires --octavia-weighted-http-targets")
+		}
+		partialPersistence := persistenceEnabled && (err != nil || weightedPersistence)
 		if err == nil {
 			err = r.validateRouteRule(rule, kind)
 		}
@@ -123,9 +128,9 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 			positions = append(positions, index)
 			continue
 		}
-		partialPersistence := persistence != nil && r.Config.RouteSessionPersistenceEnabled()
 		var buildError *routeBuildError
-		if !partialPersistence && (!partial || errors.As(err, &buildError) && buildError.kind == routeErrorUnknownFilter ||
+		routeWideError := errors.As(err, &buildError) && buildError.kind == routeErrorUnknownFilter
+		if routeWideError || !partialPersistence && (!partial ||
 			!r.Config.FixedHTTPResponses && !r.Config.WeightedHTTPTargets &&
 				slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool {
 					return model.UnresolvedHTTPBackendExtension(backend) != nil
@@ -896,19 +901,14 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			(key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
 				result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 				result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
-		var persistence *cloud.ServiceSessionPersistence
 		var persistenceServiceUID string
 		if key.rule != "" {
 			persistenceServiceUID = string(backend.ServiceUID)
-		}
-		if !invalid && tls == nil && backend.Weight > 0 && backend.RouteSessionPersistence != nil {
-			persistence = backend.RouteSessionPersistence.Settings
 		}
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
 			SessionPersistenceRule:       key.rule,
 			SessionPersistenceServiceUID: persistenceServiceUID,
-			ServiceSessionPersistence:    persistence,
 			RoutedExternal:               backend.XBackendRoutedExternal && !invalidReference,
 			SessionCookieName:            backend.XBackendCookieName,
 			SessionCookiePath:            backend.XBackendCookiePath,
@@ -918,6 +918,10 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendH2CPending: h2cPending, BackendTLS: tls,
 			XBackendClientCertificateReference: clientCertificate,
 		})
+	}
+	if !invalid && tls == nil && backend.Weight > 0 && backend.RouteSessionPersistence != nil {
+		// An earlier zero-weight reference may already have created this pool.
+		spec.HTTPBackends[*result.index].ServiceSessionPersistence = backend.RouteSessionPersistence.Settings
 	}
 	groups[key] = result
 	if h2cPending {
