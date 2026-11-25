@@ -82,9 +82,11 @@ done
 
 To check an apiserver with no bundle API, set `ENVTEST_CLUSTER_TRUST_BUNDLE=0`
 and select the subtest `^TestControllerEnvtest$/^ClusterTrustBundle_API_unserved$`.
-To verify real traffic, use the Octavia installation for each TLS profile.
-Test fresh connections with trusted and untrusted certificates before and after
-changing the bundle. Confirm that a bundle deletion closes the listener and
-fails the backend request without forwarding it upstream. The local scenario
-does not contact Octavia or Barbican. The v1.7.0 registry has no
-`ClusterTrustBundle` conformance case.
+The envtest scenarios use a recording provider.
+
+A separate Kind traffic scenario used native Octavia, Barbican and HAProxy
+with the Standard and Experimental CRDs. It exercised both consumers of a
+single bundle, rotated the client CA, removed and restored the backend CA,
+and closed a fresh HTTPS connection after deletion. The scenario covers a
+Gateway HTTPS listener and an HTTPRoute to a TLS Service port. The v1.7.0
+registry has no `ClusterTrustBundle` case. [Traffic results and replay procedure](qualification/v1.7.0/provider/cluster-trust-bundle.md)

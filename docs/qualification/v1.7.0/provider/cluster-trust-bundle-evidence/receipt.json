@@ -1,0 +1,376 @@
+{
+  "feature": "ClusterTrustBundle",
+  "qualification": "supplemental local Kind traffic",
+  "registeredUpstreamCases": 0,
+  "registeredCasePassCounts": {
+    "standard": 167,
+    "experimental": 167,
+    "total": 170
+  },
+  "featuresWithAllRegisteredCasesPassing": {
+    "passing": 55,
+    "total": 64
+  },
+  "controller": {
+    "sourceRevision": "90e3039e813ba59eea1c593072f919043b00e330",
+    "baseRevision": "0efe1ecfe1f12bf2d7fb70379cef5c27abca1d5f",
+    "sourceTree": "bef57ef484e47bb66a6ae66420062a0743d1119d",
+    "platform": "linux/amd64",
+    "manifestDigest": "sha256:1687702bb4081ae56921abe076db77d58109129dd9f54dd6527dd1a45d4fee78",
+    "configDigest": "sha256:794f612a79ee3a24a8e9ee488aede189b678b071f21515b7966a9fe1052da14e",
+    "ociArchiveSHA256": "5587bc0acc633e6c678938fd0f04740ae72edc55195846f97c6e2d23cd7c6b61",
+    "managerSHA256": "f180e2981a874a741a2efa55c0098a47aa050077c72f35d0a1380ca60af2bd86",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "inputs": {
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "octaviaRevision": "78c80bfe3019368b5dc570ad612bca89ce739301",
+    "octaviaLibRevision": "e436d312428e98ec1c5c3222cbe1199b422c487b",
+    "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1",
+    "haproxySHA256": "521e1d1f27a5aba10239362df737b616a2d10c5d0112e6071521ac98900ee997",
+    "scenarioSHA256": "8618a27db38275cbd276d51400e6cf85049bd8bf51da5737f6df33a83e0c283c",
+    "baseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "octaviaWheelSHA256": "85a578e1935b6d48b25865366e5150301486d74cf49bd9a2cbb5ed547ab6cb62",
+    "octaviaLibWheelSHA256": "ecc9c5986457cddd2f376bb2afc7c6f8eb588cc24911bf098892cee0b3fedcf7",
+    "kindNode": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+    "localKindNodeManifestDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+    "echoOCIIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+    "echoPlatformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+  },
+  "channels": {
+    "standard": {
+      "gatewayAPIBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "states": {
+        "absent": {
+          "listenerConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Invalid"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef"
+          }
+        },
+        "created": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "a",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 200,
+          "backendSNI": "abc.example.com",
+          "backendWorkload": "tls-backend",
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+              "9b651a300838cf605e20baa4de2e37965f73b79f4163e000dfeb7b0618b3ade4"
+            ],
+            "backendPools": [
+              [
+                "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+                "9b651a300838cf605e20baa4de2e37965f73b79f4163e000dfeb7b0618b3ade4"
+              ],
+              [
+                "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+                "9b651a300838cf605e20baa4de2e37965f73b79f4163e000dfeb7b0618b3ade4"
+              ]
+            ]
+          }
+        },
+        "clientRotated": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "b",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 200,
+          "backendSNI": "abc.example.com",
+          "backendWorkload": "tls-backend",
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+              "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+            ],
+            "backendPools": [
+              [
+                "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+                "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+              ],
+              [
+                "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+                "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+              ]
+            ]
+          }
+        },
+        "serverTrustRemoved": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "b",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 503,
+          "backendSNI": null,
+          "backendWorkload": null,
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+            ],
+            "backendPools": [
+              [
+                "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+              ],
+              [
+                "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+              ]
+            ]
+          }
+        },
+        "serverTrustRestored": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "b",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 200,
+          "backendSNI": "abc.example.com",
+          "backendWorkload": "tls-backend",
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+              "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+            ],
+            "backendPools": [
+              [
+                "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+                "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+              ],
+              [
+                "6c88c785257bc15ca26d00e572a1136675a97eb18a6451f6d0926856dc4892cf",
+                "eb10598bd16b00363144768a8ce1b94686e836f5542a3e513f7405c21c7baa5e"
+              ]
+            ]
+          }
+        },
+        "deleted": {
+          "listenerConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Invalid"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef"
+          },
+          "freshConnectionClosed": true
+        }
+      }
+    },
+    "experimental": {
+      "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "states": {
+        "absent": {
+          "listenerConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Invalid"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef"
+          }
+        },
+        "created": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "a",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 200,
+          "backendSNI": "abc.example.com",
+          "backendWorkload": "tls-backend",
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+              "e3463c4d887bdbdf5a23c8c90691e01ed6f3d35611ed410790d915f1e9e735f7"
+            ],
+            "backendPools": [
+              [
+                "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+                "e3463c4d887bdbdf5a23c8c90691e01ed6f3d35611ed410790d915f1e9e735f7"
+              ],
+              [
+                "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+                "e3463c4d887bdbdf5a23c8c90691e01ed6f3d35611ed410790d915f1e9e735f7"
+              ]
+            ]
+          }
+        },
+        "clientRotated": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "b",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 200,
+          "backendSNI": "abc.example.com",
+          "backendWorkload": "tls-backend",
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+              "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+            ],
+            "backendPools": [
+              [
+                "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+                "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+              ],
+              [
+                "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+                "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+              ]
+            ]
+          }
+        },
+        "serverTrustRemoved": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "b",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 503,
+          "backendSNI": null,
+          "backendWorkload": null,
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+            ],
+            "backendPools": [
+              [
+                "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+              ],
+              [
+                "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+              ]
+            ]
+          }
+        },
+        "serverTrustRestored": {
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "activeClient": "b",
+          "frontendTLS": "TLSv1.3",
+          "otherClientTLSRejected": true,
+          "httpStatus": 200,
+          "backendSNI": "abc.example.com",
+          "backendWorkload": "tls-backend",
+          "octaviaClientAuthentication": "MANDATORY",
+          "barbicanCAFingerprintsSHA256": {
+            "frontend": [
+              "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+              "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+            ],
+            "backendPools": [
+              [
+                "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+                "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+              ],
+              [
+                "1ffbecba6d71b47dff90dc2a2e610a0f41a722f942dcbc92c60b7db05559c7e5",
+                "e4c6f4f8ae48740830d504aff8e063a6ec64ead39d1b79333f95161f3e2359bc"
+              ]
+            ]
+          }
+        },
+        "deleted": {
+          "listenerConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          },
+          "backendPolicyConditions": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef"
+          },
+          "freshConnectionClosed": true
+        }
+      }
+    }
+  }
+}
