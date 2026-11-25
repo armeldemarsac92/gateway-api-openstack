@@ -1190,13 +1190,13 @@ func (p *Provider) executeSNIMutation(ctx context.Context, desired desiredGatewa
 		if step.target.weighted() {
 			opts.Tags = append(opts.Tags, sniWeightedPoolTag)
 		}
-		var builder pools.CreateOptsBuilder = opts
 		if tls := step.target.route.BackendTLS; tls != nil {
 			opts.Tags = backendTLSTags(opts.Tags, true, backendTLSRevisionTag(tls), false, false)
 		}
 		if step.target.route.BackendTLS != nil || step.poolSlot != nil && step.target.route.ServiceUID != "" {
 			opts.Tags = append(opts.Tags, sniBackendServiceTag(step.target.route))
 		}
+		var builder pools.CreateOptsBuilder = opts
 		if step.closedPool {
 			opts.AdminStateUp = boolPointer(false)
 			builder = octavia.PlaintextTCPPoolOpts{CreateOpts: opts}

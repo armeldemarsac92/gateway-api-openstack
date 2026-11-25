@@ -182,6 +182,34 @@ func TestSNIExactWeightedPolicyWirePreservesMixedPassthrough(t *testing.T) {
 	require.False(t, readback.ready(targets[0]), "a terminating policy cannot prove the passthrough target")
 }
 
+func TestSNIPassthroughWeightedPoolMarksItsBackendService(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := largeSNIPoolsTestRoute(id)
+	route.Passthrough = true
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, targets)
+	desired.protocol, actual.protocol = cloud.ListenerProtocolTLSSNI, cloud.ListenerProtocolTLSSNI
+	actual.state.LoadBalancerID = "lb"
+	step, ok := nextSNIBackendPoolsMutation(targets[0], nil)
+	require.True(t, ok)
+	require.Equal(t, sniCreatePool, step.sni.kind)
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "POST /lbaas/pools", req.Method+" "+req.URL.Path)
+		var body struct {
+			Pool struct{ Tags []string }
+		}
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+		asserted := targets[0].backendPool(0)
+		require.Contains(t, body.Pool.Tags, sniBackendServiceTag(asserted.route))
+		require.Contains(t, body.Pool.Tags, openstackidentity.SNIPoolSlotTag(0))
+		w.WriteHeader(http.StatusCreated)
+		safetyWriteJSON(t, w, map[string]any{"pool": map[string]string{"id": "weighted-pool"}})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	require.NoError(t, provider.executeSNIMutation(t.Context(), desired, actual, step.sni))
+}
+
 func TestSNIExactWeightedDiscoveryPreservesProvenTrafficAndWithdrawsRevocation(t *testing.T) {
 	id := safetyTestIdentity(t)
 	route := largeSNIPoolsTestRoute(id)
