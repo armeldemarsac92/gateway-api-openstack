@@ -92,6 +92,8 @@ On an update or removal of the policy, the controller can temporarily drain the 
 
 ## Configure session persistence on a route rule
 
+A local Experimental run used two rules targeting the same Service. Replaying its cookie or HTTP or gRPC affinity header reached the same endpoint. Recreating the Service and restarting the controller replaced the selected pool and its header tokens. Removing the HTTP Header setting preserved the sibling cookie and its pool. [Pool readback and replayed requests](qualification/v1.7.0/provider/route-rule-session-persistence/receipt.json)
+
 Install the v1.7.0 Experimental bundle, compose `config/components/experimental` into the controller overlay, and start the controller with `--gateway-api-channel=experimental` and `--experimental-route-session-persistence`. This opt-in is independent of `--octavia-xbackend-session-persistence`, which enables persistence on an XBackend object or a Service policy. The Standard bundle omits the inline field.
 
 Set `sessionPersistence` under `spec.rules[]` of an HTTPRoute or GRPCRoute. The rule must forward to one core Service backendRef. Use an Endpoint member GatewayClass and an HTTP or h2c backend. For h2c, use `appProtocol: kubernetes.io/h2c`, `--octavia-backend-h2c`, and the regional `backend_h2c_v1` capability. GRPCRoute also requires `--octavia-fixed-http-responses` and the existing gRPC ingress setup. Multiple backendRefs, authenticated backend TLS and NodePort member mode are outside this profile.
