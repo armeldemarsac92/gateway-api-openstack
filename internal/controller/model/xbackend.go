@@ -140,6 +140,12 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 			group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "XBackend session cookie needs an observed XBackend UID")
 			return group
 		}
+		if timeout, _ := durationMilliseconds(spec.SessionPersistence.AbsoluteTimeout); timeout != nil {
+			group.XBackendCookieDeadline = &cloud.HTTPSessionCookieDeadline{
+				TimeoutMS: *timeout,
+				Scope:     fmt.Sprintf("%x", sha256.Sum256([]byte(backend.UID))),
+			}
+		}
 	}
 	group.State = BackendResolved
 	group.XBackendUsesH2C = ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolH2C
@@ -171,6 +177,9 @@ func CheckXBackendObservation(key types.NamespacedName, backend *XBackendObserva
 	}
 	if diagnostic := ValidateXBackend(backend.Spec, profile); diagnostic != nil {
 		return diagnostic
+	}
+	if persistence := backend.Spec.SessionPersistence; persistence != nil && persistence.AbsoluteTimeout != nil && backend.UID == "" {
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "XBackend session cookie absoluteTimeout needs an observed XBackend UID")
 	}
 	if XBackendRequiresTLS(backend.Spec) && backend.TLS.Validation == nil {
 		return xBackendTLSReferenceDiagnostic(backend.TLS)
@@ -272,8 +281,9 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
 	case ptr.Deref(persistence.Type, gatewayv1.CookieBasedSessionPersistence) != gatewayv1.CookieBasedSessionPersistence || persistence.Header != nil:
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence supports Cookie persistence")
-	case persistence.AbsoluteTimeout != nil:
-		return backendDiagnostic(unsupported, "XBackend sessionPersistence does not support absoluteTimeout")
+	}
+	if _, valid := durationMilliseconds(persistence.AbsoluteTimeout); !valid {
+		return backendDiagnostic(unsupported, "XBackend sessionPersistence absoluteTimeout must be a Gateway API duration")
 	}
 	if cookie := persistence.Cookie; cookie != nil {
 		switch {

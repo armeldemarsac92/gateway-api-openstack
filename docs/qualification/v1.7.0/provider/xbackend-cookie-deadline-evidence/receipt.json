@@ -1,0 +1,1518 @@
+{
+  "passed": true,
+  "campaignExit": {
+    "standardSource": 1,
+    "experimentalSource": 0
+  },
+  "scope": "Local HTTP only",
+  "real": [
+    "kind Kubernetes Pods",
+    "OCI-extracted controller manager",
+    "Octavia REST and pool update worker",
+    "Amphora renderer",
+    "HAProxy"
+  ],
+  "fixture": [
+    "Keystone identity",
+    "cloud network and amphora inventory",
+    "provisioning completion",
+    "Amphora agent and Pod transports"
+  ],
+  "controller": {
+    "sourceRevision": "40121968c76c59bce4fefaa1d2585094a3acbbd4",
+    "manifestDigest": "sha256:1801229005372378b192f805508e5f2ef95dc08be6b49bbe616fd45ec0c8b83a",
+    "configDigest": "sha256:32b59357bc505589a645aeaa314bde346a2071029d315a1578bf7e598c47f388",
+    "managerSHA256": "8e890cec2105c7668617b7eafe4523c00d28449196ac3d69d3b242a6b3f171ec",
+    "ociArchiveSHA256": "42eec3bdd782e9f87606f7643adf1a2db82b005f5a009f8f4c00f34afa7acb0d"
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "fixtureBackendSHA256": "e8a1336969acca9b1cadc633f2bd21e7e0218a8fbc4d6c1fea95f8400f35d9e4",
+  "octavia": {
+    "revision": "ebc23c65cea7431a5209a388c81b7a1ecc39812f",
+    "version": "19.0.1.dev72",
+    "sha256": "dfac970fd9fd5c4ccd063bff9d717655ec0be6e60e548db9de36ca58c9412c08",
+    "filesVerified": 664
+  },
+  "octaviaLib": {
+    "revision": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+    "version": "3.12.1.dev19",
+    "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+    "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287"
+  },
+  "credentialPatternScan": {
+    "passed": true,
+    "files": 45
+  },
+  "channels": {
+    "standard": {
+      "vmCaseExit": 0,
+      "runnerExit": 0,
+      "passed": true,
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "xBackendCRD": {
+        "installed": false,
+        "discovered": false
+      },
+      "capabilitiesDefault": [],
+      "capabilitiesConfigured": [],
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "restResponseCounts": {
+        "GET providers 200": 5,
+        "GET loadbalancers 200": 21,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 10,
+        "GET pools 200": 12,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 14,
+        "POST pools 201": 1,
+        "GET members 200": 9,
+        "GET healthmonitors 200": 7,
+        "POST members 201": 1,
+        "POST healthmonitors 201": 1,
+        "POST l7policies 201": 1,
+        "GET rules 200": 6,
+        "POST rules 201": 1,
+        "PUT l7policies 200": 1
+      },
+      "receiptSHA256": "ed56c5c7a229749351ca1425fd71de7563b943758e11ba1a3b6a1001d5e90b17",
+      "ordinaryService": {
+        "route": {
+          "generation": 1,
+          "object": "30fa0a7fb4f96749d0279c9e55afbbbab0d2af5916331e72ee26f1034978ec51"
+        },
+        "conditions": [
+          {
+            "name": "cookie-http",
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              {
+                "type": "ResolvedRefs",
+                "status": "True",
+                "reason": "ResolvedRefs",
+                "observedGeneration": 1
+              },
+              {
+                "type": "gateway-api-openstack.github.io/Programmed",
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            ]
+          }
+        ],
+        "provider": {
+          "pool": "6aafb958cc056c3ec74a47cac795125905dfa36d9c5e15f7f45cd48c0fc3bbcb",
+          "loadBalancer": "99a83c056ee12f14eaba521c53b4459250b9aea6b9bb7dae260740ae72cf0775",
+          "listener": "eb9a6add052a3e858711690aac4fdd27801826a351363b1ebfe9c3db8ec19fb4",
+          "rule": "b4dee7e230e8eea0f626fdb3b8c2ea53b089883f5980d1396ecbf16208a67723",
+          "policy": "97553b4ddee26127ab7681af2d9613726b6659166f979f9f10a4cf84782834b0",
+          "poolProtocol": "HTTP",
+          "poolAlgorithm": "ROUND_ROBIN",
+          "provisioning": "ACTIVE",
+          "poolEnabled": true,
+          "nativePolicySelectsPool": true,
+          "nativeSignedCookieLimitUs": null,
+          "poolGETPersistence": null,
+          "members": [
+            {
+              "member": "9151e7d5bc53c8034d949c43096f66f883d767ec72fe90ccc634bc8d5e1beb50",
+              "address": "198.51.100.5",
+              "port": 8080,
+              "subnet": "pod",
+              "provisioning": "ACTIVE",
+              "enabled": true,
+              "weight": 1
+            }
+          ]
+        },
+        "wire": [
+          {
+            "path": "/sibling",
+            "pod": "sibling",
+            "status": 200,
+            "startUTC": "2026-11-25T07:20:02.083+00:00",
+            "startMs": 0.0,
+            "endMs": 2.371,
+            "sentCookieSHA256": null,
+            "setCookieCount": 0
+          },
+          {
+            "path": "/sibling",
+            "pod": "sibling",
+            "status": 200,
+            "startUTC": "2026-11-25T07:20:02.086+00:00",
+            "startMs": 0.0,
+            "endMs": 2.285,
+            "sentCookieSHA256": null,
+            "setCookieCount": 0
+          },
+          {
+            "path": "/sibling",
+            "pod": "sibling",
+            "status": 200,
+            "startUTC": "2026-11-25T07:20:02.089+00:00",
+            "startMs": 0.0,
+            "endMs": 1.613,
+            "sentCookieSHA256": null,
+            "setCookieCount": 0
+          }
+        ]
+      },
+      "ordinaryServiceHTTPResults": {
+        "200": 3,
+        "503": 12
+      }
+    },
+    "experimental": {
+      "vmCaseExit": 0,
+      "runnerExit": 0,
+      "passed": true,
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "xBackendCRD": {
+        "installed": true,
+        "discovered": true,
+        "servedVersions": [
+          "v1alpha1"
+        ]
+      },
+      "capabilitiesDefault": [],
+      "capabilitiesConfigured": [
+        "http_cookie_name_v1",
+        "http_cookie_absolute_timeout_v1"
+      ],
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed",
+        "AddressesAssigned": "True/AddressesAssigned"
+      },
+      "restResponseCounts": {
+        "GET providers 200": 61,
+        "GET loadbalancers 200": 115,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 57,
+        "GET pools 200": 107,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 120,
+        "POST pools 201": 3,
+        "GET members 200": 189,
+        "GET healthmonitors 200": 139,
+        "POST members 201": 13,
+        "POST healthmonitors 201": 3,
+        "POST l7policies 201": 3,
+        "GET rules 200": 286,
+        "POST rules 201": 3,
+        "PUT l7policies 200": 3,
+        "PUT pools 200": 6,
+        "PUT members 202": 4
+      },
+      "receiptSHA256": "4c8d75889c033c06caa2888f9e78a8d09ff70f4add0d7ab6065b1eefb4ba6d77",
+      "ordinaryService": {
+        "route": {
+          "generation": 1,
+          "object": "72882332788f8d7307fbe986c925ca39fbee66e402d86612256ba66c0f1c8440"
+        },
+        "conditions": [
+          {
+            "name": "cookie-http",
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              {
+                "type": "ResolvedRefs",
+                "status": "True",
+                "reason": "ResolvedRefs",
+                "observedGeneration": 1
+              },
+              {
+                "type": "gateway-api-openstack.github.io/Programmed",
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            ]
+          }
+        ],
+        "provider": {
+          "pool": "9103d613a25a5b5bb08baf2001a25b717757b3165d15ab9e5ece3b76169949c3",
+          "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+          "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+          "rule": "ea10daf01515668b1a3b87abacf4101a200ad24be324eaf2cd74739c07aa398d",
+          "policy": "73139ae5b92e9d29646b1ae512f0faf44c41cbf056db8674b45ddafb950589b8",
+          "poolProtocol": "HTTP",
+          "poolAlgorithm": "ROUND_ROBIN",
+          "provisioning": "ACTIVE",
+          "poolEnabled": true,
+          "nativePolicySelectsPool": true,
+          "nativeSignedCookieLimitUs": null,
+          "poolGETPersistence": null,
+          "members": [
+            {
+              "member": "211c0a784cd33a9718673708ddf91d51928983a20f3755a337fb855c23222914",
+              "address": "198.51.100.5",
+              "port": 8080,
+              "subnet": "pod",
+              "provisioning": "ACTIVE",
+              "enabled": true,
+              "weight": 1
+            }
+          ]
+        },
+        "wire": [
+          {
+            "path": "/sibling",
+            "pod": "sibling",
+            "status": 200,
+            "startUTC": "2026-11-25T07:25:03.466+00:00",
+            "startMs": 0.0,
+            "endMs": 2.238,
+            "sentCookieSHA256": null,
+            "setCookieCount": 0
+          },
+          {
+            "path": "/sibling",
+            "pod": "sibling",
+            "status": 200,
+            "startUTC": "2026-11-25T07:25:03.469+00:00",
+            "startMs": 0.0,
+            "endMs": 1.761,
+            "sentCookieSHA256": null,
+            "setCookieCount": 0
+          },
+          {
+            "path": "/sibling",
+            "pod": "sibling",
+            "status": 200,
+            "startUTC": "2026-11-25T07:25:03.471+00:00",
+            "startMs": 0.0,
+            "endMs": 1.063,
+            "sentCookieSHA256": null,
+            "setCookieCount": 0
+          }
+        ]
+      },
+      "ordinaryServiceHTTPResults": {
+        "200": 15,
+        "503": 9
+      },
+      "phases": {
+        "absolute-1500ms": {
+          "state": "passed",
+          "xBackend": {
+            "generation": 1,
+            "object": "083478ae1f9f243298fb7dd9a691a88c5aafde09ff28740f66270495b0b90db4"
+          },
+          "absoluteTimeout": "1s500ms",
+          "conditions": [
+            {
+              "name": "cookie-http",
+              "namespace": "cookie-qualification",
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                }
+              ]
+            }
+          ],
+          "routes": {
+            "first": {
+              "route": {
+                "generation": 1,
+                "object": "9f51b335d199fa69f14f91354663e61f74a5d0e6e3d6a272a0568c828c67e7a5"
+              },
+              "backendRefWeight": 1,
+              "conditions": [
+                {
+                  "name": "cookie-http",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ],
+              "provider": {
+                "pool": "7d06fb75f2544fbe3063750edaa156c885791622137d920c6aee1e979916cce9",
+                "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+                "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+                "rule": "bfc9af806eca54ed8c9fd95695b8ae2e4d10b015feb1f43c2fa00b4bbec4633d",
+                "policy": "f050dd2ae58678fdb0c4a24b5f5ab542a514386600ec92185c89b7c8507f4afe",
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "nativePolicySelectsPool": true,
+                "nativeSignedCookieLimitUs": 1500000,
+                "poolGETPersistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "fixture_session",
+                  "cookie_absolute_timeout_ms": 1500,
+                  "cookie_scopeSHA256": "ef576498d2795c8a1080305fdd14bb9fe8af94cc041cb91dd2e5491ec6344b52"
+                },
+                "members": [
+                  {
+                    "member": "673ddf1ed2bdca46cfb1f0ae1ad3ec02424cd27cd08b44f1d46a8a44fc326d03",
+                    "address": "198.51.100.6",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  },
+                  {
+                    "member": "660c05ddd643a7cad7baa124ac15866b43729c9779c6aa1660f90c648a86e5a1",
+                    "address": "198.51.100.7",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "second": {
+              "route": {
+                "generation": 1,
+                "object": "7a96a7852040138b9a535ec26b830ba702292983a1d37dca597a39c1c0ee9254"
+              },
+              "backendRefWeight": 1,
+              "conditions": [
+                {
+                  "name": "cookie-http",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ],
+              "provider": {
+                "pool": "03934e306480a418e9062fc155cd19305d207a78eef651305d1d645c38f527be",
+                "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+                "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+                "rule": "5e7a29c60f91c8694477de4729e7764c7a51d89340e001a3b05b901c7a392a58",
+                "policy": "2fcc8da5519eebf04cd85c87e2266a2508b2180379e1c696ad6c472bb62fb07e",
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "nativePolicySelectsPool": true,
+                "nativeSignedCookieLimitUs": 1500000,
+                "poolGETPersistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "fixture_session",
+                  "cookie_absolute_timeout_ms": 1500,
+                  "cookie_scopeSHA256": "ef576498d2795c8a1080305fdd14bb9fe8af94cc041cb91dd2e5491ec6344b52"
+                },
+                "members": [
+                  {
+                    "member": "661a884c30615a5a5b6bad1d85ae913edc99ac7148191eefa04c7463439d2eb8",
+                    "address": "198.51.100.6",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  },
+                  {
+                    "member": "838c3dd91ee53c369a2e17f0ce6d73d1478519cec16b0fb6bcda409c6499b1d4",
+                    "address": "198.51.100.7",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  }
+                ]
+              }
+            }
+          },
+          "wire": [
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:20.683+00:00",
+              "startMs": 0.0,
+              "endMs": 2.239,
+              "sentCookieSHA256": null,
+              "setCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:20.785+00:00",
+              "startMs": 101.115,
+              "endMs": 116.684,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:21.145+00:00",
+              "startMs": 461.282,
+              "endMs": 464.199,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:21.534+00:00",
+              "startMs": 851.056,
+              "endMs": 853.922,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:21.875+00:00",
+              "startMs": 1191.214,
+              "endMs": 1194.572,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:21.995+00:00",
+              "startMs": 1311.479,
+              "endMs": 1314.967,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-b",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.635+00:00",
+              "startMs": 1951.269,
+              "endMs": 1955.178,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "06db6ae4cdfafc3075c4d68350db0b16a4e23b9e57d4add0879720518299698d",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.639+00:00",
+              "startMs": 1956.02,
+              "endMs": 1958.651,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "81aa5e99204a3e50d83e2bd02de6221dbf306c728f28f024e881c54f3e3bd2f3",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.643+00:00",
+              "startMs": 1959.373,
+              "endMs": 1961.181,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "9a1c1e3ff604e3e7298edcf193196206a37d5419ad21bf7ec6e196d573e3adf0",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-b",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.646+00:00",
+              "startMs": 1962.18,
+              "endMs": 1964.633,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "af04ab46f2dc3a9e9be7d9ce5c5a5e13af6b4068bfb3eb06812d9ae4bd12c35d",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-b",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.649+00:00",
+              "startMs": 1965.536,
+              "endMs": 1968.924,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "b81ba7267dad0752ad21ef06b4d8e1e592a6683d7a51695bc1c60a588b15dbea",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.653+00:00",
+              "startMs": 1969.849,
+              "endMs": 1972.875,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "e255cf824b20759662bab2acee19af5d9a39f3f9caf53244c75957b862ecddb4",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.657+00:00",
+              "startMs": 1973.965,
+              "endMs": 1976.583,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "01efc936d51a1e619a9298fdb3ce3f51b1ac9eabf9f2f19e74c354edc9c58615",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-b",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:22.661+00:00",
+              "startMs": 1977.559,
+              "endMs": 1979.611,
+              "sentCookieSHA256": "6c807c3550b7501bbb60f45730722253071a8a6423581f38fc08d40a8e562fdf",
+              "setCookieSHA256": "b34b3e3d0b81eb49ad38095974747f675282c84cd27203f89e72191cd9a7f205",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            }
+          ],
+          "memberTransitions": {
+            "first": {
+              "sameEndpoints": true,
+              "sameProviderMemberIDs": true,
+              "drainedBeforeRepopulating": false
+            },
+            "second": {
+              "sameEndpoints": true,
+              "sameProviderMemberIDs": true,
+              "drainedBeforeRepopulating": false
+            }
+          },
+          "poolCookieScopesMatchXBackendUID": true,
+          "ordinaryService": {
+            "route": {
+              "generation": 1,
+              "object": "72882332788f8d7307fbe986c925ca39fbee66e402d86612256ba66c0f1c8440"
+            },
+            "conditions": [
+              {
+                "name": "cookie-http",
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ]
+              }
+            ],
+            "provider": {
+              "pool": "9103d613a25a5b5bb08baf2001a25b717757b3165d15ab9e5ece3b76169949c3",
+              "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+              "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+              "rule": "ea10daf01515668b1a3b87abacf4101a200ad24be324eaf2cd74739c07aa398d",
+              "policy": "73139ae5b92e9d29646b1ae512f0faf44c41cbf056db8674b45ddafb950589b8",
+              "poolProtocol": "HTTP",
+              "poolAlgorithm": "ROUND_ROBIN",
+              "provisioning": "ACTIVE",
+              "poolEnabled": true,
+              "nativePolicySelectsPool": true,
+              "nativeSignedCookieLimitUs": null,
+              "poolGETPersistence": null,
+              "members": [
+                {
+                  "member": "211c0a784cd33a9718673708ddf91d51928983a20f3755a337fb855c23222914",
+                  "address": "198.51.100.5",
+                  "port": 8080,
+                  "subnet": "pod",
+                  "provisioning": "ACTIVE",
+                  "enabled": true,
+                  "weight": 1
+                }
+              ]
+            },
+            "wire": [
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:22.831+00:00",
+                "startMs": 0.0,
+                "endMs": 2.237,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              },
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:22.834+00:00",
+                "startMs": 0.0,
+                "endMs": 2.005,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              },
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:22.837+00:00",
+                "startMs": 0.0,
+                "endMs": 2.307,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              }
+            ]
+          },
+          "expiry": {
+            "lastAcceptedEndMs": 1314.967,
+            "firstExpiredReplayStartMs": 1951.269,
+            "replaysByRouteAndPod": {
+              "first": {
+                "pod-a": 2,
+                "pod-b": 2
+              },
+              "second": {
+                "pod-a": 2,
+                "pod-b": 2
+              }
+            }
+          }
+        },
+        "absolute-zero": {
+          "state": "passed",
+          "xBackend": {
+            "generation": 2,
+            "object": "083478ae1f9f243298fb7dd9a691a88c5aafde09ff28740f66270495b0b90db4"
+          },
+          "absoluteTimeout": "0s",
+          "conditions": [
+            {
+              "name": "cookie-http",
+              "namespace": "cookie-qualification",
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 2
+                }
+              ]
+            }
+          ],
+          "routes": {
+            "first": {
+              "route": {
+                "generation": 1,
+                "object": "9f51b335d199fa69f14f91354663e61f74a5d0e6e3d6a272a0568c828c67e7a5"
+              },
+              "backendRefWeight": 1,
+              "conditions": [
+                {
+                  "name": "cookie-http",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ],
+              "provider": {
+                "pool": "7d06fb75f2544fbe3063750edaa156c885791622137d920c6aee1e979916cce9",
+                "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+                "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+                "rule": "bfc9af806eca54ed8c9fd95695b8ae2e4d10b015feb1f43c2fa00b4bbec4633d",
+                "policy": "f050dd2ae58678fdb0c4a24b5f5ab542a514386600ec92185c89b7c8507f4afe",
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "nativePolicySelectsPool": true,
+                "nativeSignedCookieLimitUs": 0,
+                "poolGETPersistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "fixture_session",
+                  "cookie_absolute_timeout_ms": 0,
+                  "cookie_scopeSHA256": "ef576498d2795c8a1080305fdd14bb9fe8af94cc041cb91dd2e5491ec6344b52"
+                },
+                "members": [
+                  {
+                    "member": "ba1f5c260eba6644f6d1269e21e692c2059c5ed2f6c4dd17c9a0f67574221a73",
+                    "address": "198.51.100.6",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  },
+                  {
+                    "member": "30415c103e66ffb519c9b138ac517bedf848dd7340a708486ad972b5246deb54",
+                    "address": "198.51.100.7",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "second": {
+              "route": {
+                "generation": 1,
+                "object": "7a96a7852040138b9a535ec26b830ba702292983a1d37dca597a39c1c0ee9254"
+              },
+              "backendRefWeight": 1,
+              "conditions": [
+                {
+                  "name": "cookie-http",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ],
+              "provider": {
+                "pool": "03934e306480a418e9062fc155cd19305d207a78eef651305d1d645c38f527be",
+                "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+                "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+                "rule": "5e7a29c60f91c8694477de4729e7764c7a51d89340e001a3b05b901c7a392a58",
+                "policy": "2fcc8da5519eebf04cd85c87e2266a2508b2180379e1c696ad6c472bb62fb07e",
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "nativePolicySelectsPool": true,
+                "nativeSignedCookieLimitUs": 0,
+                "poolGETPersistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "fixture_session",
+                  "cookie_absolute_timeout_ms": 0,
+                  "cookie_scopeSHA256": "ef576498d2795c8a1080305fdd14bb9fe8af94cc041cb91dd2e5491ec6344b52"
+                },
+                "members": [
+                  {
+                    "member": "25e2c0c772c8af6177cbda248d886a754bc31ca995e7438c5c78cc2427bc7a41",
+                    "address": "198.51.100.6",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  },
+                  {
+                    "member": "67ad072940034bf00489bfd1cd7e732f253453d8a42b6f7599a1d9b6fa5c3bf6",
+                    "address": "198.51.100.7",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  }
+                ]
+              }
+            }
+          },
+          "wire": [
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:34.618+00:00",
+              "startMs": 0.0,
+              "endMs": 5.084,
+              "sentCookieSHA256": null,
+              "setCookieSHA256": "b62c6a1773269e7cb36ad9dca91fbe8a52dff302c5ad00f8e4b9ec9c95202ea9",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-b",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:34.624+00:00",
+              "startMs": 6.303,
+              "endMs": 8.832,
+              "sentCookieSHA256": "b62c6a1773269e7cb36ad9dca91fbe8a52dff302c5ad00f8e4b9ec9c95202ea9",
+              "setCookieSHA256": "316ab32fdce52c83c15a9dc31211c62db5a7c5dedb94a2acad91cdf4b34e6be9",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:34.629+00:00",
+              "startMs": 11.665,
+              "endMs": 15.742,
+              "sentCookieSHA256": "316ab32fdce52c83c15a9dc31211c62db5a7c5dedb94a2acad91cdf4b34e6be9",
+              "setCookieSHA256": "54d0775126c4174abaa861526030e9ae52a25cb1b0a43325657febf0b06a30ee",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-b",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:34.636+00:00",
+              "startMs": 18.678,
+              "endMs": 23.66,
+              "sentCookieSHA256": "54d0775126c4174abaa861526030e9ae52a25cb1b0a43325657febf0b06a30ee",
+              "setCookieSHA256": "5bcc56219af0b776dbbe22c3853fe638e264f9dd49e50039ad3e785e392b077f",
+              "setCookieCount": 1,
+              "cookieFormat": "signed-v1",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            }
+          ],
+          "memberTransitions": {
+            "first": {
+              "sameEndpoints": true,
+              "sameProviderMemberIDs": false,
+              "drainedBeforeRepopulating": true
+            },
+            "second": {
+              "sameEndpoints": true,
+              "sameProviderMemberIDs": false,
+              "drainedBeforeRepopulating": true
+            }
+          },
+          "poolCookieScopesMatchXBackendUID": true,
+          "ordinaryService": {
+            "route": {
+              "generation": 1,
+              "object": "72882332788f8d7307fbe986c925ca39fbee66e402d86612256ba66c0f1c8440"
+            },
+            "conditions": [
+              {
+                "name": "cookie-http",
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ]
+              }
+            ],
+            "provider": {
+              "pool": "9103d613a25a5b5bb08baf2001a25b717757b3165d15ab9e5ece3b76169949c3",
+              "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+              "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+              "rule": "ea10daf01515668b1a3b87abacf4101a200ad24be324eaf2cd74739c07aa398d",
+              "policy": "73139ae5b92e9d29646b1ae512f0faf44c41cbf056db8674b45ddafb950589b8",
+              "poolProtocol": "HTTP",
+              "poolAlgorithm": "ROUND_ROBIN",
+              "provisioning": "ACTIVE",
+              "poolEnabled": true,
+              "nativePolicySelectsPool": true,
+              "nativeSignedCookieLimitUs": null,
+              "poolGETPersistence": null,
+              "members": [
+                {
+                  "member": "211c0a784cd33a9718673708ddf91d51928983a20f3755a337fb855c23222914",
+                  "address": "198.51.100.5",
+                  "port": 8080,
+                  "subnet": "pod",
+                  "provisioning": "ACTIVE",
+                  "enabled": true,
+                  "weight": 1
+                }
+              ]
+            },
+            "wire": [
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:34.816+00:00",
+                "startMs": 0.0,
+                "endMs": 3.003,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              },
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:34.820+00:00",
+                "startMs": 0.0,
+                "endMs": 2.527,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              },
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:34.823+00:00",
+                "startMs": 0.0,
+                "endMs": 2.436,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              }
+            ]
+          }
+        },
+        "legacy-restored": {
+          "state": "passed",
+          "xBackend": {
+            "generation": 3,
+            "object": "083478ae1f9f243298fb7dd9a691a88c5aafde09ff28740f66270495b0b90db4"
+          },
+          "absoluteTimeout": null,
+          "conditions": [
+            {
+              "name": "cookie-http",
+              "namespace": "cookie-qualification",
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 3
+                }
+              ]
+            }
+          ],
+          "routes": {
+            "first": {
+              "route": {
+                "generation": 1,
+                "object": "9f51b335d199fa69f14f91354663e61f74a5d0e6e3d6a272a0568c828c67e7a5"
+              },
+              "backendRefWeight": 1,
+              "conditions": [
+                {
+                  "name": "cookie-http",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ],
+              "provider": {
+                "pool": "7d06fb75f2544fbe3063750edaa156c885791622137d920c6aee1e979916cce9",
+                "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+                "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+                "rule": "bfc9af806eca54ed8c9fd95695b8ae2e4d10b015feb1f43c2fa00b4bbec4633d",
+                "policy": "f050dd2ae58678fdb0c4a24b5f5ab542a514386600ec92185c89b7c8507f4afe",
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "nativePolicySelectsPool": true,
+                "nativeSignedCookieLimitUs": null,
+                "poolGETPersistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "fixture_session"
+                },
+                "members": [
+                  {
+                    "member": "aa3bacb17e263fa41b128e6733c79c32ce9179ea744cc55b492f255504ac28a2",
+                    "address": "198.51.100.6",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  },
+                  {
+                    "member": "2a4d38c39dbc9114adfc55466bcf16af7f33b008c44151088fead3af27f52f27",
+                    "address": "198.51.100.7",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "second": {
+              "route": {
+                "generation": 1,
+                "object": "7a96a7852040138b9a535ec26b830ba702292983a1d37dca597a39c1c0ee9254"
+              },
+              "backendRefWeight": 1,
+              "conditions": [
+                {
+                  "name": "cookie-http",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ],
+              "provider": {
+                "pool": "03934e306480a418e9062fc155cd19305d207a78eef651305d1d645c38f527be",
+                "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+                "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+                "rule": "5e7a29c60f91c8694477de4729e7764c7a51d89340e001a3b05b901c7a392a58",
+                "policy": "2fcc8da5519eebf04cd85c87e2266a2508b2180379e1c696ad6c472bb62fb07e",
+                "poolProtocol": "HTTP",
+                "poolAlgorithm": "ROUND_ROBIN",
+                "provisioning": "ACTIVE",
+                "poolEnabled": true,
+                "nativePolicySelectsPool": true,
+                "nativeSignedCookieLimitUs": null,
+                "poolGETPersistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "fixture_session"
+                },
+                "members": [
+                  {
+                    "member": "d9b8801738ac51b15e44fd1b4dd42dec846b3fdc2e7ee9a44a143e0bcadc5614",
+                    "address": "198.51.100.6",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  },
+                  {
+                    "member": "e299730e46e085b379bb2532c75497a165e32e60ada5f0c29832fb72e8b1fce4",
+                    "address": "198.51.100.7",
+                    "port": 8080,
+                    "subnet": "pod",
+                    "provisioning": "ACTIVE",
+                    "enabled": true,
+                    "weight": 1
+                  }
+                ]
+              }
+            }
+          },
+          "wire": [
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:46.625+00:00",
+              "startMs": 0.0,
+              "endMs": 6.007,
+              "sentCookieSHA256": null,
+              "setCookieSHA256": "b26cc41ba6965d0cadb428114d4e11a9bcda428bc26dd1da909d5a93392f6ef9",
+              "setCookieCount": 1,
+              "cookieFormat": "native-member",
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true,
+              "explicitRootPath": true,
+              "persistentAttribute": false
+            },
+            {
+              "path": "/first/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:48.576+00:00",
+              "startMs": 1951.502,
+              "endMs": 1954.521,
+              "sentCookieSHA256": "b26cc41ba6965d0cadb428114d4e11a9bcda428bc26dd1da909d5a93392f6ef9",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            },
+            {
+              "path": "/second/session",
+              "pod": "pod-a",
+              "status": 200,
+              "startUTC": "2026-11-25T07:25:48.580+00:00",
+              "startMs": 1955.132,
+              "endMs": 1956.461,
+              "sentCookieSHA256": "b26cc41ba6965d0cadb428114d4e11a9bcda428bc26dd1da909d5a93392f6ef9",
+              "setCookieCount": 0,
+              "browserSession": true,
+              "browserRootPath": true,
+              "browserHostOnly": true
+            }
+          ],
+          "memberTransitions": {
+            "first": {
+              "sameEndpoints": true,
+              "sameProviderMemberIDs": false,
+              "drainedBeforeRepopulating": true
+            },
+            "second": {
+              "sameEndpoints": true,
+              "sameProviderMemberIDs": false,
+              "drainedBeforeRepopulating": true
+            }
+          },
+          "poolCookieScopesMatchXBackendUID": null,
+          "ordinaryService": {
+            "route": {
+              "generation": 1,
+              "object": "72882332788f8d7307fbe986c925ca39fbee66e402d86612256ba66c0f1c8440"
+            },
+            "conditions": [
+              {
+                "name": "cookie-http",
+                "conditions": [
+                  {
+                    "type": "Accepted",
+                    "status": "True",
+                    "reason": "Accepted",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "ResolvedRefs",
+                    "status": "True",
+                    "reason": "ResolvedRefs",
+                    "observedGeneration": 1
+                  },
+                  {
+                    "type": "gateway-api-openstack.github.io/Programmed",
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                ]
+              }
+            ],
+            "provider": {
+              "pool": "9103d613a25a5b5bb08baf2001a25b717757b3165d15ab9e5ece3b76169949c3",
+              "loadBalancer": "6dfda15ed78578d425d9c94d953a705f87078a62bc2b2a15063fc5e7e7cdc6e7",
+              "listener": "9eb9adbe044a81627652bba8691402dd74ffca7e83eca971ba19d2537b6e6fdc",
+              "rule": "ea10daf01515668b1a3b87abacf4101a200ad24be324eaf2cd74739c07aa398d",
+              "policy": "73139ae5b92e9d29646b1ae512f0faf44c41cbf056db8674b45ddafb950589b8",
+              "poolProtocol": "HTTP",
+              "poolAlgorithm": "ROUND_ROBIN",
+              "provisioning": "ACTIVE",
+              "poolEnabled": true,
+              "nativePolicySelectsPool": true,
+              "nativeSignedCookieLimitUs": null,
+              "poolGETPersistence": null,
+              "members": [
+                {
+                  "member": "211c0a784cd33a9718673708ddf91d51928983a20f3755a337fb855c23222914",
+                  "address": "198.51.100.5",
+                  "port": 8080,
+                  "subnet": "pod",
+                  "provisioning": "ACTIVE",
+                  "enabled": true,
+                  "weight": 1
+                }
+              ]
+            },
+            "wire": [
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:48.740+00:00",
+                "startMs": 0.0,
+                "endMs": 3.007,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              },
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:48.744+00:00",
+                "startMs": 0.0,
+                "endMs": 2.356,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              },
+              {
+                "path": "/sibling",
+                "pod": "sibling",
+                "status": 200,
+                "startUTC": "2026-11-25T07:25:48.747+00:00",
+                "startMs": 0.0,
+                "endMs": 1.591,
+                "sentCookieSHA256": null,
+                "setCookieCount": 0
+              }
+            ]
+          }
+        }
+      },
+      "poolUpdates": [
+        {
+          "poolSHA256": "7d06fb75f2544fbe3063750edaa156c885791622137d920c6aee1e979916cce9",
+          "absoluteTimeoutFieldPresent": true,
+          "absoluteTimeoutMs": 0,
+          "scopeSHA256": "ef576498d2795c8a1080305fdd14bb9fe8af94cc041cb91dd2e5491ec6344b52",
+          "dispatch": "update_pool",
+          "amphoraDriverCalls": 1
+        },
+        {
+          "poolSHA256": "03934e306480a418e9062fc155cd19305d207a78eef651305d1d645c38f527be",
+          "absoluteTimeoutFieldPresent": true,
+          "absoluteTimeoutMs": 0,
+          "scopeSHA256": "ef576498d2795c8a1080305fdd14bb9fe8af94cc041cb91dd2e5491ec6344b52",
+          "dispatch": "update_pool",
+          "amphoraDriverCalls": 1
+        },
+        {
+          "poolSHA256": "7d06fb75f2544fbe3063750edaa156c885791622137d920c6aee1e979916cce9",
+          "absoluteTimeoutFieldPresent": true,
+          "absoluteTimeoutMs": null,
+          "scopeSHA256": null,
+          "dispatch": "update_pool",
+          "amphoraDriverCalls": 1
+        },
+        {
+          "poolSHA256": "03934e306480a418e9062fc155cd19305d207a78eef651305d1d645c38f527be",
+          "absoluteTimeoutFieldPresent": true,
+          "absoluteTimeoutMs": null,
+          "scopeSHA256": null,
+          "dispatch": "update_pool",
+          "amphoraDriverCalls": 1
+        }
+      ]
+    }
+  },
+  "firstExperimentalAttempt": {
+    "receiptSHA256": "56bb5876a18bb6150986909e2914dabf4943123751af04b83558ce74c7111cb8",
+    "phase": "absolute-zero",
+    "check": "duration reconciliation unexpectedly changed route, pool or member identity",
+    "observed": {
+      "first": {
+        "sameRoute": true,
+        "samePool": true,
+        "providerMemberIDsChanged": true,
+        "poolGETAbsoluteTimeoutMs": 0
+      },
+      "second": {
+        "sameRoute": true,
+        "samePool": true,
+        "providerMemberIDsChanged": true,
+        "poolGETAbsoluteTimeoutMs": 0
+      }
+    },
+    "resolution": "The controller drains the pools before applying a changed cookie policy. The follow-up verifies stable routes, pools and Pod endpoints and accounts for observed Octavia member replacement."
+  }
+}

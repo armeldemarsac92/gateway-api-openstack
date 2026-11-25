@@ -114,6 +114,8 @@ type desiredRoute struct {
 	xBackend                    bool
 	xBackendPlaintext           bool
 	sessionCookieName           string
+	sessionCookieDeadline       *cloud.HTTPSessionCookieDeadline
+	cookieReadbackPending       bool
 	sessionCookieCapability     xBackendCookieCapability
 	redirect                    bool
 	redirectMatches             []cloud.HTTPPathMatch
@@ -427,6 +429,9 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
 			return invalid(errors.New("HTTP session persistence requires a valid cookie name and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
 		}
+		if deadline := backend.SessionCookieDeadline; deadline != nil && (backend.SessionCookieName == "" || !deadline.Valid()) {
+			return invalid(errors.New("HTTP session persistence absolute timeout requires a cookie name, valid timeout and XBackend scope"))
+		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
@@ -446,6 +451,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
 		part.sessionCookieName = backend.SessionCookieName
+		part.sessionCookieDeadline = backend.SessionCookieDeadline
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {
 				return invalid(err)

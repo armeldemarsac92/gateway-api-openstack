@@ -158,7 +158,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject invalid TCPRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
-	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use the regional Octavia http_cookie_name_v1 capability for Experimental XBackend session cookies")
+	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend session cookies and optional absolute timeout")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
 	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
 		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
