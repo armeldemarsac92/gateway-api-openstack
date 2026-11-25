@@ -322,7 +322,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 
 func (r *Reconciler) validateRouteMatches(rule gatewayv1.HTTPRouteRule, grpc bool) error {
 	for _, match := range rule.Matches {
-		if _, _, err := supportedMatch(match, r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && !grpc, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc); err != nil {
+		if _, _, err := supportedMatch(match, r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && !grpc, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc, r.Config.LiteralHTTPPaths); err != nil {
 			return err
 		}
 	}
@@ -1108,7 +1108,7 @@ func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSecti
 	return matches, route.Rules, nil
 }
 
-func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch, exactQueryParams bool) (cloud.PathMatchType, string, error) {
+func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch, exactQueryParams, literalPaths bool) (cloud.PathMatchType, string, error) {
 	if len(match.Headers) != 0 && !exactHeaders {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "exact HTTP header matching requires --octavia-http-header-exact")
 	}
@@ -1126,7 +1126,7 @@ func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch, e
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	pathType := cloud.PathMatchType(normalized.PathType)
-	if _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix); err != nil {
+	if _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix, literalPaths); err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	return pathType, normalized.PathValue, nil

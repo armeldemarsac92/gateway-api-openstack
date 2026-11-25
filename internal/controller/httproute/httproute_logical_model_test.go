@@ -106,6 +106,49 @@ func TestHTTPRouteWithMaximumLengthHostname(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteWithLiteralPathLowersOnlyWithOptIn(t *testing.T) {
+	cfg := testConfig()
+	_, gateway := providerRouteParentObjects(cfg)
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+	route.UID = "route-uid"
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()
+
+	for _, test := range []struct {
+		name       string
+		kind       gatewayv1.PathMatchType
+		raw, want  string
+		needsOptIn bool
+	}{
+		{"maximum exact", gatewayv1.PathMatchExact, "/" + strings.Repeat("x", 1023), "/" + strings.Repeat("x", 1023), true},
+		{"maximum prefix with trailing slash", gatewayv1.PathMatchPathPrefix, "/" + strings.Repeat("z", 1022) + "/", "/" + strings.Repeat("z", 1022), true},
+		{"short escaped by renderer", gatewayv1.PathMatchExact, "/o'clock&a", "/o'clock&a", true},
+		{"stock percent escape", gatewayv1.PathMatchExact, "/%41", "/%41", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
+				Type: ptr.To(test.kind), Value: ptr.To(test.raw),
+			}}}
+			r := &Reconciler{Config: cfg}
+			_, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+			if test.needsOptIn {
+				var rejected *routeBuildError
+				if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported ||
+					!strings.Contains(rejected.message, "--octavia-literal-http-paths") {
+					t.Fatalf("expected UnsupportedValue identifying the opt-in, got %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			r.Config.LiteralHTTPPaths = true
+			desired, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+			if err != nil || desired.PathType != cloud.PathMatchType(test.kind) || desired.PathValue != test.want {
+				t.Fatalf("path lowering = %q/%q, %v, want %s %q", desired.PathType, desired.PathValue, err, test.kind, test.want)
+			}
+		})
+	}
+}
+
 func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -266,7 +309,7 @@ func TestHTTPMethodAndQueryValidationAreIndependent(t *testing.T) {
 		{method: "get", want: "unknown HTTP method"},
 		{method: gatewayv1.HTTPMethodGet, query: []gatewayv1.HTTPQueryParamMatch{{Name: "q", Value: "one"}}, want: "query parameter"},
 	} {
-		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, false, true, false)
+		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, false, true, false, false)
 		var rejected *routeBuildError
 		if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
 			t.Fatalf("match = %#v, expected UnsupportedValue mentioning %q, got %v", test, test.want, err)
@@ -334,7 +377,7 @@ func TestExactHTTPQueryParameterLimits(t *testing.T) {
 		{name: "q", want: "1–1024"},
 	} {
 		match := gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: gatewayv1.HTTPHeaderName(test.name), Value: test.value}}}
-		_, _, err := supportedMatch(match, false, false, true)
+		_, _, err := supportedMatch(match, false, false, true, false)
 		if test.want == "" {
 			if err != nil {
 				t.Fatalf("legal maximum query name and value: %v", err)

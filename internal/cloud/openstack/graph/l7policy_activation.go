@@ -230,7 +230,7 @@ func canBatchPolicyActivation(route desiredRoute, observed observedRouteGraph, p
 				continue
 			}
 			rules := rulesFor(wanted, route.hostnameRuleValue)
-			if len(rules) == 0 || rules[0].ruleType != l7policies.TypePath || rules[0].invert {
+			if len(rules) == 0 || !isHTTPPathRule(rules[0].ruleType) || rules[0].invert {
 				return false
 			}
 			for _, rule := range rules[1:] {

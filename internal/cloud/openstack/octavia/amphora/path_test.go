@@ -17,7 +17,6 @@ limitations under the License.
 package amphora
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -34,50 +33,43 @@ func TestLiteralPathPrefixPattern(t *testing.T) {
 	}
 }
 
-func TestApostrophePathRules(t *testing.T) {
+func TestPathRuleValuesUsesLiteralOnlyWhenNeeded(t *testing.T) {
+	exact255 := "/" + strings.Repeat("a", 254)
+	exact1024 := "/" + strings.Repeat("a", 1023)
 	for _, tc := range []struct {
-		name      string
-		path      string
-		isPrefix  bool
-		pattern   string
-		matches   []string
-		fallsThru []string
+		name   string
+		path   string
+		prefix bool
+		want   PathRules
 	}{
-		{
-			name: "exact", path: "/o'clock+books", pattern: `^/o"'"clock\+books$`,
-			matches: []string{"/o'clock+books"}, fallsThru: []string{"/o'clock+books/", "/o'clockbooks", "/o%27clock+books"},
-		},
-		{
-			name: "prefix", path: "/o'clock/", isPrefix: true, pattern: `^/o"'"clock($|/)`,
-			matches: []string{"/o'clock", "/o'clock/", "/o'clock/noon"}, fallsThru: []string{"/o'clockish", "/O'clock"},
-		},
+		{name: "stock exact at limit", path: exact255, want: PathRules{Exact: exact255}},
+		{name: "stock percent escape", path: "/%41", want: PathRules{Exact: "/%41"}},
+		{name: "stock root", path: "/", prefix: true, want: PathRules{Prefix: "/"}},
+		{name: "stock prefix", path: "/api/", prefix: true, want: PathRules{Exact: "/api", Prefix: "/api/"}},
+		{name: "prefix with long segment", path: exact255, prefix: true, want: PathRules{Literal: exact255}},
+		{name: "maximum exact", path: exact1024, want: PathRules{Literal: exact1024}},
+		{name: "maximum prefix", path: exact1024, prefix: true, want: PathRules{Literal: exact1024}},
+		{name: "maximum prefix with trailing slash", path: exact1024[:1023] + "/", prefix: true, want: PathRules{Literal: exact1024[:1023]}},
+		{name: "short apostrophe", path: "/o'clock", want: PathRules{Literal: "/o'clock"}},
+		{name: "short ampersand", path: "/a&b/", prefix: true, want: PathRules{Literal: "/a&b"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rules, err := PathRuleValues(tc.path, tc.isPrefix)
-			if err != nil || rules != (PathRules{Regex: tc.pattern}) {
-				t.Fatalf("path rules = %+v, %v, want only regex %q", rules, err, tc.pattern)
+			rules, err := PathRuleValues(tc.path, tc.prefix, true)
+			if err != nil || rules != tc.want {
+				t.Fatalf("enabled rules = %+v, %v, want %+v", rules, err, tc.want)
 			}
-			pattern := regexp.MustCompile(strings.ReplaceAll(rules.Regex, `"'"`, "'"))
-			for _, path := range tc.matches {
-				if !pattern.MatchString(path) {
-					t.Errorf("pattern does not match %q", path)
+			rules, err = PathRuleValues(tc.path, tc.prefix, false)
+			if tc.want.Literal != "" {
+				if err == nil || !strings.Contains(err.Error(), "--octavia-literal-http-paths") {
+					t.Fatalf("expected an explicit opt-in error, got %+v, %v", rules, err)
 				}
-			}
-			for _, path := range tc.fallsThru {
-				if pattern.MatchString(path) {
-					t.Errorf("pattern matches %q", path)
-				}
+			} else if err != nil || rules != tc.want {
+				t.Fatalf("stock rules = %+v, %v, want %+v", rules, err, tc.want)
 			}
 		})
 	}
-}
 
-func TestApostrophePathRuleValueLength(t *testing.T) {
-	path := "/o'clock/" + strings.Repeat("a", 238)
-	if rules, err := PathRuleValues(path, true); err != nil || len(rules.Regex) != 255 {
-		t.Fatalf("path rules = %+v, %v, want a 255-character regex", rules, err)
-	}
-	if _, err := PathRuleValues(path+"a", true); err == nil || !strings.Contains(err.Error(), "256 characters") {
-		t.Fatalf("error = %v, want encoded rule value length exceeding 255", err)
+	if _, err := PathRuleValues(exact1024+"/", true, true); err == nil {
+		t.Fatal("accepted a 1025-byte path before prefix normalization")
 	}
 }

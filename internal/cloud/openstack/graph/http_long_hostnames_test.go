@@ -53,7 +53,7 @@ func TestLongHTTPHostnameRuleRequiresRegionalDiscovery(t *testing.T) {
 				Rule l7policies.Rule `json:"rule"`
 			}
 			require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
-			require.True(t, isLongHTTPHostnameRule(l7policies.RuleType(body.Rule.RuleType), l7policies.CompareType(body.Rule.CompareType), body.Rule.Value))
+			require.Equal(t, longHostnameCapability, requiredHTTPRuleCapability(l7policies.RuleType(body.Rule.RuleType), l7policies.CompareType(body.Rule.CompareType), body.Rule.Value))
 			require.False(t, body.Rule.Invert)
 			require.Empty(t, body.Rule.Key)
 			writes++
@@ -76,7 +76,7 @@ func TestLongHTTPHostnameRuleRequiresRegionalDiscovery(t *testing.T) {
 	stock, err := provider.buildDesiredGatewayGraph(spec)
 	require.NoError(t, err)
 	enable := graphMutation{kind: graphEnableListener}
-	require.Equal(t, []graphMutation{enable}, provider.protectLongHTTPHostnames(t.Context(), stock, actual, []graphMutation{enable}, &result))
+	require.Equal(t, []graphMutation{enable}, provider.protectHTTPRuleCapabilities(t.Context(), stock, actual, []graphMutation{enable}, &result))
 	require.Zero(t, discoveries, "a short hostname needs no capability read")
 
 	spec.Routes[0].Spec.Hostname = strings.Repeat("a.", 126) + "b"
@@ -85,16 +85,16 @@ func TestLongHTTPHostnameRuleRequiresRegionalDiscovery(t *testing.T) {
 	part := desired.routes[0]
 	rule := rulesFor(part.policies[0], part.hostnameRuleValue)[1]
 	create := graphMutation{kind: graphRouteMutation, route: routeMutation{kind: routeMutationCreateRule, parentID: "policy", rule: rule}}
-	plan := provider.protectLongHTTPHostnames(t.Context(), desired, actual, []graphMutation{create, enable}, &result)
+	plan := provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, []graphMutation{create, enable}, &result)
 	require.True(t, isHTTPListenerWithdrawal(plan))
 	require.Equal(t, "listener", plan[0].listenerID)
 	require.Zero(t, writes)
 	require.Equal(t, cloud.OutcomeProgressing, result.Gateway.Outcome.State)
 
 	actual.listener.AdminStateUp = false
-	require.Empty(t, provider.protectLongHTTPHostnames(t.Context(), desired, actual, []graphMutation{create, enable}, &result))
+	require.Empty(t, provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, []graphMutation{create, enable}, &result))
 	advertised = true
-	plan = provider.protectLongHTTPHostnames(t.Context(), desired, actual, []graphMutation{create, enable}, &result)
+	plan = provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, []graphMutation{create, enable}, &result)
 	require.Equal(t, []graphMutation{create, enable}, plan)
 	require.NoError(t, provider.executeGraphMutation(t.Context(), desired, actual, plan[0]))
 	require.Equal(t, 1, writes)
@@ -109,10 +109,10 @@ func TestLongHTTPHostnameRuleRequiresRegionalDiscovery(t *testing.T) {
 	// An installed inverse may outlive its desired rule during replacement or
 	// opt-out. It must still be withdrawn behind the closed listener.
 	remove := graphMutation{kind: graphRouteMutation, route: routeMutation{kind: routeMutationDeleteRule, parentID: "policy", id: "host"}}
-	require.Equal(t, []graphMutation{remove}, provider.protectLongHTTPHostnames(t.Context(), stock, actual, []graphMutation{remove, enable}, &result))
+	require.Equal(t, []graphMutation{remove}, provider.protectHTTPRuleCapabilities(t.Context(), stock, actual, []graphMutation{remove, enable}, &result))
 	provider.longHTTPHostnames = false
 	before := discoveries
-	require.Equal(t, []graphMutation{remove}, provider.protectLongHTTPHostnames(t.Context(), stock, actual, []graphMutation{remove, enable}, &result))
+	require.Equal(t, []graphMutation{remove}, provider.protectHTTPRuleCapabilities(t.Context(), stock, actual, []graphMutation{remove, enable}, &result))
 	require.Equal(t, before, discoveries)
 }
 
@@ -130,13 +130,13 @@ func TestLongHTTPHostnameIsolationKeepsOneInvertedRule(t *testing.T) {
 	provider := &Provider{projectID: "project-a", longHTTPHostnames: true}
 	desired, err := provider.buildDesiredGatewayGraph(spec)
 	require.NoError(t, err)
-	require.True(t, desired.longHTTPHostnamePorts[port])
+	require.Equal(t, longHostnameCapability, desired.httpRuleCapabilityPorts[port])
 	policy := desired.routes[0].policies[0]
 	require.Len(t, policy.httpHostExclusions, 1)
 	rules := rulesFor(policy, "")
 	require.Len(t, rules, 2)
 	require.True(t, rules[1].invert)
-	require.True(t, isLongHTTPHostnameRule(rules[1].ruleType, rules[1].compareType, rules[1].value))
+	require.Equal(t, longHostnameCapability, requiredHTTPRuleCapability(rules[1].ruleType, rules[1].compareType, rules[1].value))
 	suffix := strings.TrimPrefix(hostname, "*.")
 	require.True(t, redirectGuardMatches(t, policy.httpHostExclusions[0], "x."+strings.ToUpper(suffix)+":8080", "/api"))
 	require.False(t, redirectGuardMatches(t, policy.httpHostExclusions[0], suffix, "/api"))
@@ -233,7 +233,7 @@ func TestReconcileLongHTTPHostnameRetriesClosureAfterListenerError(t *testing.T)
 func TestWeightedTargetWithdrawalProceedsWithLongHostnameListenerClosed(t *testing.T) {
 	desired, actual := weightedPlanFixture()
 	desired.spec.Gateway.Spec.ListenerPort = 80
-	desired.longHTTPHostnamePorts = map[int]bool{80: true}
+	desired.httpRuleCapabilityPorts = map[int]httpRuleCapabilities{80: longHostnameCapability}
 	actual.listener.ProtocolPort = 80
 	actual.listener.ProvisioningStatus = "ACTIVE"
 	actual.adminObserved = map[string]bool{actual.listener.ID: true}
@@ -254,16 +254,16 @@ func TestWeightedTargetWithdrawalProceedsWithLongHostnameListenerClosed(t *testi
 	withdrawal := steps[0]
 	require.Equal(t, routeMutationSetPolicyTarget, withdrawal.route.kind)
 	require.True(t, withdrawal.route.withdrawHTTPPolicy)
-	require.True(t, isHTTPListenerWithdrawal(provider.protectLongHTTPHostnames(t.Context(), desired, actual, steps, &result)))
+	require.True(t, isHTTPListenerWithdrawal(provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, steps, &result)))
 
 	actual.listener.AdminStateUp = false
 	steps, result = plan()
-	protected := provider.protectLongHTTPHostnames(t.Context(), desired, actual, steps, &result)
+	protected := provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, steps, &result)
 	require.Equal(t, []graphMutation{withdrawal}, protected)
 	policy := &actual.routes[0].httpParts[weighted.backendKey].policies[0]
 	policy.weightedTargets = *withdrawal.route.weightedTargets
 	steps, result = plan()
-	protected = provider.protectLongHTTPHostnames(t.Context(), desired, actual, steps, &result)
+	protected = provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, steps, &result)
 	require.NotEmpty(t, protected)
 	require.Equal(t, remote.backendKey, protected[0].backendKey)
 	require.Equal(t, routeMutationDeleteMember, protected[0].route.kind)
@@ -277,7 +277,7 @@ func TestWeightedTargetWithdrawalProceedsWithLongHostnameListenerClosed(t *testi
 	enable := graphMutation{kind: graphEnableListener, listenerID: actual.listener.ID}
 	create := graphMutation{kind: graphRouteMutation, listenerID: actual.listener.ID, route: routeMutation{kind: routeMutationCreateRule}}
 	sibling := graphMutation{kind: graphEnableListener, listenerID: "peer"}
-	require.Equal(t, []graphMutation{sibling}, provider.protectLongHTTPHostnames(t.Context(), desired, actual, []graphMutation{enable, create, sibling}, &result))
+	require.Equal(t, []graphMutation{sibling}, provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, []graphMutation{enable, create, sibling}, &result))
 }
 
 func TestDeletingShortRouteDoesNotClosePreservedLongHostnamePort(t *testing.T) {
@@ -310,7 +310,7 @@ func TestDeletingShortRouteDoesNotClosePreservedLongHostnamePort(t *testing.T) {
 		t.Helper()
 		steps, result, err := provider.buildGatewayGraphPlan(desired, actual)
 		require.NoError(t, err)
-		return provider.protectLongHTTPHostnames(t.Context(), desired, actual, steps, &result)
+		return provider.protectHTTPRuleCapabilities(t.Context(), desired, actual, steps, &result)
 	}
 	deletion := plan()
 	require.Len(t, deletion, 1)

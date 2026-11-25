@@ -37,7 +37,7 @@ func ValidHTTPPathReplacement(value string) bool {
 
 // ValidHTTPPath checks the absolute path syntax used by Gateway API Exact and PathPrefix matches.
 func ValidHTTPPath(path string) bool {
-	if !strings.HasPrefix(path, "/") || strings.Contains(path, "//") || strings.Contains(path, "/./") || strings.Contains(path, "/../") ||
+	if len(path) > 1024 || !strings.HasPrefix(path, "/") || strings.Contains(path, "//") || strings.Contains(path, "/./") || strings.Contains(path, "/../") ||
 		strings.Contains(strings.ToLower(path), "%2f") || strings.Contains(path, "#") || strings.HasSuffix(path, "/.") || strings.HasSuffix(path, "/..") {
 		return false
 	}

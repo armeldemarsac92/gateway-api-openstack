@@ -12,6 +12,14 @@ The local qualification records the original Gateway API cases and the settled 3
 
 The standard workload and Magnum manifests continue to use the stock Octavia API. The HTTP actions component changes two controller arguments and can be composed with the operator HTTPS component in an operator-owned kustomization. The HTTPS component has its own certificate and listener requirements. [Operator HTTPS](operator-https.md)
 
+## Enable literal HTTP path matches
+
+Install the Octavia database migration and compatible Octavia API, workers and Amphora images. Add Amphora to `enabled_http_literal_path_providers` in Octavia's `[api_settings]`. Using the controller's project credentials, check that the effective provider's regional `GET /v2/lbaas/providers/{provider}/gateway_capabilities` response lists `http_literal_path_v1`. Add `--octavia-literal-http-paths` to the controller arguments. The option defaults to off and can be enabled independently of long hostnames and HTTP actions.
+
+The option supports Gateway API `Exact` and `PathPrefix` paths up to 1024 ASCII bytes on HTTP and terminated HTTPS. The controller sends `HTTP_PATH_LITERAL` when a stock rule would exceed Octavia's 255-character value limit or the legacy renderer would change the path, such as when it contains an apostrophe or ampersand. Octavia compares the raw path. The path match itself leaves the forwarded path unchanged. `PathPrefix` matches whole segments and ignores a trailing slash in the configured prefix. A higher-priority path can also exclude its matching requests from a redirect.
+
+The controller reports `UnsupportedValue` for a route that needs literal path rules while the option is off. A listener that depends on an installed literal path rule stays closed while the opt-in or the regional capability is unavailable. Other physical listeners can keep serving. Before retiring the extension, replace or remove the affected matches and wait for the full Gateway reconciliation to reopen the listener. Verify that its owned Octavia policies no longer contain `HTTP_PATH_LITERAL` rules, including inverted redirect exclusions.
+
 ## Enable forwarding URL rewrites
 
 Use `--octavia-request-url-rewrite` when the effective Amphora driver on the regional endpoint advertises `request_url_rewrite_v1`. The rule matches the original request, then forwards it with the new hostname or path and the original query string. A prefix replacement uses the rule's single `PathPrefix` match. An empty `urlRewrite: {}` leaves the request unchanged.
