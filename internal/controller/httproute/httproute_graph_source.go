@@ -145,6 +145,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteDroppedInlineRules != nil && *request.HTTPRouteDroppedInlineRules != snapshot.droppedInlineRules {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
+			if requested && request.HTTPRouteAllRulesRejected != nil && *request.HTTPRouteAllRulesRejected != snapshot.allRulesRejected {
+				return graph.RouteInputs{}, errHTTPRouteChanged
+			}
 			if requested && request.HTTPRouteBackendTLSAncestorSlot != nil && *request.HTTPRouteBackendTLSAncestorSlot != snapshot.backendTLSAncestorSlot {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}

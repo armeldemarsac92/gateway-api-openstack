@@ -238,6 +238,9 @@ type L7PolicyObservation struct {
 	HTTPRequestPolicy            *cloud.HTTPRequestPolicy
 	HTTPRequestPolicyReported    bool
 	HTTPRequestPolicyPresent     bool
+	ExternalAuth                 *ListenerHTTPExternalAuth
+	ExternalAuthReported         bool
+	ExternalAuthPresent          bool
 	TargetRequestFiltersPresent  bool
 	TargetResponseHeadersPresent bool
 	RequestMirrors               []HTTPRequestMirror
@@ -311,6 +314,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		RedirectRequest          json.RawMessage `json:"redirect_request"`
 		RequestURLRewrite        json.RawMessage `json:"request_url_rewrite"`
 		HTTPRequestPolicy        json.RawMessage `json:"http_request_policy"`
+		ExternalAuth             json.RawMessage `json:"external_auth"`
 		RequestMirrors           json.RawMessage `json:"request_mirrors"`
 		RequestCORS              json.RawMessage `json:"request_cors"`
 		RequestHeaderOperations  json.RawMessage `json:"request_header_operations"`
@@ -350,7 +354,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		_ = json.Unmarshal(row.HTTPSListenerHostname, &observation.HTTPSListenerHostname)
 	}
 	observation.ActivationOptions = policyActivationOptions(row.HTTPSListenerHostname, row.Targets, row.FixedResponse,
-		row.RedirectRequest, row.RequestURLRewrite, row.RequestCORS, row.RequestHeaderOperations, row.ResponseHeaderOperations, row.HTTPRequestPolicy, row.RequestMirrors)
+		row.RedirectRequest, row.RequestURLRewrite, row.RequestCORS, row.RequestHeaderOperations, row.ResponseHeaderOperations, row.HTTPRequestPolicy, row.RequestMirrors, row.ExternalAuth)
 	if row.AdminState != nil {
 		observation.Policy.AdminStateUp = *row.AdminState
 	}
@@ -403,6 +407,11 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	observation.HTTPRequestPolicyPresent = observation.HTTPRequestPolicyReported && string(row.HTTPRequestPolicy) != "null"
 	if observation.HTTPRequestPolicyPresent {
 		observation.HTTPRequestPolicy = readHTTPRequestPolicy(row.HTTPRequestPolicy)
+	}
+	observation.ExternalAuthReported = row.ExternalAuth != nil
+	observation.ExternalAuthPresent = hasJSONValue(row.ExternalAuth)
+	if observation.ExternalAuthPresent {
+		observation.ExternalAuth = readPolicyExternalAuth(row.ExternalAuth)
 	}
 	observation.RequestCORSReported = row.RequestCORS != nil
 	if observation.RequestCORSReported && string(row.RequestCORS) != "null" {
@@ -496,6 +505,7 @@ type PolicyCreateOpts struct {
 	InitialRules             []l7policies.CreateRuleOpts
 	RequestCORS              *cloud.HTTPCORS
 	HTTPRequestPolicy        *cloud.HTTPRequestPolicy
+	ExternalAuth             *ListenerHTTPExternalAuth
 	RequestMirrors           []HTTPRequestMirror
 }
 
@@ -576,6 +586,14 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 			return nil, fmt.Errorf("%s requires a forwarding action", httpRequestPolicyField)
 		}
 		if err := (HTTPRequestPolicyUpdate{Value: opts.HTTPRequestPolicy}).write(body); err != nil {
+			return nil, err
+		}
+	}
+	if opts.ExternalAuth != nil {
+		if !opts.supportsExternalAuth() {
+			return nil, fmt.Errorf("external_auth requires an HTTP forwarding policy without additional request or response filters")
+		}
+		if err := (PolicyExternalAuthUpdate{Value: opts.ExternalAuth}).write(body); err != nil {
 			return nil, err
 		}
 	}

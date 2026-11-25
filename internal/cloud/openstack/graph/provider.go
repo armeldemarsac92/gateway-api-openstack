@@ -82,6 +82,7 @@ type ProviderConfig struct {
 	HTTPRequestURLRewrite  bool
 	HTTPRequestPolicy      bool
 	HTTPRequestMirror      bool
+	RouteExternalAuth      bool
 	HTTPCORS               bool
 	BackendRequestFilters  bool
 	HTTPMethodMatch        bool
@@ -123,6 +124,7 @@ type Provider struct {
 	httpRequestURLRewrite  bool
 	httpRequestPolicy      bool
 	httpRequestMirror      bool
+	routeExternalAuth      bool
 	httpCORS               bool
 	backendRequestFilters  bool
 	httpMethodMatch        bool
@@ -174,6 +176,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		httpRequestURLRewrite:  cfg.HTTPRequestURLRewrite,
 		httpRequestPolicy:      cfg.HTTPRequestPolicy,
 		httpRequestMirror:      cfg.HTTPRequestMirror,
+		routeExternalAuth:      cfg.RouteExternalAuth,
 		httpCORS:               cfg.HTTPCORS,
 		backendRequestFilters:  cfg.BackendRequestFilters,
 		httpRequestRedirect:    cfg.HTTPRequestRedirect,
@@ -237,6 +240,15 @@ func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityBackendH2C)
+}
+
+// RouteExternalAuthAvailable reports whether the regional policy API can
+// authorize a request on its selected HTTP route before forwarding it.
+func (p *Provider) RouteExternalAuthAvailable(ctx context.Context) (bool, error) {
+	if !p.routeExternalAuth || !p.fixedHTTPResponses {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityPolicyExternalAuth)
 }
 
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {

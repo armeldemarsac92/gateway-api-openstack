@@ -38,6 +38,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 type routeReconcileStatus struct {
@@ -258,6 +259,7 @@ func (r *Reconciler) handleRouteProviderFailure(
 	parent gatewayv1.ParentReference,
 	referencesEvaluated bool,
 	diagnostic model.Diagnostic,
+	allRulesRejected string,
 	providerErr error,
 	action string,
 ) (ctrl.Result, error) {
@@ -266,7 +268,7 @@ func (r *Reconciler) handleRouteProviderFailure(
 		return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The HTTPRoute graph could not be reconciled"}, providerErr)
 	}
 	route := scope.route
-	status := providerFailureRouteStatus(policy, referencesEvaluated).withBackendDiagnostic(diagnostic)
+	status := providerFailureRouteStatus(policy, referencesEvaluated).withBackendDiagnostic(diagnostic).withAllRulesRejected(allRulesRejected)
 	scope.setProviderFailureStatuses(
 		[]parentStatusUpdate{{parent: parent, status: status}},
 		policy,
@@ -390,6 +392,17 @@ func (s routeReconcileStatus) withBackendDiagnostic(diagnostic model.Diagnostic)
 	return s
 }
 
+func (s routeReconcileStatus) withAllRulesRejected(message string) routeReconcileStatus {
+	if message == "" {
+		return s
+	}
+	s.accepted, s.acceptedReason, s.acceptedMessage = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), message
+	if s.programmed == metav1.ConditionTrue {
+		s.programmedMessage = "Octavia is serving local rejections for all applicable rules"
+	}
+	return s
+}
+
 func (s routeReconcileStatus) withBackendTLSAncestor(slot backendtls.AncestorSlot) routeReconcileStatus {
 	switch slot {
 	case backendtls.AncestorSlotFull:
@@ -472,6 +485,23 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	for _, rule := range rules {
 		for _, backend := range rule.BackendRefs {
 			if diagnostic := model.UnresolvedHTTPBackendExtension(backend); diagnostic != nil {
+				*status = status.withBackendDiagnostic(*diagnostic)
+			}
+		}
+	}
+	if r.Config.RouteExternalAuthEnabled() {
+		for _, rule := range rules {
+			if !model.HasHTTPRouteExternalAuth(rule) {
+				continue
+			}
+			auth, diagnostic := model.NormalizeHTTPRouteExternalAuth(rule, true, r.Config.WeightedHTTPTargets)
+			if diagnostic == nil {
+				_, _, diagnostic, err = routebackend.ObserveHTTPExternalAuthService(ctx, r.routePatchReader(), model.HTTPRouteKind, route.Namespace, *auth)
+				if err != nil {
+					return err
+				}
+			}
+			if diagnostic != nil && diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) {
 				*status = status.withBackendDiagnostic(*diagnostic)
 			}
 		}

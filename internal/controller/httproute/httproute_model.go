@@ -111,6 +111,16 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 	var valid []gatewayv1.HTTPRouteRule
 	var positions []int
 	for index, rule := range route.Spec.Rules {
+		if r.checkRouteExternalAuth(rule, kind) {
+			// The logical compiler retains even invalid filter configurations
+			// as fixed responses at the original match precedence.
+			if err := r.validateRouteRule(rule, kind); err != nil {
+				return nil, nil, "", err
+			}
+			valid = append(valid, rule)
+			positions = append(positions, index)
+			continue
+		}
 		if _, diagnostic := model.NormalizeHTTPRequestPolicy(rule, !grpc && r.Config.HTTPRequestPolicy); diagnostic != nil {
 			return nil, nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
 		}
@@ -220,6 +230,9 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewayv1.Kind) error {
 	grpc := kind == model.GRPCRouteKind
+	if r.checkRouteExternalAuth(rule, kind) {
+		return r.validateRouteMatches(rule, grpc)
+	}
 	_, diagnostic := model.NormalizeRequestMirrors(rule.Filters, r.Config.HTTPRequestMirror, len(rule.BackendRefs) > 0)
 	if diagnostic != nil {
 		return routeActionError(diagnostic)
@@ -228,18 +241,13 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
 	weightedTargets := r.Config.WeightedHTTPTargets && (!grpc || len(rule.BackendRefs) > 1 ||
 		len(rule.BackendRefs) == 1 && (ptr.Deref(rule.BackendRefs[0].Weight, 1) == 0 || len(rule.BackendRefs[0].Filters) != 0))
-	exactHeaders := r.Config.HTTPHeaderExact
-	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
-	methodMatch := r.Config.HTTPMethodMatch && !grpc
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
 		if err := r.compileRouteAction(rule, kind); err != nil {
 			return err
 		}
 	}
-	for _, match := range rule.Matches {
-		if _, _, err := supportedMatch(match, exactHeaders, methodMatch, exactQueryParams); err != nil {
-			return err
-		}
+	if err := r.validateRouteMatches(rule, grpc); err != nil {
+		return err
 	}
 	if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
 		return nil
@@ -308,6 +316,15 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 	}
 	if !validBackendPort(backend.Port) {
 		return newRouteBuildError(routeErrorUnsupported, "backendRef must specify a port between 1 and 65535")
+	}
+	return nil
+}
+
+func (r *Reconciler) validateRouteMatches(rule gatewayv1.HTTPRouteRule, grpc bool) error {
+	for _, match := range rule.Matches {
+		if _, _, err := supportedMatch(match, r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && !grpc, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -384,6 +401,7 @@ type routeModelDiagnostics struct {
 	corsFallback            bool
 	retryBudgetAncestorFull bool
 	droppedInlineRules      string
+	allRulesRejected        string
 	backendTLSAncestorSlot  backendtls.AncestorSlot
 }
 
@@ -403,9 +421,25 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	if err != nil {
 		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 	}
+	externalAuthRejections := inputs.externalAuthRejections(route, matches, rules)
 	matches, rules, dropped := r.excludeIncompatibleInlineRules(route, inputs, matches, rules, topology.Topology.MemberMode)
 	if len(rules) == 0 && dropped != "" {
 		return cloud.RouteSpec{}, routeModelDiagnostics{}, newRouteBuildError(routeErrorUnsupported, "%s", dropped)
+	}
+	var allRulesRejected string
+	if len(externalAuthRejections) != 0 {
+		if dropped != "" {
+			dropped += ". "
+		}
+		dropped += "Dropped Rule " + strings.Join(externalAuthRejections, ", ")
+		applicable := make(map[int]struct{})
+		for _, match := range matches {
+			applicable[match.RuleIndex] = struct{}{}
+		}
+		if len(applicable) == len(externalAuthRejections) {
+			allRulesRejected = "All applicable HTTPRoute rules are unsupported. " + dropped
+			dropped = ""
+		}
 	}
 	admitted, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 	if err != nil {
@@ -439,6 +473,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	var desired cloud.RouteSpec
 	diagnostics := routeModelDiagnostics{
 		droppedInlineRules:      dropped,
+		allRulesRejected:        allRulesRejected,
 		backendTLSAncestorSlot:  routeBackendTLSAncestorSlot(rules),
 		retryBudgetAncestorFull: inputs.retryBudgetAncestorFull(matches, rules, model.HTTPProfileRouteKind(route) == model.GRPCRouteKind),
 	}
@@ -620,11 +655,22 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		fixed        *int
 		corsFallback bool
 		mirrors      []cloud.HTTPMirrorTarget
+		externalAuth *cloud.ListenerExternalAuth
 	}
 	groups := make(map[backendKey]httpBackendResolution, len(rules))
 	targets := make([]ruleTarget, len(rules))
 	var diagnostics routeModelDiagnostics
 	for _, rule := range rules {
+		auth := inputs.externalAuthForRule(rule)
+		if auth.diagnostic.Reason != "" {
+			if auth.diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) {
+				diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, auth.diagnostic)
+			}
+			targets[rule.Index].fixed = ptr.To(len(spec.FixedHTTPRules))
+			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
+			continue
+		}
+		targets[rule.Index].externalAuth = auth.config
 		if redirect := rule.Redirect; redirect != nil {
 			targets[rule.Index].redirect = ptr.To(len(spec.HTTPRedirects))
 			spec.HTTPRedirects = append(spec.HTTPRedirects, lowerRequestRedirect(rule.Index, *redirect, listener))
@@ -746,6 +792,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			CORS:                     cors,
 			RequestPolicy:            requestPolicy,
 			RequestMirrors:           target.mirrors,
+			ExternalAuth:             target.externalAuth,
 		})
 	}
 	inputs.attachHTTPBackendRetryBudgets(spec, matches, rules, groups)

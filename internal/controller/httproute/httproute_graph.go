@@ -53,6 +53,7 @@ type routeGraphResult struct {
 	backendDiagnostic          model.Diagnostic
 	corsFallback               bool
 	droppedInlineRules         string
+	allRulesRejected           string
 	backendTLSAncestorSlot     backendtls.AncestorSlot
 	retryBudgetAncestorFull    bool
 	cloud.RouteResult
@@ -100,6 +101,7 @@ func (r *Reconciler) ensureRouteGraph(
 		HTTPRouteBackendDiagnostic:           &prepared.backendDiagnostic,
 		HTTPRouteCORSFallback:                &prepared.corsFallback,
 		HTTPRouteDroppedInlineRules:          &prepared.droppedInlineRules,
+		HTTPRouteAllRulesRejected:            &prepared.allRulesRejected,
 		HTTPRouteRejectedSections:            &prepared.rejectedSections,
 		HTTPRouteRetryBudgetAncestorFull:     &prepared.retryBudgetAncestorFull,
 		HTTPRouteUsesXBackendClientTLS:       &prepared.usesXBackendClientTLS,
@@ -176,6 +178,7 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		backendDiagnostic:       snapshot.backendDiagnostic,
 		corsFallback:            snapshot.corsFallback,
 		droppedInlineRules:      snapshot.droppedInlineRules,
+		allRulesRejected:        snapshot.allRulesRejected,
 		backendTLSAncestorSlot:  snapshot.backendTLSAncestorSlot,
 		retryBudgetAncestorFull: snapshot.retryBudgetAncestorFull,
 	}

@@ -20,14 +20,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 
-	"golang.org/x/net/http/httpguts"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,7 +35,6 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -50,8 +46,6 @@ const (
 	invalidListenerFilter     = gatewayv1.ListenerConditionReason("InvalidListenerFilter")
 	invalidListenerFilterRef  = gatewayv1.ListenerConditionReason("InvalidListenerFilterRef")
 )
-
-var listenerAuthPath = regexp.MustCompile("^(?:[-A-Za-z0-9/._~!$&'()*+,;=:@]|%[0-9a-fA-F]{2})+$")
 
 func listenerHasRequestFilters(listener *gatewayv1.Listener) bool {
 	return listener.Filters != nil && len(listener.Filters.Requests) != 0
@@ -198,150 +192,70 @@ func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway 
 
 // GatewayOwnsListenerRequestFilters identifies filters handled by the opted-in
 // HTTP listener profile. Gateway reconciliation checks grants and backend readiness.
-func GatewayOwnsListenerRequestFilters(config controller.Config, namespace string, listener *gatewayv1.Listener) bool {
+func GatewayOwnsListenerRequestFilters(config controller.Config, listener *gatewayv1.Listener) bool {
 	if !config.GatewayListenerFiltersEnabled() || listenerFamily(listener) != gatewayv1.HTTPProtocolType ||
 		listener.Protocol == gatewayv1.HTTPSProtocolType && !config.OperatorHTTPS || !listenerHasRequestFilters(listener) ||
 		len(listener.Filters.Requests) > maxListenerRequestFilters {
 		return false
 	}
 	return !slices.ContainsFunc(listener.Filters.Requests, func(filter gatewayv1.ListenerFilter) bool {
-		_, _, issue := normalizeListenerFilter(namespace, filter)
+		_, issue := normalizeListenerFilter(filter)
 		return issue != nil
 	})
 }
 
-func normalizeListenerFilter(namespace string, filter gatewayv1.ListenerFilter) (cloud.ListenerExternalAuth, types.NamespacedName, *httpsListenerIssue) {
-	var auth cloud.ListenerExternalAuth
-	invalid := func(reason gatewayv1.ListenerConditionReason, message string) (cloud.ListenerExternalAuth, types.NamespacedName, *httpsListenerIssue) {
-		return auth, types.NamespacedName{}, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, reason, message}
-	}
-	unresolved := func(message string) (cloud.ListenerExternalAuth, types.NamespacedName, *httpsListenerIssue) {
-		return auth, types.NamespacedName{}, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef, message}
+func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExternalAuth, *httpsListenerIssue) {
+	invalid := func(message string) (*model.HTTPExternalAuth, *httpsListenerIssue) {
+		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, invalidListenerFilter, message}
 	}
 	switch filter.Type {
 	case gatewayv1.ListenerFilterExtensionRef:
 		if filter.ExtensionRef == nil || filter.ExternalAuth != nil {
-			return invalid(invalidListenerFilter, "ExtensionRef requires an extensionRef")
+			return invalid("ExtensionRef requires an extensionRef")
 		}
-		return unresolved(fmt.Sprintf("ExtensionRef %s %s/%s is unsupported", filter.ExtensionRef.Group, filter.ExtensionRef.Kind, filter.ExtensionRef.Name))
+		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef,
+			fmt.Sprintf("ExtensionRef %s %s/%s is unsupported", filter.ExtensionRef.Group, filter.ExtensionRef.Kind, filter.ExtensionRef.Name)}
 	case gatewayv1.ListenerFilterExternalAuth:
 		if filter.ExternalAuth == nil || filter.ExtensionRef != nil {
-			return invalid(invalidListenerFilter, "ExternalAuth requires an externalAuth configuration")
+			return invalid("ExternalAuth requires an externalAuth configuration")
 		}
 	default:
-		return invalid(gatewayv1.ListenerReasonUnsupportedValue, fmt.Sprintf("Listener filter type %q is unsupported", filter.Type))
+		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+			fmt.Sprintf("Listener filter type %q is unsupported", filter.Type)}
 	}
-	filterAuth := filter.ExternalAuth
-	if filterAuth.ExternalAuthProtocol != gatewayv1.HTTPRouteExternalAuthHTTPProtocol {
-		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "ExternalAuth supports HTTP authorization")
+	auth, diagnostic := model.NormalizeHTTPExternalAuth(filter.ExternalAuth)
+	if diagnostic == nil {
+		return auth, nil
 	}
-	if filterAuth.GRPCAuthConfig != nil || filterAuth.ForwardBody != nil && filterAuth.ForwardBody.MaxSize < 0 {
-		return invalid(invalidListenerFilter, "Invalid HTTP ExternalAuth options")
-	}
-	if filterAuth.ForwardBody != nil && filterAuth.ForwardBody.MaxSize > 0 {
-		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "ExternalAuth request body forwarding is unsupported")
-	}
-	if options := filterAuth.HTTPAuthConfig; options != nil {
-		if len(options.Path) > 1024 || options.Path != "" && (!strings.HasPrefix(options.Path, "/") || !listenerAuthPath.MatchString(options.Path)) {
-			return invalid(invalidListenerFilter, "ExternalAuth HTTP path prefix is invalid")
+	switch diagnostic.Condition {
+	case string(gatewayv1.RouteConditionResolvedRefs):
+		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef, diagnostic.Message}
+	case string(gatewayv1.RouteConditionAccepted):
+		if diagnostic.Reason == "Invalid" {
+			return invalid(diagnostic.Message)
 		}
-		auth.PathPrefix = options.Path
-		if !validAuthHeaders(options.AllowedRequestHeaders) || !validAuthHeaders(options.AllowedResponseHeaders) {
-			return invalid(invalidListenerFilter, "ExternalAuth header list contains an invalid name")
-		}
-		auth.AllowedRequestHeaders = normalizeAuthHeaders(options.AllowedRequestHeaders)
-		auth.AllowedResponseHeaders = normalizeAuthHeaders(options.AllowedResponseHeaders)
 	}
-	key, supported := model.BackendServiceReference(namespace, filterAuth.BackendRef)
-	if !supported || key.Name == "" {
-		return unresolved("ExternalAuth backendRef must refer to a core Service")
-	}
-	return auth, key, nil
+	return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, diagnostic.Message}
 }
 
 func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-	auth, key, issue := normalizeListenerFilter(gateway.Namespace, filter)
+	auth, issue := normalizeListenerFilter(filter)
 	if issue != nil {
-		return auth, issue, nil
+		return cloud.ListenerExternalAuth{}, issue, nil
 	}
-	unresolved := func(message string) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-		return auth, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef, message}, nil
+	resolved, diagnostic, err := routebackend.ResolveHTTPExternalAuth(ctx, r.APIReader, "Gateway", gateway.Namespace, *auth, topology)
+	if diagnostic == nil {
+		return resolved, nil, err
 	}
-	filterAuth := filter.ExternalAuth
-	if key.Namespace != gateway.Namespace {
-		grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
-		if err != nil {
-			return auth, nil, err
-		}
-		grants = slices.DeleteFunc(grants, func(grant gatewayv1.ReferenceGrant) bool { return !grant.DeletionTimestamp.IsZero() })
-		if !model.BackendReferenceAllowedFor("Gateway", gateway.Namespace, key, grants) {
-			return auth, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerReasonRefNotPermitted,
-				fmt.Sprintf("No ReferenceGrant authorizes this Gateway to use Service %s", key)}, nil
-		}
+	condition, reason := gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef
+	switch diagnostic.Reason {
+	case string(gatewayv1.RouteReasonBackendNotFound), string(gatewayv1.RouteReasonRefNotPermitted):
+		reason = gatewayv1.ListenerConditionReason(diagnostic.Reason)
 	}
-	var service corev1.Service
-	if err := r.APIReader.Get(ctx, key, &service); err != nil {
-		if apierrors.IsNotFound(err) {
-			return auth, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerConditionReason(gatewayv1.RouteReasonBackendNotFound),
-				fmt.Sprintf("ExternalAuth backend Service %s was not found", key)}, nil
-		}
-		return auth, nil, err
+	if diagnostic.Condition == string(gatewayv1.RouteConditionAccepted) {
+		condition, reason = gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue
 	}
-	if !service.DeletionTimestamp.IsZero() || service.UID == "" {
-		return unresolved(fmt.Sprintf("ExternalAuth backend Service %s has no live identity", key))
-	}
-	port, diagnostic := model.ResolveServicePort(&service, filterAuth.BackendRef.Port, false)
-	if diagnostic != nil {
-		return unresolved(diagnostic.Message)
-	}
-	var policies gatewayv1.BackendTLSPolicyList
-	if err := r.APIReader.List(ctx, &policies, client.InNamespace(service.Namespace)); err != nil {
-		return auth, nil, err
-	}
-	if policies.Continue != "" {
-		return auth, nil, fmt.Errorf("incomplete BackendTLSPolicy inventory for ExternalAuth backend Service %s", key)
-	}
-	if slices.ContainsFunc(policies.Items, func(policy gatewayv1.BackendTLSPolicy) bool {
-		return policy.DeletionTimestamp.IsZero() && backendtls.AppliesToServicePort(&policy, &service, port)
-	}) {
-		return auth, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
-			"ExternalAuth backend TLS is unsupported"}, nil
-	}
-	members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, &service, filterAuth.BackendRef.Port, corev1.ProtocolTCP, topology, nil, false)
-	if err != nil {
-		return auth, nil, err
-	}
-	if diagnostic != nil && diagnostic.Reason != string(gatewayv1.RouteReasonPending) {
-		return unresolved(diagnostic.Message)
-	}
-	auth.ServiceUID, auth.ServicePort = string(service.UID), int(port.Port)
-	auth.MemberSubnetID = topology.Topology.MemberSubnetID
-	auth.BackendSecurityGroups = topology.Topology.BackendSecurityGroupIDs
-	auth.Members = slices.DeleteFunc(members, func(member cloud.Member) bool { return member.Draining })
-	return auth, nil, nil
-}
-
-func normalizeAuthHeaders(headers []string) []string {
-	if len(headers) == 0 {
-		return nil
-	}
-	names := make([]string, len(headers))
-	for i, name := range headers {
-		names[i] = strings.ToLower(name)
-		if names[i] == ":authority" {
-			// Octavia accepts HTTP field names. Retain a targeted list
-			// containing only the protected authority as a targeted list.
-			names[i] = "host"
-		}
-	}
-	slices.Sort(names)
-	return slices.Compact(names)
-}
-
-func validAuthHeaders(headers []string) bool {
-	return len(headers) <= 64 && !slices.ContainsFunc(headers, func(name string) bool {
-		return name != ":authority" && (len(name) > 256 || !httpguts.ValidHeaderFieldName(name))
-	})
+	return resolved, &httpsListenerIssue{condition, reason, diagnostic.Message}, err
 }
 
 func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previous gatewayv1.GatewayStatus, filters listenerFilterObservation, result cloud.GatewayResult, tlsChanged *graph.TLSAuthorizationChanged) {

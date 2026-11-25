@@ -177,7 +177,7 @@ func (s *Service) ActivatePolicies(ctx context.Context, listenerID string, batch
 
 // policyActivationOptions captures modifiers which can change how a policy
 // routes requests independently of the action and the rule list.
-func policyActivationOptions(hostname, targets, fixed, redirect, rewrite, cors, request, response, requestPolicy, requestMirrors json.RawMessage) string {
+func policyActivationOptions(hostname, targets, fixed, redirect, rewrite, cors, request, response, requestPolicy, requestMirrors, externalAuth json.RawMessage) string {
 	var options = map[string]any{}
 	for _, option := range []struct {
 		name  string
@@ -185,6 +185,7 @@ func policyActivationOptions(hostname, targets, fixed, redirect, rewrite, cors, 
 	}{
 		{"hostname", hostname}, {"targets", targets}, {"fixed_response", fixed}, {"redirect_request", redirect},
 		{"request_url_rewrite", rewrite}, {"request_cors", cors}, {"request_headers", request}, {"response_headers", response}, {httpRequestPolicyField, requestPolicy}, {requestMirrorsField, requestMirrors},
+		{policyExternalAuthField, externalAuth},
 	} {
 		if len(option.value) == 0 {
 			continue

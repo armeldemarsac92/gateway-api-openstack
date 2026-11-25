@@ -86,6 +86,12 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 		}},
 		{name: "HTTP query parameters without fixed responses", mutate: func(cfg *Config) { cfg.HTTPQueryParamExact = true }},
 		{name: "HTTP method without fixed responses", mutate: func(cfg *Config) { cfg.HTTPMethodMatch = true }},
+		{name: "HTTPRoute ExternalAuth without Experimental CRDs", mutate: func(cfg *Config) {
+			cfg.RouteExternalAuth, cfg.FixedHTTPResponses = true, true
+		}},
+		{name: "HTTPRoute ExternalAuth without fixed responses", mutate: func(cfg *Config) {
+			cfg.GatewayAPIChannel, cfg.RouteExternalAuth = features.FeatureChannelExperimental, true
+		}},
 		{name: "XBackend client identity in Standard", mutate: func(cfg *Config) {
 			cfg.XBackendClientCertificate, cfg.BackendTLSPolicy = true, true
 		}},

@@ -450,7 +450,7 @@ func statusGatewayKeys(config Config, routeNamespace string, parents []gatewayv1
 func backendServiceKeys(route *gatewayv1.HTTPRoute) []string {
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range model.HTTPServiceBackendReferences(rule, true) {
+		for _, backend := range append(model.HTTPServiceBackendReferences(rule, true), model.HTTPRouteExternalAuthReferences(rule)...) {
 			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" {
 				keys[ObjectKeyString(key)] = struct{}{}
@@ -467,7 +467,7 @@ func backendNamespaceKeys(object client.Object) []string {
 	}
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range model.HTTPServiceBackendReferences(rule, true) {
+		for _, backend := range append(model.HTTPServiceBackendReferences(rule, true), model.HTTPRouteExternalAuthReferences(rule)...) {
 			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" && key.Namespace != route.Namespace {
 				keys[key.Namespace] = struct{}{}

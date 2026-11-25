@@ -51,6 +51,8 @@ type routeModelInputs struct {
 	gateway                   *gatewayv1.Gateway
 	input                     model.Input
 	logical                   model.Gateway
+	externalAuth              map[*model.HTTPExternalAuth]routeExternalAuthObservation
+	externalAuthCapability    model.Diagnostic
 	backendTLSAvailability    map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor        *backendtls.GatewayAncestor
 	clusterTrustBundles       *backendtls.ClusterTrustBundles
@@ -272,7 +274,10 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	}
 	// Namespace authorization and admitted route specs were checked above.
 	// Compare only the backend dependencies used to build this model here.
-	return inputs.validateBackends(ctx, r.APIReader)
+	if err := inputs.validateBackends(ctx, r.APIReader); err != nil {
+		return err
+	}
+	return inputs.validateExternalAuth(ctx, r.APIReader, r.Config)
 }
 
 func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (*routeModelInputs, error) {
@@ -302,7 +307,12 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			return nil, err
 		}
 	}
-	return inputs, nil
+	inputs.externalAuth, err = inputs.observeExternalAuth(ctx, reader, r.Config)
+	if err != nil {
+		return nil, err
+	}
+	inputs.externalAuthCapability = r.externalAuthCapability(ctx, inputs.externalAuth)
+	return inputs, ctx.Err()
 }
 
 // collectRouteForwardingInputs compiles the same admitted routes, transport
@@ -337,6 +347,9 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.HTTPRequestURLRewrite = r.Config.HTTPRequestURLRewrite
 	input.HTTPRequestPolicy = r.Config.HTTPRequestPolicy
 	input.HTTPRequestMirror = r.Config.HTTPRequestMirror
+	input.CheckRouteExternalAuth = r.routeExternalAuthRulesEnabled()
+	input.RouteExternalAuth = r.Config.RouteExternalAuthEnabled()
+	input.WeightedHTTPTargets = r.Config.WeightedHTTPTargets
 	input.HTTPCORS = r.Config.HTTPCORS
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
 	input.BackendResponseHeaders = r.Config.ResponseHeaderModifier && r.Config.WeightedHTTPTargets
@@ -373,7 +386,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 		input.GatewayListenerRequestFilters = make(map[gatewayv1.SectionName]bool)
 		for i := range input.Gateway.Spec.Listeners {
 			listener := &input.Gateway.Spec.Listeners[i]
-			if gatewaycontroller.GatewayOwnsListenerRequestFilters(r.Config, input.Gateway.Namespace, listener) {
+			if gatewaycontroller.GatewayOwnsListenerRequestFilters(r.Config, listener) {
 				input.GatewayListenerRequestFilters[listener.Name] = true
 			}
 		}

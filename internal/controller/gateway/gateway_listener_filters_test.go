@@ -18,7 +18,6 @@ package gateway
 
 import (
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -129,16 +128,6 @@ func TestListenerFiltersRejectUnknownExtensionOnHTTPS(t *testing.T) {
 	require.NotEqual(t, -1, index)
 	require.Equal(t, "UnsupportedValue", conditions[index].Reason)
 	require.Contains(t, conditions[index].Message, "filters.requests[0]")
-}
-
-func TestListenerFiltersValidateOctaviaHeaderSelection(t *testing.T) {
-	require.True(t, validAuthHeaders([]string{strings.Repeat("x", 256), "X-Identity", "Host", ":authority"}))
-	require.False(t, validAuthHeaders([]string{strings.Repeat("x", 257)}))
-	require.False(t, validAuthHeaders([]string{"X Identity"}))
-	require.False(t, validAuthHeaders([]string{"X-K"}))
-	require.Nil(t, normalizeAuthHeaders(nil))
-	require.Equal(t, []string{"host"}, normalizeAuthHeaders([]string{":authority", "Host"}))
-	require.Equal(t, []string{"authority", "host", "x-identity"}, normalizeAuthHeaders([]string{"X-Identity", "Host", "Authority"}))
 }
 
 func TestListenerFiltersAggregateProgrammedAndKeepTransitionTimes(t *testing.T) {

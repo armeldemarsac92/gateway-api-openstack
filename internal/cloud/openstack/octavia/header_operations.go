@@ -39,6 +39,7 @@ type PolicyFilters struct {
 	CORS              *RequestCORSUpdate
 	RequestPolicy     *HTTPRequestPolicyUpdate
 	RequestMirrors    *RequestMirrorsUpdate
+	ExternalAuth      *PolicyExternalAuthUpdate
 	Tags              []string
 }
 
@@ -62,6 +63,11 @@ func (filters PolicyFilters) write(body map[string]any) error {
 	}
 	if filters.RequestMirrors != nil {
 		if err := filters.RequestMirrors.write(body); err != nil {
+			return err
+		}
+	}
+	if filters.ExternalAuth != nil {
+		if err := filters.ExternalAuth.write(body); err != nil {
 			return err
 		}
 	}
