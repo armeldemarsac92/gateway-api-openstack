@@ -447,7 +447,7 @@ func deniedHTTPBackendKeys(route desiredRoute) map[string]bool {
 	denied := make(map[string]bool)
 	for _, backend := range route.httpParts {
 		issue := backend.cookieSupportIssue()
-		if backend.backendTLS.denies() || issue == cloud.SessionPersistenceUnsupported || issue == cloud.SessionPersistenceUnverified {
+		if backend.backendTLS.denies() || issue >= cloud.SessionPersistenceUnverified {
 			denied[backend.backendKey] = true
 		}
 	}

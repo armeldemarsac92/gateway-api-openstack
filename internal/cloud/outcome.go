@@ -160,7 +160,10 @@ const (
 	// SessionPersistenceNotObserved denotes a deferred inventory, with no discovery attempt.
 	SessionPersistenceNotObserved
 	SessionPersistenceUnverified
+	SessionPersistenceDeadlineUnverified
+	SessionPersistenceDeadlineReadbackUnverified
 	SessionPersistenceUnsupported
+	SessionPersistenceDeadlineUnsupported
 )
 
 // RouteReadyResult returns a converged HTTPRoute result.
