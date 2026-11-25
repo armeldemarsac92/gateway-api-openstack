@@ -1,0 +1,337 @@
+{
+  "feature": "XTelemetryPolicy OTLP/HTTPS with BackendTLSPolicy System CAs",
+  "scope": {
+    "observed": [
+      "Gateway API resources on kind, real application and OpenTelemetry Collector Pods",
+      "Octavia REST and database, native listener TaskFlow and Amphora HAProxy driver",
+      "Real HAProxy forwarding, CA staging and reload handlers, HTTP and OTLP over TLS"
+    ],
+    "simulated": [
+      "Single Amphora inventory, agent transport and service-control boundary",
+      "Keystone, Neutron, namespace networking and part of provider provisioning",
+      "Synthetic regional trust bundle and local pool and member publication callbacks"
+    ],
+    "pending": [
+      "Deployed region",
+      "Packaged Amphora VM",
+      "Exporter headers",
+      "Full Gateway API conformance"
+    ]
+  },
+  "controller": {
+    "sourceRevision": "6f8a2c11cc26a0ef094b4eb444e1b465ff5cfef8",
+    "manifestDigest": "sha256:65633eb03d6f020016ed8e23560b552ea100a650dc5a2d5a4729ad3d23fecced",
+    "configDigest": "sha256:f1af41930f15aa2636f4e43bf0bdb5b6cfe01d128d9d533acd0c7e859a54ec71",
+    "managerSHA256": "1b0bbf1513acf7536877a848f7532d842c54c4e3e24fedbdef3c2ec2836ecddf",
+    "ociArchiveSHA256": "46f2369154c5e35b8509605362199bf41ea3a97ef69f60b225ec5e7a8da294b7"
+  },
+  "octavia": {
+    "revision": "31e1fcaeb9208d2714497862657a3a35439228e0",
+    "version": "19.0.1.dev87",
+    "wheel": "octavia-19.0.1.dev87-py3-none-any.whl",
+    "wheelSHA256": "5a27e17e7566edab98aa4af3c8fab45c2d775093f16792bfb57cca5b98d31e6f",
+    "pullRequest": "https://github.com/armeldemarsac92/octavia/pull/43",
+    "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-collector-system-trust-31e1fcaeb920"
+  },
+  "octaviaLib": {
+    "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+    "version": "3.12.1.dev21",
+    "wheel": "octavia_lib-3.12.1.dev21-py3-none-any.whl",
+    "wheelSHA256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+    "release": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-header-persistence-eb4c646b5975"
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kindNodeManifestDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "scenarioSHA256": "bb0468aaf3d8f2884bad66cd28078965f77224c71eba5d1d5bbf08cced7408a9",
+  "haproxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1",
+    "sha256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+    "luaSHA256": "bf7cb25f80267578e82854a181aab9e0af290f89df687d3e4818a10815509c26"
+  },
+  "collector": {
+    "version": "otelcol version 0.165.0",
+    "sha256": "14e254a6a0880d9b6f94487658e49fc9f3b0e14c62e82253be78da08e8c1ddd8",
+    "serviceAppProtocol": "https",
+    "wellKnownCACertificates": "System"
+  },
+  "channels": {
+    "experimental": {
+      "passed": true,
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "discovery": {
+        "xtelemetrypolicies.gateway.networking.x-k8s.io": {
+          "installed": true,
+          "discovered": true,
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental"
+        },
+        "backendtlspolicies.gateway.networking.k8s.io": {
+          "installed": true,
+          "discovered": true,
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental"
+        }
+      },
+      "controllerPolicyOptions": [
+        "--octavia-backend-tls-policy",
+        "--octavia-telemetry-policy"
+      ],
+      "octaviaRegionalCapabilities": {
+        "listener_otlp_tracing_v1": true,
+        "backend_tls_system_ca_v1": true,
+        "backend_tls_hostname_v1": true
+      },
+      "nativeHAProxyReloadCount": 25,
+      "phases": {
+        "system-ca-trusted": {
+          "conditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listener": {
+            "protocol": "HTTP",
+            "listenerStatus": "ACTIVE",
+            "exporterStatus": "ACTIVE",
+            "exporterEnabled": true,
+            "exporterExplicitlyNull": false,
+            "haproxyRunning": true
+          },
+          "telemetryPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "backendTLSPolicyAncestorConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "collectorPool": {
+            "protocol": "HTTP",
+            "tlsEnabled": true,
+            "systemCA": true,
+            "alpn": [
+              "http/1.1"
+            ],
+            "isolatedCollectorTag": true,
+            "strictHostnameAndSNI": true,
+            "explicitCAReferencePresent": false,
+            "usedForApplicationForwarding": false,
+            "serviceEndpointMatched": true,
+            "status": "ACTIVE",
+            "attestation": {
+              "emptyPoolPublicationAcknowledged": true,
+              "membersAtControllerRead": 0,
+              "systemCABundleMatchedAtReadAndInHAProxy": true,
+              "readBeforeFirstMemberWrite": true
+            }
+          },
+          "application": {
+            "http200": 1,
+            "matchingCollectorSpans": 1,
+            "applicationAndCollectorSpanMatch": true
+          },
+          "secondRouteHTTP200": true
+        },
+        "reference-grant-withdrawn": {
+          "conditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listener": {
+            "protocol": "HTTP",
+            "listenerStatus": "ACTIVE",
+            "exporterStatus": "ACTIVE",
+            "exporterEnabled": false,
+            "exporterExplicitlyNull": true,
+            "haproxyRunning": true
+          },
+          "telemetryPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted"
+          },
+          "backendTLSPolicyAncestorConditions": {},
+          "duringConvergence": {
+            "applicationHTTP200": 5,
+            "witnessHTTP200": 5
+          },
+          "retiredCollectorPoolAbsent": true,
+          "settledForwarding": {
+            "http200": 20,
+            "traceContextUnchanged": 20
+          },
+          "collectorObservationSeconds": 6.618,
+          "matchingCollectorSpans": 0,
+          "collectorHealth": {
+            "httpStatus": 200,
+            "certificateVerified": true,
+            "decodedSpan": true
+          }
+        },
+        "reference-grant-restored": {
+          "conditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listener": {
+            "protocol": "HTTP",
+            "listenerStatus": "ACTIVE",
+            "exporterStatus": "ACTIVE",
+            "exporterEnabled": true,
+            "exporterExplicitlyNull": false,
+            "haproxyRunning": true
+          },
+          "telemetryPolicyConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "backendTLSPolicyAncestorConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "duringConvergence": {
+            "applicationHTTP200": 15,
+            "witnessHTTP200": 15
+          },
+          "collectorPool": {
+            "protocol": "HTTP",
+            "tlsEnabled": true,
+            "systemCA": true,
+            "alpn": [
+              "http/1.1"
+            ],
+            "isolatedCollectorTag": true,
+            "strictHostnameAndSNI": true,
+            "explicitCAReferencePresent": false,
+            "usedForApplicationForwarding": false,
+            "serviceEndpointMatched": true,
+            "status": "ACTIVE",
+            "attestation": {
+              "emptyPoolPublicationAcknowledged": true,
+              "membersAtControllerRead": 0,
+              "systemCABundleMatchedAtReadAndInHAProxy": true,
+              "readBeforeFirstMemberWrite": true
+            }
+          },
+          "application": {
+            "http200": 1,
+            "matchingCollectorSpans": 1,
+            "applicationAndCollectorSpanMatch": true
+          },
+          "secondRouteHTTP200": true
+        }
+      },
+      "amphoraCapabilities": {
+        "listener_otlp_tracing_v1": true,
+        "backend_tls_system_ca_v1": true,
+        "backend_tls_hostname_v1": true
+      },
+      "beforeGrantWithdrawalCollectorPreflight": {
+        "httpStatus": 200,
+        "certificateVerified": true,
+        "decodedSpan": true
+      },
+      "nativeListenerUpdates": 4,
+      "syntheticTrustBundleStages": 23,
+      "acknowledgedConfigurationPublications": 23,
+      "sameGatewayListenerAndPoliciesAcrossPhases": true,
+      "distinctCollectorPoolsBeforeAndAfterRestoration": true
+    },
+    "standard": {
+      "passed": true,
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "discovery": {
+        "xtelemetrypolicies.gateway.networking.x-k8s.io": {
+          "installed": false,
+          "discovered": false
+        },
+        "backendtlspolicies.gateway.networking.k8s.io": {
+          "installed": true,
+          "discovered": true,
+          "bundleVersion": "v1.7.0",
+          "channel": "standard"
+        }
+      },
+      "controllerPolicyOptions": [],
+      "octaviaRegionalCapabilities": {
+        "listener_otlp_tracing_v1": false,
+        "backend_tls_system_ca_v1": false,
+        "backend_tls_hostname_v1": true
+      },
+      "nativeHAProxyReloadCount": 3,
+      "phases": {
+        "standard-forwarding": {
+          "conditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listener": {
+            "protocol": "HTTP",
+            "listenerStatus": "ACTIVE",
+            "exporterStatus": null,
+            "exporterEnabled": false,
+            "exporterExplicitlyNull": false,
+            "haproxyRunning": true
+          },
+          "forwarding": {
+            "http200": 2,
+            "traceContextUnchanged": 2
+          }
+        }
+      }
+    }
+  }
+}
