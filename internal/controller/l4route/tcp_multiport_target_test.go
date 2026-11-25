@@ -74,7 +74,7 @@ func TestScopedTCPForwardingTargetFences(t *testing.T) {
 					t.Fatal(err)
 				}
 				n := input.Nodes[0]
-				if n.Disposition != cloud.GraphPreserve || !slices.Equal(n.RetainScopedListenerPorts, []int{8080}) {
+				if n.Disposition != cloud.GraphPreserve || !slices.Equal(n.RetainListenerPorts, []int{8080}) {
 					t.Fatalf("retained listener = %+v", n)
 				}
 				return

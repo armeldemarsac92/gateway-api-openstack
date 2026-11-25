@@ -214,7 +214,7 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		if scoped && node.Disposition == cloud.GraphPreserve {
 			// A bound route with no fresh authorized target cannot keep a
 			// default on any port. Scope withdrawal to its proven edges.
-			node.RetainScopedListenerPorts = []int{}
+			node.RetainListenerPorts = []int{}
 		}
 		snapshot.nodes = append(snapshot.nodes, node)
 		snapshot.revisions = append(snapshot.revisions, route.GetResourceVersion())
@@ -250,12 +250,12 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			}
 			node.Disposition = cloud.GraphEnsure
 			node.Spec = *spec
-			node.RetainScopedListenerPorts = nil
-		} else if scoped && r.protocol() == gatewayv1.TCPProtocolType && r.hasPreviousObservedBackendTarget(winner.route, target, checkpoint) {
-			// A selector edit can carry forward existing edges. The provider
-			// must confirm the old pool matches the freshly authorized backend.
+			node.RetainListenerPorts = nil
+		} else if r.canRetainObservedTarget(winner.route, target, checkpoint) {
+			// The provider must confirm the existing pool still matches
+			// the freshly authorized backend before keeping listener edges.
 			node.Spec = *spec
-			node.RetainScopedListenerPorts = spec.ScopedListenerPorts
+			node.RetainListenerPorts = ports
 		}
 	}
 	if trigger != nil {

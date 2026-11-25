@@ -1,0 +1,18 @@
+{
+  "correctedDecoderReplayExit": 0,
+  "correctedNativeFixtureSHA256": "e01e2e92c7a8d5aad16a0cab7c15762bd6853d64a6c07166ad743ec29b3b1cf5",
+  "initialFixtureRunnerExit": 1,
+  "nameTagWasPreservedAsHash": true,
+  "providerTagInputReconstruction": "published 9388be4580dd identity.tag encoding and SHA-256 fallback",
+  "rawInput": "253-character Gateway name in the preserved Experimental upstream log",
+  "recordedInitialFailureReproduced": true,
+  "replayScope": "ownership tag decoder only",
+  "shortGatewayNamesChecked": 8,
+  "upstreamCoreStatistics": {
+    "Failed": 0,
+    "Passed": 21,
+    "Skipped": 0
+  },
+  "upstreamExit": 0,
+  "upstreamReportSHA256": "c014b324720ffdffbc9883b4bb3e0110ec6302c2d9263cafe0c3e07b3de037c3"
+}

@@ -1211,12 +1211,15 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			spec.Gateway.Disposition != cloud.GraphEnsure || protocol != cloud.ListenerProtocolHTTP) {
 			return invalid("waiting for HTTP policy removal requires a preserved HTTPRoute on an ensured HTTP Gateway")
 		}
-		assigned := node.RetainScopedListenerPorts
-		if assigned != nil && (node.Disposition != cloud.GraphPreserve || spec.Gateway.Disposition != cloud.GraphEnsure || len(ports) == 0) {
-			return invalid("limiting a preserved pool's defaults requires a complete Gateway listener set")
+		assigned := node.RetainListenerPorts
+		if assigned != nil && (node.Disposition != cloud.GraphPreserve || spec.Gateway.Disposition != cloud.GraphEnsure || !usesDefaultPool(protocol)) {
+			return invalid("retaining pool defaults requires a preserved route and an ensured transport Gateway")
 		}
 		if node.Disposition == cloud.GraphEnsure {
 			assigned = node.Spec.ScopedListenerPorts
+			if usesDefaultPool(protocol) && len(ports) == 0 && len(assigned) == 0 {
+				assigned = []int{spec.Gateway.Spec.ListenerPort}
+			}
 		}
 		scopedHTTP := protocol == cloud.ListenerProtocolHTTP && len(ports) != 0 && node.Disposition == cloud.GraphEnsure
 		if (!scopedHTTP || node.Spec.GRPC) && (node.Spec.ScopeHTTPResources || len(node.Spec.AdditionalHTTPPorts) != 0) {
@@ -1224,8 +1227,9 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		if !scopedHTTP {
 			for index, port := range assigned {
-				if !ports[port] || portWinners[port] || index > 0 && assigned[index-1] >= port {
-					return invalid("scoped route elections require sorted, distinct ports from the Gateway listener set")
+				validPort := ports[port] || len(ports) == 0 && usesDefaultPool(protocol) && port == spec.Gateway.Spec.ListenerPort
+				if !validPort || portWinners[port] || index > 0 && assigned[index-1] >= port {
+					return invalid("route elections require sorted, distinct ports from the Gateway listener set")
 				}
 				portWinners[port] = true
 			}
@@ -1238,10 +1242,14 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		if transport := node.Spec.GatewayRequirements.ListenerProtocol; node.Disposition == cloud.GraphDelete && transport != "" && !supportedListenerProtocol(transport) {
 			return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: unsupported detaching route protocol %q", cloud.ErrOwnershipConflict, transport)}
 		}
-		if len(node.RetainScopedListenerPorts) != 0 {
-			if protocol != cloud.ListenerProtocolTCP || !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) ||
-				!slices.Equal(node.RetainScopedListenerPorts, node.Spec.ScopedListenerPorts) {
-				return invalid("retaining TCP defaults requires the matching Gateway and backend specification")
+		if len(node.RetainListenerPorts) != 0 {
+			retainedPorts := node.Spec.ScopedListenerPorts
+			if len(ports) == 0 && len(retainedPorts) == 0 {
+				retainedPorts = []int{spec.Gateway.Spec.ListenerPort}
+			}
+			if !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) ||
+				!slices.Equal(node.RetainListenerPorts, retainedPorts) {
+				return invalid("retaining transport defaults requires the matching Gateway and backend specification")
 			}
 			route, err = p.buildDesiredRoute(node.Spec)
 			if err != nil {

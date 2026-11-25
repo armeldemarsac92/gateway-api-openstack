@@ -172,7 +172,7 @@ func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Lis
 func (r *Reconciler) listenerCandidates(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []*transportRoute) []*transportRoute {
 	var candidates []*transportRoute
 	for _, route := range routes {
-		if !route.GetDeletionTimestamp().IsZero() || !r.Config.DefaultGatewaysEnabled() && len(route.parentRefs) != 1 {
+		if !route.GetDeletionTimestamp().IsZero() {
 			continue
 		}
 		if slices.ContainsFunc(r.gatewayRefs(route, gateway), func(ref gatewayv1.ParentReference) bool { return parentSelects(ref, listener) }) {

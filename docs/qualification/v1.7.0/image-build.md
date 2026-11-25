@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-With a route-scoped provider error, two accepted TCP or UDP routes still contribute two attachments to their listener. A newly renamed UDP listener reports its attachments while programming is pending. [Build record](image.json) · [Reconciliation cases](provider/transport-route-attachments/receipt.json)
+A TCPRoute, UDPRoute or passthrough TLSRoute can serve through two explicitly named Gateways. Removing one parent withdraws only its forwarding path. [Build record](image.json) · [Status and traffic on both channels](provider/explicit-transport-parents/README.md)
+
+With a route-scoped provider error, two accepted TCP or UDP routes still contribute two attachments to their listener. A newly renamed UDP listener reports its attachments while programming is pending. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-bce32f44ecad22ab18dd62428fd48ecd3309a5d3/image.json) · [Reconciliation cases](provider/transport-route-attachments/receipt.json)
 
 An Experimental EndpointSelector XBackend kept its named Cookie over authenticated HTTP/2. With two server-authenticated endpoints, each received six replays of its own Cookie. A separate origin verified the enrolled client certificate on three mutual TLS replays. [Traffic and TLS checks](provider/xbackend-cookie-authenticated-http2/receipt.json)
 
