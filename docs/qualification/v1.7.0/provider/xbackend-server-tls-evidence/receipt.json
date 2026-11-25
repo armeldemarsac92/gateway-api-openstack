@@ -1,0 +1,637 @@
+{
+  "subject": "Gateway API v1.7.0 Experimental HTTPRoute with ServerOnly XBackend TLS",
+  "scope": "Local kind, service-account manager extracted from OCI, Octavia REST, Amphora rendering and HAProxy. Local fixtures provided cloud inventory, provisioning and Amphora transport.",
+  "registeredUpstreamCase": false,
+  "controller": {
+    "source": "b823f09447a11e1c728f73bb9ab9081826ceb534",
+    "parents": [
+      "688b8353f06046af6c496763bbc8e964edad5145"
+    ],
+    "tree": "28e8acf0f93b753c405d6945b5e09e185c40bf1e",
+    "signatureVerified": true,
+    "manifestDigest": "sha256:ef6e273cfa10684ff7a386f40489158b3e2c54947b3b124c13eb9cfc66595c5b",
+    "managerSHA256": "6c82e667b98a4371222dce56e484ff27411cb646bc4be269cec62dd656acf4ec",
+    "platform": "linux/amd64",
+    "normalAndNoCacheBuildsMatch": true,
+    "ociArchiveSHA256": "72cba66676d8c6ad2ebb8ef8feca8f71d631db26eeac20572ed2cfd9c52b8717"
+  },
+  "providers": {
+    "octavia": {
+      "source": "5edd5b1402fd22de33a13fc84d6cc0ab9f38b593",
+      "wheel": "octavia-19.0.1.dev53-py3-none-any.whl",
+      "wheelSHA256": "9cc357339eaa4fb0b2ce2fde251c8d97f8947402d49645c04e6f4983d6af770e",
+      "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-otlp-tracing-5edd5b1402fd"
+    },
+    "octaviaLib": {
+      "source": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+      "wheel": "octavia_lib-3.12.1.dev19-py3-none-any.whl",
+      "wheelSHA256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+      "release": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-otlp-tracing-542a56dcbec8"
+    }
+  },
+  "channels": {
+    "standard": {
+      "rawReceiptSHA256": "0d32aa55d019b837e761417414629122c33e60325157c8eb1c583a3dfa4a8fcd",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "xBackendCRD": {
+        "installed": false,
+        "discovered": false
+      },
+      "regionalCapabilityEnabled": false,
+      "ordinaryService": {
+        "http": [
+          200,
+          200,
+          200
+        ],
+        "origin": "sibling",
+        "route": {
+          "generation": 1,
+          "object": "3a5521d98b6251c60815a45fa3af98a77311e8dd1e59629f6ed16a01a0fcb870",
+          "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+        },
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "poolIdentitySHA256": "0e97274b082f911d4356e723bba09e657d81997c309eb16cef7eb7537822f743"
+      },
+      "managerOctaviaMicroversion": "2.8",
+      "alpnPoolWrites": [],
+      "renderedMicroversion": "2.8"
+    },
+    "experimental": {
+      "rawReceiptSHA256": "d2e53c0e9c232c211f404e0f679412e53750cf506895e4f3e55b8f2c04e75a00",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "xBackendCRD": {
+        "installed": true,
+        "discovered": true,
+        "servedVersions": [
+          "v1alpha1"
+        ]
+      },
+      "regionalCapabilityEnabled": true,
+      "ordinaryService": {
+        "http": [
+          200,
+          200,
+          200
+        ],
+        "origin": "sibling",
+        "route": {
+          "generation": 1,
+          "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+          "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+        },
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+      },
+      "managerOctaviaMicroversion": "2.24",
+      "alpnPoolWrites": [
+        {
+          "method": "POST",
+          "http": 201,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        },
+        {
+          "method": "PUT",
+          "http": 200,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        },
+        {
+          "method": "POST",
+          "http": 201,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        }
+      ],
+      "renderedMicroversion": "2.24",
+      "caRecreated": {
+        "sameCertificate": true,
+        "configMapRecreated": true
+      },
+      "independentWrongIdentity": {
+        "verifyCode": 62,
+        "verifyMessage": "Hostname mismatch, certificate is not valid for 'authenticated.backend.test'."
+      },
+      "phases": {
+        "selector-authenticated": {
+          "route": {
+            "generation": 1,
+            "object": "d1fa5cebf4bdb7dcd6affbd863e86732c2ad5af5934a025abba6a3b6f6269522",
+            "specSHA256": "f5cb063f62d19ed1e498dce4116e35376d3d62f053834d5e5b7a3609e12fce63"
+          },
+          "backend": {
+            "generation": 1,
+            "object": "d68773d93b1fd3b8e0da898da7a7079c13d4e33266b6c6018fd2350ed3ad129d",
+            "specSHA256": "ff4fea52e5e764e136d8e4e88c2bfadb131ec1722752b07f63f89c261b7d95c6"
+          },
+          "HTTPRouteConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "XBackendConditions": {
+            "Accepted": "True/Accepted"
+          },
+          "originApplicationRequestsReceived": 3,
+          "http": [
+            200,
+            200,
+            200
+          ],
+          "sibling": {
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "origin": "sibling",
+            "route": {
+              "generation": 1,
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+              "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+            },
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+          },
+          "publicPool": {
+            "pool": "135f5f8a91621719e143501a2805d3eb939037ca71e882d7a473bb668c25f1b6",
+            "provisioning": "ACTIVE",
+            "poolEnabled": true,
+            "poolProtocol": "HTTP",
+            "tlsEnabled": true,
+            "hostname": "endpoint.backend.test",
+            "alpn": [
+              "http/1.1"
+            ],
+            "caReferenceSHA256": "2e76863a6bc55ede882ba638e2ecde0f0649e73a1ba70a92584ee9dc792a14d2",
+            "clientCertificate": false
+          },
+          "readyMembers": 1,
+          "HAProxy": {
+            "nativeConfigSHA256": "5f5eae214f4e595188dfe44d74be979684340519a5f0c10a5ed38dc1cb8d6784",
+            "nativePolicySelectsPool": true,
+            "nativeStrictHostname": [
+              "endpoint.backend.test"
+            ],
+            "nativeVerifyRequired": true,
+            "nativeALPN": [
+              "http/1.1"
+            ]
+          },
+          "tlsOrigins": [
+            {
+              "origin": "protected",
+              "sni": "endpoint.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "protected",
+              "sni": "endpoint.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "protected",
+              "sni": "endpoint.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            }
+          ]
+        },
+        "selector-ca-withdrawn": {
+          "route": {
+            "generation": 1,
+            "object": "d1fa5cebf4bdb7dcd6affbd863e86732c2ad5af5934a025abba6a3b6f6269522",
+            "specSHA256": "f5cb063f62d19ed1e498dce4116e35376d3d62f053834d5e5b7a3609e12fce63"
+          },
+          "backend": {
+            "generation": 1,
+            "object": "d68773d93b1fd3b8e0da898da7a7079c13d4e33266b6c6018fd2350ed3ad129d",
+            "specSHA256": "ff4fea52e5e764e136d8e4e88c2bfadb131ec1722752b07f63f89c261b7d95c6"
+          },
+          "HTTPRouteConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/InvalidCACertificateRef",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "XBackendConditions": {
+            "Accepted": "False/NoValidCACertificate"
+          },
+          "originApplicationRequestsReceived": 0,
+          "http": [
+            503,
+            503,
+            503
+          ],
+          "sibling": {
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "origin": "sibling",
+            "route": {
+              "generation": 1,
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+              "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+            },
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+          },
+          "publicPool": {
+            "pool": "135f5f8a91621719e143501a2805d3eb939037ca71e882d7a473bb668c25f1b6",
+            "provisioning": "ACTIVE",
+            "poolEnabled": true,
+            "poolProtocol": "HTTP",
+            "tlsEnabled": true,
+            "hostname": "endpoint.backend.test",
+            "alpn": [
+              "http/1.1"
+            ],
+            "caReferenceSHA256": "2e76863a6bc55ede882ba638e2ecde0f0649e73a1ba70a92584ee9dc792a14d2",
+            "clientCertificate": false
+          },
+          "readyMembers": 0,
+          "HAProxy": {
+            "nativeConfigSHA256": "2768dac9e1e9260e10d56e82348374ab49f4f6fa322640aa6ec9f1f7f32b83da",
+            "nativePolicySelectsPool": true,
+            "nativeStrictHostname": [],
+            "nativeVerifyRequired": false,
+            "nativeALPN": []
+          }
+        },
+        "selector-ca-restored": {
+          "route": {
+            "generation": 1,
+            "object": "d1fa5cebf4bdb7dcd6affbd863e86732c2ad5af5934a025abba6a3b6f6269522",
+            "specSHA256": "f5cb063f62d19ed1e498dce4116e35376d3d62f053834d5e5b7a3609e12fce63"
+          },
+          "backend": {
+            "generation": 1,
+            "object": "d68773d93b1fd3b8e0da898da7a7079c13d4e33266b6c6018fd2350ed3ad129d",
+            "specSHA256": "ff4fea52e5e764e136d8e4e88c2bfadb131ec1722752b07f63f89c261b7d95c6"
+          },
+          "HTTPRouteConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "XBackendConditions": {
+            "Accepted": "True/Accepted"
+          },
+          "originApplicationRequestsReceived": 3,
+          "http": [
+            200,
+            200,
+            200
+          ],
+          "sibling": {
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "origin": "sibling",
+            "route": {
+              "generation": 1,
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+              "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+            },
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+          },
+          "publicPool": {
+            "pool": "135f5f8a91621719e143501a2805d3eb939037ca71e882d7a473bb668c25f1b6",
+            "provisioning": "ACTIVE",
+            "poolEnabled": true,
+            "poolProtocol": "HTTP",
+            "tlsEnabled": true,
+            "hostname": "endpoint.backend.test",
+            "alpn": [
+              "http/1.1"
+            ],
+            "caReferenceSHA256": "2f4b2f63a812dd39bfc3d5c0bb7402eb87f9ce66fa56ef1d7f9d833442247295",
+            "clientCertificate": false
+          },
+          "readyMembers": 1,
+          "HAProxy": {
+            "nativeConfigSHA256": "00936c714f9b66d47d421bd9bbf27b04989c208b7bc8cc8384a8a10042ec70bb",
+            "nativePolicySelectsPool": true,
+            "nativeStrictHostname": [
+              "endpoint.backend.test"
+            ],
+            "nativeVerifyRequired": true,
+            "nativeALPN": [
+              "http/1.1"
+            ]
+          },
+          "tlsOrigins": [
+            {
+              "origin": "protected",
+              "sni": "endpoint.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "protected",
+              "sni": "endpoint.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "protected",
+              "sni": "endpoint.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            }
+          ]
+        },
+        "external-authenticated": {
+          "route": {
+            "generation": 1,
+            "object": "26fb71b0f221857790aae4723e8f06bfbbb296bfe93784be3e6eb579327e3c37",
+            "specSHA256": "035ba21798722f2e0849364c74087f5876af7d7bf590a1e6ea240396193ea7c3"
+          },
+          "backend": {
+            "generation": 1,
+            "object": "db6a0401d13487d0e1f0e186cc67eb4e089ed8f7914b064d96d53228984f05c2",
+            "specSHA256": "2f01033d5404b202a25cd74f4c2d0bd0387b00026ba3527e6a32a4700f3d1a16"
+          },
+          "HTTPRouteConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "XBackendConditions": {
+            "Accepted": "True/Accepted"
+          },
+          "originApplicationRequestsReceived": 3,
+          "http": [
+            200,
+            200,
+            200
+          ],
+          "sibling": {
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "origin": "sibling",
+            "route": {
+              "generation": 1,
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+              "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+            },
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+          },
+          "publicPool": {
+            "pool": "b7449d6c6d349f29a67f388481464dac0b41c752d7ae1fe43a2f0f8004344a3d",
+            "provisioning": "ACTIVE",
+            "poolEnabled": true,
+            "poolProtocol": "HTTP",
+            "tlsEnabled": true,
+            "hostname": "authenticated.backend.test",
+            "alpn": [
+              "http/1.1"
+            ],
+            "caReferenceSHA256": "8c5bbd3bd189324408ddec515ae1f05386de1c58d6904e9e953e6ac85d8f2d8a",
+            "clientCertificate": false
+          },
+          "readyMembers": 1,
+          "HAProxy": {
+            "nativeConfigSHA256": "1e58239d0b0b0bc9be881df83ce79846942a3ae745863adbe0a4dd93533d269e",
+            "nativePolicySelectsPool": true,
+            "nativeStrictHostname": [
+              "authenticated.backend.test"
+            ],
+            "nativeVerifyRequired": true,
+            "nativeALPN": [
+              "http/1.1"
+            ]
+          },
+          "tlsOrigins": [
+            {
+              "origin": "A",
+              "sni": "authenticated.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "A",
+              "sni": "authenticated.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "A",
+              "sni": "authenticated.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            }
+          ]
+        },
+        "external-wrong-identity": {
+          "route": {
+            "generation": 1,
+            "object": "26fb71b0f221857790aae4723e8f06bfbbb296bfe93784be3e6eb579327e3c37",
+            "specSHA256": "035ba21798722f2e0849364c74087f5876af7d7bf590a1e6ea240396193ea7c3"
+          },
+          "backend": {
+            "generation": 1,
+            "object": "db6a0401d13487d0e1f0e186cc67eb4e089ed8f7914b064d96d53228984f05c2",
+            "specSHA256": "2f01033d5404b202a25cd74f4c2d0bd0387b00026ba3527e6a32a4700f3d1a16"
+          },
+          "HTTPRouteConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "XBackendConditions": {
+            "Accepted": "True/Accepted"
+          },
+          "originApplicationRequestsReceived": 0,
+          "http": [
+            503,
+            503,
+            503
+          ],
+          "sibling": {
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "origin": "sibling",
+            "route": {
+              "generation": 1,
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+              "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+            },
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+          },
+          "publicPool": {
+            "pool": "b7449d6c6d349f29a67f388481464dac0b41c752d7ae1fe43a2f0f8004344a3d",
+            "provisioning": "ACTIVE",
+            "poolEnabled": true,
+            "poolProtocol": "HTTP",
+            "tlsEnabled": true,
+            "hostname": "authenticated.backend.test",
+            "alpn": [
+              "http/1.1"
+            ],
+            "caReferenceSHA256": "8c5bbd3bd189324408ddec515ae1f05386de1c58d6904e9e953e6ac85d8f2d8a",
+            "clientCertificate": false
+          },
+          "readyMembers": 1,
+          "HAProxy": {
+            "nativeConfigSHA256": "e9546c3c8a61f80e566d71de34a8183bc30b6920cdd2ef42809bc2f9bc132051",
+            "nativePolicySelectsPool": true,
+            "nativeStrictHostname": [
+              "authenticated.backend.test"
+            ],
+            "nativeVerifyRequired": true,
+            "nativeALPN": [
+              "http/1.1"
+            ]
+          }
+        },
+        "external-correct-identity-restored": {
+          "route": {
+            "generation": 1,
+            "object": "26fb71b0f221857790aae4723e8f06bfbbb296bfe93784be3e6eb579327e3c37",
+            "specSHA256": "035ba21798722f2e0849364c74087f5876af7d7bf590a1e6ea240396193ea7c3"
+          },
+          "backend": {
+            "generation": 1,
+            "object": "db6a0401d13487d0e1f0e186cc67eb4e089ed8f7914b064d96d53228984f05c2",
+            "specSHA256": "2f01033d5404b202a25cd74f4c2d0bd0387b00026ba3527e6a32a4700f3d1a16"
+          },
+          "HTTPRouteConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "XBackendConditions": {
+            "Accepted": "True/Accepted"
+          },
+          "originApplicationRequestsReceived": 3,
+          "http": [
+            200,
+            200,
+            200
+          ],
+          "sibling": {
+            "http": [
+              200,
+              200,
+              200
+            ],
+            "origin": "sibling",
+            "route": {
+              "generation": 1,
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
+              "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
+            },
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
+          },
+          "publicPool": {
+            "pool": "b7449d6c6d349f29a67f388481464dac0b41c752d7ae1fe43a2f0f8004344a3d",
+            "provisioning": "ACTIVE",
+            "poolEnabled": true,
+            "poolProtocol": "HTTP",
+            "tlsEnabled": true,
+            "hostname": "authenticated.backend.test",
+            "alpn": [
+              "http/1.1"
+            ],
+            "caReferenceSHA256": "8c5bbd3bd189324408ddec515ae1f05386de1c58d6904e9e953e6ac85d8f2d8a",
+            "clientCertificate": false
+          },
+          "readyMembers": 1,
+          "HAProxy": {
+            "nativeConfigSHA256": "abd3b4bd526f94c00363930b30741923df8957cec9e5a697c0f0ea9723de2c68",
+            "nativePolicySelectsPool": true,
+            "nativeStrictHostname": [
+              "authenticated.backend.test"
+            ],
+            "nativeVerifyRequired": true,
+            "nativeALPN": [
+              "http/1.1"
+            ]
+          },
+          "tlsOrigins": [
+            {
+              "origin": "A",
+              "sni": "authenticated.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "A",
+              "sni": "authenticated.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            },
+            {
+              "origin": "A",
+              "sni": "authenticated.backend.test",
+              "alpn": "http/1.1",
+              "httpProtocol": "HTTP/1.1"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+    "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287"
+  },
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "fixtureBackendSHA256": "e8a1336969acca9b1cadc633f2bd21e7e0218a8fbc4d6c1fea95f8400f35d9e4"
+}

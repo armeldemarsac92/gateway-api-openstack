@@ -979,6 +979,287 @@ func TestBackendTLSWeightedDenialPreservesHealthyShare(t *testing.T) {
 	}
 }
 
+func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	spec.Gateway.BackendClientCertificate.Reference = "https://barbican.example/v1/secrets/service-client"
+	spec.Gateway.Spec.ListenerProtocol, route.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP, cloud.ListenerProtocolHTTP
+	route.MemberMode = cloud.MemberModeEndpoint
+	route.BackendTLSObserved = true
+	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+	tls := newGraphBackendTLS(t)
+	route.HTTPBackends = []cloud.HTTPBackend{
+		{Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: tls,
+			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/service"}}},
+		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: tls, RoutedExternal: true,
+			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/external", Precedence: 1}}},
+	}
+	p := &Provider{projectID: spec.Gateway.Spec.Identity.OpenStackProjectID}
+	desired, err := p.buildDesiredRoute(*route)
+	require.NoError(t, err)
+	serviceKey := openstackidentity.HTTPBackendPoolKey(route.HTTPBackends[0])
+	externalKey := openstackidentity.HTTPBackendPoolKey(route.HTTPBackends[1])
+	externalIndex := slices.IndexFunc(desired.httpParts, func(part desiredRoute) bool { return part.backendKey == externalKey })
+	require.NotEqual(t, -1, externalIndex)
+	external := &desired.httpParts[externalIndex]
+	require.NotEqual(t, serviceKey, externalKey)
+	observed := observedRouteGraph{httpParts: map[string]*observedRouteGraph{external.backendKey: {
+		pool:    &pools.Pool{ID: "external", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		members: []pools.Member{{ID: "previous", Address: "198.51.100.20", ProtocolPort: 8443}},
+	}}}
+	graph := desiredGatewayGraph{spec: spec, routes: []desiredRoute{desired}}
+	parts := backendTLSParts(&graph, []observedRouteGraph{observed})
+	require.Len(t, parts, 2)
+	for _, part := range parts {
+		if part.key == externalKey {
+			require.Empty(t, part.clientCertificate)
+		} else {
+			require.Equal(t, serviceKey, part.key)
+			require.Equal(t, spec.Gateway.BackendClientCertificate, part.clientCertificate)
+		}
+	}
+	quarantine := func() *graphMutation {
+		return firstBackendTLSWithdrawal(backendTLSParts(&graph, []observedRouteGraph{observed}), func(part backendTLSPart) backendTLSPlan {
+			return part.preflight()
+		})
+	}
+
+	// Drain the old members while the direct predicate still selects this
+	// pool. Close it for configuration only once the regional path is ready.
+	step := quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
+	actual := observed.httpParts[external.backendKey]
+	actual.members = nil
+	require.Nil(t, quarantine())
+
+	var request struct {
+		Pool    map[string]any
+		Members []any
+	}
+	p.octavia = octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		switch r.Method + " " + r.URL.Path {
+		case "POST /lbaas/pools":
+			w.WriteHeader(http.StatusCreated)
+		case "PUT /lbaas/pools/external":
+			require.Equal(t, "ERROR", actual.pool.ProvisioningStatus)
+		case "PUT /lbaas/pools/external/members":
+			require.Equal(t, "ACTIVE", actual.pool.ProvisioningStatus)
+			require.False(t, actual.pool.AdminStateUp)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		default:
+			t.Fatalf("unexpected Octavia operation %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"pool":{}}`))
+	})))
+	plan := backendTLSPlan{phase: backendTLSConfigure, settings: octavia.BackendTLSSettings{
+		Hostname: tls.Hostname, CAReference: "https://barbican.example/v1/secrets/backend-ca",
+	}}
+	stage := plan.poolMutation(*external, *actual)
+	require.NotNil(t, stage)
+	require.Equal(t, new(false), stage.poolAdmin)
+	require.Contains(t, *stage.poolTags, backendTLSManagedTag)
+	create := plan.poolMutation(*external, observedRouteGraph{})
+	require.NotNil(t, create)
+	require.NoError(t, p.executeRouteMutation(t.Context(), *external, *create))
+	require.Equal(t, false, request.Pool["admin_state_up"])
+	require.Equal(t, true, request.Pool["tls_enabled"])
+	require.Equal(t, []any{"http/1.1"}, request.Pool["alpn_protocols"])
+	require.Equal(t, tls.Hostname, request.Pool["backend_tls_hostname"])
+	require.Equal(t, plan.settings.CAReference, request.Pool["ca_tls_container_ref"])
+	require.NotContains(t, request.Pool, "tls_container_ref")
+
+	// A failed pool reload needs an administrative PUT. Member batch
+	// withdrawal must wait for a new ACTIVE read and keep the pool closed.
+	actual.pool.Tags = []string{backendTLSManagedTag}
+	actual.pool.ProvisioningStatus = "ERROR"
+	actual.backendTLS.AdminObserved = true
+	actual.members = []pools.Member{{ID: "previous"}}
+	step = quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, routeMutationSetBackendTLS, step.route.kind)
+	require.Equal(t, new(false), step.route.poolAdmin)
+	require.Nil(t, step.route.backendTLS)
+	require.False(t, step.route.retry)
+	request.Pool = nil
+	require.NoError(t, p.executeRouteMutation(t.Context(), *external, step.route))
+	require.Equal(t, map[string]any{"admin_state_up": false}, request.Pool)
+	actual.pool.AdminStateUp = false
+	step = quarantine()
+	require.NotNil(t, step)
+	require.True(t, step.route.retry)
+	actual.pool.ProvisioningStatus = "PENDING_UPDATE"
+	require.Nil(t, quarantine())
+	require.Nil(t, plan.poolMutation(*external, *actual))
+	actual.pool.ProvisioningStatus = "ACTIVE"
+	step = quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
+	require.NoError(t, p.executeRouteMutation(t.Context(), *external, step.route))
+	require.Equal(t, []any{}, request.Members)
+	require.Nil(t, plan.poolMutation(*external, *actual))
+	actual.members = nil
+	require.Nil(t, quarantine())
+	configure := plan.poolMutation(*external, *actual)
+	require.NotNil(t, configure)
+	require.Nil(t, configure.poolAdmin)
+	require.Equal(t, plan.settings, *configure.backendTLS)
+	require.Equal(t, []string{xBackendServerALPN}, *configure.poolALPNProtocols)
+
+	actual.pool.AdminStateUp, actual.pool.TLSEnabled = true, true
+	actual.pool.CATLSContainerRef = plan.settings.CAReference
+	actual.members = []pools.Member{{ID: "configured", Address: "198.51.100.20", ProtocolPort: 8443}}
+	graph.routes[0].httpParts[externalIndex].spec.BackendTLS = &cloud.BackendTLSValidation{Denied: true}
+	step = quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
+	require.Nil(t, step.route.poolAdmin)
+}
+
+func TestXBackendServerOnlyRequiresConfiguredPoolALPN(t *testing.T) {
+	validation := newGraphBackendTLS(t)
+	for _, version := range []string{"2.8", "2.23", "2.24"} {
+		t.Run(version, func(t *testing.T) {
+			discoveries := 0
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
+				require.Equal(t, "load-balancer "+version, r.Header.Get("OpenStack-API-Version"))
+				discoveries++
+				safetyWriteJSON(t, w, map[string][]string{"gateway_capabilities": {octavia.GatewayCapabilityBackendTLSHostname}})
+			}))
+			client.Type, client.Microversion = "load-balancer", version
+			p := newTestProvider(t, ServiceClients{LoadBalancer: client}, ProviderConfig{BackendTLSPolicy: true, BackendCA: &backendca.Store{}})
+
+			wantALPN := version == "2.24"
+			available, err := p.XBackendTLSAvailable(t.Context(), false)
+			require.NoError(t, err)
+			require.Equal(t, wantALPN, available)
+			if !wantALPN {
+				require.Zero(t, discoveries)
+			}
+			available, err = p.BackendTLSAvailable(t.Context())
+			require.NoError(t, err)
+			require.True(t, available, "Service policies do not require pool ALPN")
+
+			canDiscover := func(bool, bool) bool { return true }
+			desired := desiredRoute{spec: cloud.RouteSpec{BackendTLS: validation}}
+			service := p.observeBackendTLS(t.Context(), desired, observedRouteGraph{}, canDiscover, false, cloud.BackendClientCertificate{})
+			require.Equal(t, backendTLSClaim, service.phase)
+			desired.xBackend = true
+			xBackend := p.observeBackendTLS(t.Context(), desired, observedRouteGraph{}, canDiscover, false, cloud.BackendClientCertificate{})
+			if !wantALPN {
+				require.Equal(t, backendTLSBlocked, xBackend.phase)
+				require.Contains(t, xBackend.issue, "2.24")
+				return
+			}
+			require.Equal(t, backendTLSClaim, xBackend.phase)
+
+			observed := observedRouteGraph{
+				pool: &pools.Pool{TLSEnabled: true},
+				backendTLS: octavia.PoolBackendTLS{
+					HostnameObserved: true, CAObserved: true, ClientRefObserved: true, EnabledObserved: true, AdminObserved: true,
+				},
+			}
+			xBackend = p.observeBackendTLS(t.Context(), desired, observed, canDiscover, false, cloud.BackendClientCertificate{})
+			require.Equal(t, backendTLSBlocked, xBackend.phase)
+			require.Contains(t, xBackend.issue, "readback")
+			observed.backendTLS.ALPNObserved = true
+			xBackend = p.observeBackendTLS(t.Context(), desired, observed, canDiscover, false, cloud.BackendClientCertificate{})
+			require.Equal(t, backendTLSClaim, xBackend.phase)
+		})
+	}
+}
+
+func TestXBackendDeniedUsesAnEnabledEmptyPoolAndRestoresPlaintext(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	route.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP
+	route.MemberMode = cloud.MemberModeEndpoint
+	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+	route.HTTPBackends = []cloud.HTTPBackend{{
+		Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8443,
+		Matches:    []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/private"}},
+		BackendTLS: &cloud.BackendTLSValidation{Denied: true},
+	}}
+	p := &Provider{projectID: spec.Gateway.Spec.Identity.OpenStackProjectID}
+	desired, err := p.buildDesiredRoute(*route)
+	require.NoError(t, err)
+	backend := desired.httpParts[0]
+	backend.backendTLS = backendTLSPlan{phase: backendTLSDenied}
+	var request struct {
+		Pool     map[string]any
+		L7Policy map[string]any
+	}
+	p.octavia = octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		w.WriteHeader(http.StatusCreated)
+		switch r.URL.Path {
+		case "/lbaas/pools":
+			_, _ = w.Write([]byte(`{"pool":{"id":"empty"}}`))
+		case "/lbaas/l7policies":
+			_, _ = w.Write([]byte(`{"l7policy":{"id":"match"}}`))
+		default:
+			t.Errorf("unexpected Octavia path %s", r.URL.Path)
+		}
+	})))
+	steps, _, err := buildRouteEnsurePlan(backend, observedRouteGraph{})
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	require.Equal(t, routeMutationCreatePool, steps[0].kind)
+	require.NoError(t, p.executeRouteMutation(t.Context(), backend, steps[0]))
+	require.Equal(t, true, request.Pool["admin_state_up"])
+	require.NotContains(t, request.Pool, "tls_enabled")
+	require.Empty(t, backend.members)
+	empty := observedRouteGraph{pool: &pools.Pool{ID: "empty", AdminStateUp: true, Protocol: "HTTP", ProvisioningStatus: "ACTIVE"}}
+	steps, _, err = buildRouteEnsurePlan(backend, empty)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	require.Equal(t, routeMutationCreatePolicy, steps[0].kind)
+	require.NoError(t, p.executeRouteMutation(t.Context(), backend, steps[0]))
+	require.Equal(t, "REDIRECT_TO_POOL", request.L7Policy["action"])
+	require.Equal(t, "empty", request.L7Policy["redirect_pool_id"])
+
+	route.HTTPBackends[0].InvalidReference = true
+	p.fixedHTTPResponses = true
+	fixed, err := p.buildDesiredRoute(*route)
+	require.NoError(t, err)
+	fixedPart := fixed.httpParts[0]
+	fixedPart.backendTLS = backend.backendTLS
+	require.True(t, fixedPart.fixedResponse)
+	require.Nil(t, fixedPart.backendTLS.poolMutation(fixedPart, observedRouteGraph{}))
+
+	// Older quarantine writes may have disabled and marked an ordinary pool.
+	// Its stock readback must prove that it never installed TLS before a
+	// current mode None can release it without authenticated capabilities.
+	route.HTTPBackends[0].InvalidReference, route.HTTPBackends[0].BackendTLS = false, nil
+	plain, err := p.buildDesiredRoute(*route)
+	require.NoError(t, err)
+	restored := plain.httpParts[0]
+	pool := &pools.Pool{ID: "original", ProvisioningStatus: "ACTIVE", Protocol: "HTTP", Tags: []string{backendTLSManagedTag}}
+	observed := observedRouteGraph{pool: pool, backendTLS: octavia.PoolBackendTLS{
+		AdminObserved: true, EnabledObserved: true, CAObserved: true, ClientRefObserved: true,
+	}}
+	noTLSCapability := func(bool, bool) bool { return false }
+	plan := p.observeBackendTLS(t.Context(), restored, observed, noTLSCapability, false, cloud.BackendClientCertificate{})
+	require.Equal(t, backendTLSRelease, plan.phase)
+	step := plan.poolMutation(restored, observed)
+	require.NotNil(t, step)
+	require.Equal(t, new(true), step.poolAdmin)
+	pool.AdminStateUp = true
+	step = plan.poolMutation(restored, observed)
+	require.NotNil(t, step)
+	require.NotContains(t, *step.poolTags, backendTLSManagedTag)
+	pool.Tags = append(pool.Tags, backendTLSRevisionTag(newGraphBackendTLS(t)))
+	plan = p.observeBackendTLS(t.Context(), restored, observed, noTLSCapability, false, cloud.BackendClientCertificate{})
+	require.Equal(t, backendTLSBlocked, plan.phase)
+}
+
 func TestBackendTLSRestartHoldsPoolRepresentationWithoutPolicyObservation(t *testing.T) {
 	for _, grouped := range []bool{false, true} {
 		t.Run(fmt.Sprintf("grouped-replacement-%t", grouped), func(t *testing.T) {
@@ -1022,6 +1303,7 @@ func TestBackendTLSFreshWithdrawalPrecedesDisabledPoolRetry(t *testing.T) {
 		observed.pool.TLSEnabled, observed.backendTLS.AdminObserved = true, true
 		observed.pool.AdminStateUp = i == 1
 		if i == 0 {
+			part.xBackend = true
 			observed.pool.ProvisioningStatus = "ERROR"
 		}
 	}

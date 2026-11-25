@@ -318,6 +318,11 @@ func ValidateMicroversion(value string) error {
 	return validateMicroversion(value, 5)
 }
 
+// SupportsPoolALPN checks the configured API version for pool alpn_protocols.
+func SupportsPoolALPN(value string) bool {
+	return validateMicroversion(value, 24) == nil
+}
+
 func validateMicroversion(value string, minimumMinor int) error {
 	parts := strings.Split(value, ".")
 	if len(parts) != 2 {

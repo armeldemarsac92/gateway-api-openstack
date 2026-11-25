@@ -902,6 +902,7 @@ type routeMutation struct {
 	clearPoolPersistence     bool
 	backendH2C               *bool
 	poolAdmin                *bool
+	poolALPNProtocols        *[]string
 	poolTags                 *[]string
 	backendTLS               *octavia.BackendTLSSettings
 	backendRetryBudget       *octavia.BackendRetryBudgetUpdate
@@ -1643,14 +1644,17 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		var hostname string
 		var subjectAltNames []cloud.BackendTLSSubjectAltName
 		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
-		if step.poolTags != nil && (desired.spec.GRPC || step.backendTLS != nil &&
+		if step.poolTags != nil && (desired.xBackend || desired.spec.GRPC || step.backendTLS != nil &&
 			(step.backendTLS.ClientCertificateReference != "" || len(step.backendTLS.SubjectAltNames) != 0)) {
-			// gRPC TLS, client certificates and explicit SANs start closed.
-			// Reopening requires independent, ownership-checked readback.
+			// Authenticated XBackends and extended Service TLS start closed.
+			// Enabling traffic requires independent, ownership-checked readback.
 			opts.AdminStateUp = boolPointer(false)
 		}
 		if step.backendTLS != nil {
 			opts.TLSEnabled, opts.CATLSContainerRef = true, step.backendTLS.CAReference
+			if desired.xBackend {
+				opts.ALPNProtocols = []string{xBackendServerALPN}
+			}
 			opts.TLSContainerRef = step.backendTLS.ClientCertificateReference
 			hostname = step.backendTLS.Hostname
 			subjectAltNames = step.backendTLS.SubjectAltNames
@@ -1676,7 +1680,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationClearPoolMembers:
 		err = p.octavia.ClearMembers(ctx, step.id)
 	case routeMutationSetBackendTLS:
-		opts := pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags}
+		opts := pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags, ALPNProtocols: step.poolALPNProtocols}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C, BackendTLS: step.backendTLS,
 			ClearTLSClientRef: step.clearTLSClientRef})
 	case routeMutationDisableMember:

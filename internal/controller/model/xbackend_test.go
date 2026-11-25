@@ -133,6 +133,21 @@ func TestXBackendExternalHostnameProfile(t *testing.T) {
 			t.Errorf("TLS mode %s must fail closed", mode)
 		}
 	}
+	profile := input.XBackendProfile
+	profile.ServerTLS = true
+	spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{}}
+	if got := ValidateXBackend(spec, profile); got == nil || got.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Errorf("ServerOnly requires an explicit TLS hostname even with a DNS destination: %+v", got)
+	}
+	spec.TLS.Validation.Hostname = "identity.example.test"
+	spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	if got := ValidateXBackend(spec, profile); got == nil || got.Reason != string(gatewayv1.RouteReasonUnsupportedProtocol) {
+		t.Errorf("ServerOnly must reject HTTP/2: %+v", got)
+	}
+	spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP11)
+	if got := ValidateXBackend(spec, profile); got != nil {
+		t.Errorf("ServerOnly should accept an explicit TLS hostname and HTTP/1.1: %+v", got)
+	}
 	spec.TLS = nil
 	ref.Port = ptr.To(gatewayv1.PortNumber(8089))
 	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {

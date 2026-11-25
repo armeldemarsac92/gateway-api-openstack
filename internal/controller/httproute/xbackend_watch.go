@@ -54,6 +54,35 @@ func (r *Reconciler) enqueueHTTPRoutesForXBackend(ctx context.Context, object cl
 	return r.enqueueHTTPRouteConsumers(ctx, consumers)
 }
 
+func (r *Reconciler) enqueueXBackendsForCA(ctx context.Context, object client.Object) []reconcile.Request {
+	key := client.ObjectKeyFromObject(object)
+	var backends gatewayx.XBackendList
+	if err := r.List(ctx, &backends, client.InNamespace(key.Namespace), client.MatchingFields{
+		controller.IndexXBackendByCA: controller.ObjectKeyString(key),
+	}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list XBackends for CA", "ca", key)
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(backends.Items))
+	for i := range backends.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&backends.Items[i])})
+	}
+	return requests
+}
+
+func (r *Reconciler) enqueueXBackendRoutesForCA(ctx context.Context, object client.Object) []reconcile.Request {
+	var consumers []gatewayv1.HTTPRoute
+	for _, backend := range r.enqueueXBackendsForCA(ctx, object) {
+		routes, err := r.listXBackendConsumers(ctx, backend.NamespacedName)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for XBackend", "xBackend", backend.NamespacedName)
+			continue
+		}
+		consumers = append(consumers, routes...)
+	}
+	return r.enqueueHTTPRouteConsumers(ctx, consumers)
+}
+
 func (r *Reconciler) enqueueHTTPRoutesForXBackendPod(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
 	var consumers []gatewayv1.HTTPRoute
@@ -142,6 +171,12 @@ func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
+	if r.Config.BackendTLSPolicy {
+		setup.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueXBackendsForCA))
+		if watch := r.Config.ClusterTrustBundles.Watch(r.enqueueXBackendsForCA); watch != nil {
+			setup.WatchesRawSource(watch)
+		}
+	}
 	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
 	if err != nil {
 		return err
