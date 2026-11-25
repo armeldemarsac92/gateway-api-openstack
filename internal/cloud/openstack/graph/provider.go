@@ -74,6 +74,7 @@ type ProviderConfig struct {
 	BackendTLSPolicy       bool
 	BackendRetryBudget     bool
 	TCPConnectionRejection bool
+	UDPPacketDrop          bool
 	FixedHTTPResponses     bool
 	HTTPHeaderExact        bool
 	HTTPQueryParamExact    bool
@@ -110,8 +111,9 @@ type Provider struct {
 	poolALPN               bool
 	backendRetryBudget     bool
 	tcpConnectionRejection bool
-	tcpReplayMu            sync.Mutex
-	tcpReplayAfter         map[string]time.Time
+	udpPacketDrop          bool
+	transportReplayMu      sync.Mutex
+	transportReplayAfter   map[string]time.Time
 	fixedHTTPResponses     bool
 	httpHeaderExact        bool
 	httpQueryParamExact    bool
@@ -161,6 +163,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		poolALPN:               serviceClients.LoadBalancer != nil && clients.SupportsPoolALPN(serviceClients.LoadBalancer.Microversion),
 		backendRetryBudget:     cfg.BackendRetryBudget,
 		tcpConnectionRejection: cfg.TCPConnectionRejection,
+		udpPacketDrop:          cfg.UDPPacketDrop,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
@@ -272,6 +275,20 @@ func (p *Provider) TCPConnectionRejectionAvailable(ctx context.Context) (bool, e
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	available, err := p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityTCPConnectionRejection)
+	if isNotFound(err) {
+		return false, nil
+	}
+	return available, err
+}
+
+// UDPPacketDropAvailable checks the opt-in and regional Amphora support.
+func (p *Provider) UDPPacketDropAvailable(ctx context.Context) (bool, error) {
+	if !p.udpPacketDrop {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	available, err := p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityUDPPacketDrop)
 	if isNotFound(err) {
 		return false, nil
 	}

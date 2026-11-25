@@ -710,6 +710,9 @@ func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
 	if actual.scoped {
 		for _, listener := range actual.scopedListeners {
 			if listener.DefaultPoolID != "" {
+				if owner := defaultPoolOwner(&listener, actual.routes); owner != -1 && actual.routes[owner].udpDropPool() {
+					return []graphMutation{deleteDefaultUDPPacketDropPool(listener.DefaultPoolID)}
+				}
 				mutation := clearListenerDefaultPool(actual.protocol)
 				mutation.listenerID = listener.ID
 				return []graphMutation{mutation}
@@ -717,6 +720,9 @@ func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
 		}
 	}
 	if listener := actual.deletion.defaultPoolListener; listener != nil && listener.DefaultPoolID != "" {
+		if pool := actual.deletion.defaultUDPPacketDropPool; pool != "" {
+			return []graphMutation{deleteDefaultUDPPacketDropPool(pool)}
+		}
 		return []graphMutation{clearListenerDefaultPool(listener.Protocol)}
 	}
 	// Removing a predicate from a serving L7 policy can widen its match.
@@ -736,6 +742,11 @@ func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
 		plan = append(plan, graphMutation{kind: graphDeleteLoadBalancer, message: "Deleting Octavia load balancer"})
 	}
 	return plan
+}
+
+func deleteDefaultUDPPacketDropPool(poolID string) graphMutation {
+	return graphMutation{kind: graphDeleteChild, deletion: gatewayDeletionStep{resource: gatewayDeletionPool, resourceID: poolID},
+		message: "Deleting the Octavia UDP packet drop pool and its default edge"}
 }
 
 func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {

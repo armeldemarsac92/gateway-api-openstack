@@ -328,10 +328,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, nil
 	}
 	p.observeTCPConnectionRejectionCapability(ctx, &desired, actual)
+	p.observeUDPPacketDropCapability(ctx, &desired, actual)
+	if result, handled, err := p.reconcileUDPPacketDrop(ctx, desired, actual); handled {
+		return result, err
+	}
 	if result, handled, err := p.reconcileServingTCPRejection(ctx, desired, actual); handled {
 		return result, err
 	}
-	if result, handled, err := p.replayPendingTCPRejection(ctx, desired, actual); handled {
+	if result, handled, err := p.replayPendingTransportBatch(ctx, desired, actual); handled {
 		return result, err
 	}
 	p.gateRequestMirrors(ctx, &desired, actual)
@@ -365,7 +369,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.isolateUnavailableSNISuffix(ctx, &desired, actual)
 	if actual.addressReadError != nil {
-		if actual.protocol == cloud.ListenerProtocolTCP {
+		if usesDefaultPool(actual.protocol) {
 			return result, actual.addressReadError
 		}
 		if isSNIProtocol(desired.protocol) {
@@ -398,7 +402,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
-		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired)) && spec.ValidateMutation != nil {
+		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired) || hasUDPDropTarget(desired)) && spec.ValidateMutation != nil {
 			// Busy Octavia can prove a serving subset without a write. Apply
 			// the same Kubernetes snapshot fence before publishing that proof.
 			if err := spec.ValidateMutation(ctx); err != nil {
@@ -470,7 +474,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
-		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual)) && spec.ValidateMutation != nil {
+		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual)) && spec.ValidateMutation != nil {
 			if err := spec.ValidateMutation(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err
 			}
@@ -536,8 +540,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if err != nil {
 		if step.kind == graphRouteMutation {
-			if step.route.kind == routeMutationReplaceTCPMembers {
-				withdrawn, withdrawalErr := p.withdrawAfterRejectedTCPBatch(ctx, desired, step.routeIndex, &result, err)
+			if step.route.kind == routeMutationReplaceTransportMembers {
+				withdrawn, withdrawalErr := p.withdrawAfterRejectedTransportBatch(ctx, desired, step.routeIndex, &result, err)
 				if withdrawn {
 					return result, withdrawalErr
 				}
@@ -1486,7 +1490,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP || desired.protocol == cloud.ListenerProtocolTCP
+		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP || desired.protocol == cloud.ListenerProtocolTCP || desired.protocol == cloud.ListenerProtocolUDP
 		observePending := (isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolTCP) && lb.ProvisioningStatus == "PENDING_UPDATE"
 		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
 			observation.phase != loadBalancerPhaseActive && !observePending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {

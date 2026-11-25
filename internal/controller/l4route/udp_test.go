@@ -19,6 +19,7 @@ package l4route
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -38,6 +39,100 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
+
+func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
+	gateway, class, route := udpRouteFixture()
+	localRef, local, localEndpoints := udpBackendFixture(route.Namespace, "primary", 3, "10.1.2.3")
+	remoteRef, remote, remoteEndpoints := udpBackendFixture("remote", "secondary", 1, "10.1.2.4")
+	remoteRef.Namespace = ptr.To(gatewayv1.Namespace(remote.Namespace))
+	originalRefs := []gatewayv1.BackendRef{localRef, remoteRef}
+	route.Spec.Rules[0].BackendRefs = slices.Clone(originalRefs)
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "allow-udp", UID: "grant"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "UDPRoute", Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: &remoteRef.Name}},
+		},
+	}
+	r := testReconciler(t, gateway, class, route, local, localEndpoints, remote, remoteEndpoints, grant)
+	r.Protocol = gatewayv1.UDPProtocolType
+	r.Coordinator = &graph.Coordinator{}
+	r.Config.UDPPacketDrop = true
+	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
+	id := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	r.Writer = readyRouteWriter(t, r)
+	reconcile := func() graph.RouteInputs {
+		t.Helper()
+		route = reconcileUDPRoute(t, r, route)
+		route = reconcileUDPRoute(t, r, route)
+		input, err := r.ObserveRouteGraph(t.Context(), viewRoute(route).graphRequest(id, graph.Ensure, gateway), gateway)
+		if err != nil || len(input.Nodes) != 1 {
+			t.Fatalf("observe UDPRoute = %+v, %v", input.Nodes, err)
+		}
+		return input
+	}
+	members := []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 3}, {Address: "10.1.2.4", Port: 9090, Weight: 1}}
+	check := func(input graph.RouteInputs, drop cloud.UDPPacketDrop, want []cloud.Member, status metav1.ConditionStatus, reason string) {
+		t.Helper()
+		spec := input.Nodes[0].Spec
+		if spec.UDPPacketDrop == nil || *spec.UDPPacketDrop != drop || !slices.Equal(spec.Members, want) ||
+			spec.HealthMonitor != (cloud.HealthMonitorConfig{}) || string(route.UID) != id.RouteUID || !reflect.DeepEqual(route.Spec.Rules[0].BackendRefs, originalRefs) {
+			t.Fatalf("unexpected UDP forwarding target: %+v, want %+v with %v", spec, drop, want)
+		}
+		checkRouteCondition(t, route, r.Config.ControllerName, "Accepted", metav1.ConditionTrue, "Accepted")
+		checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", status, reason)
+		checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+	}
+	original := reconcile()
+	check(original, cloud.UDPPacketDrop{Denominator: 1}, members, metav1.ConditionTrue, "ResolvedRefs")
+
+	if err := r.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	r.APIReader = denyServiceRead{Reader: r.Client, namespace: remote.Namespace}
+	if err := original.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("a grant withdrawal did not fence the previous UDP graph: %v", err)
+	}
+	partial := []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 1}}
+	revoked := reconcile()
+	check(revoked, cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial, metav1.ConditionFalse, "RefNotPermitted")
+
+	grant.ResourceVersion = ""
+	if err := r.Create(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	r.APIReader = r.Client
+	if err := revoked.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("a restored grant did not fence the old drop fraction: %v", err)
+	}
+	check(reconcile(), cloud.UDPPacketDrop{Denominator: 1}, members, metav1.ConditionTrue, "ResolvedRefs")
+
+	if err := r.Delete(t.Context(), remoteEndpoints); err != nil {
+		t.Fatal(err)
+	}
+	check(reconcile(), cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial, metav1.ConditionTrue, "ResolvedRefs")
+	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return false, nil }
+	plan, err := r.planRoute(t.Context(), viewRoute(route), id, true)
+	if err != nil || plan.desired != nil || !plan.detach {
+		t.Fatalf("unavailable drop capability did not fail closed: %+v, %v", plan, err)
+	}
+}
+
+func TestUDPPacketDropKeepsInvalidZeroWeightOutOfTheFraction(t *testing.T) {
+	gateway, class, route := udpRouteFixture()
+	local, service, endpoints := udpBackendFixture(route.Namespace, "primary", 3, "10.1.2.3")
+	missing, _, _ := udpBackendFixture(route.Namespace, "missing", 0)
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{local, missing}
+	r := testReconciler(t, gateway, class, route, service, endpoints)
+	r.Protocol, r.Config.UDPPacketDrop = gatewayv1.UDPProtocolType, true
+	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
+	id := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	plan, err := r.planRoute(t.Context(), viewRoute(route), id, true)
+	if err != nil || plan.desired == nil || plan.detach || plan.resolved.Reason != "BackendNotFound" ||
+		plan.desired.UDPPacketDrop == nil || *plan.desired.UDPPacketDrop != (cloud.UDPPacketDrop{Denominator: 1}) {
+		t.Fatalf("zero-weight reference altered the UDP forwarding share: %+v, %v", plan, err)
+	}
+}
 
 func TestUDPNodePortSelectsVIPFamilyOnDualStackWorker(t *testing.T) {
 	gateway, _, route := udpRouteFixture()
