@@ -1523,6 +1523,7 @@ func buildRoutePolicyPlan(
 			(desired.fixedResponse || weighted != nil && allWeightedTargetsFixed(weighted.targets))
 		if targetUpdate {
 			step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.ID, parentID: poolID,
+				policy:                  desiredPolicy{grpcContentTypeRule: wantedPolicy.grpcContentTypeRule},
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch, requestURLRewriteUpdate: rewritePatch}
 			if weighted != nil {
 				step.weightedTargets = &weighted.targets
@@ -1545,6 +1546,7 @@ func buildRoutePolicyPlan(
 				rewritePatch.KeepPolicyState = true
 			}
 			step := routeMutation{kind: routeMutationSetRequestMirrors, id: policy.ID,
+				policy:                  desiredPolicy{grpcContentTypeRule: wantedPolicy.grpcContentTypeRule},
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch, requestURLRewriteUpdate: rewritePatch}
 			setRequestMirrorUpdate(&step, wantedPolicy, observedPolicy)
 			plan = append(plan, step)
@@ -1557,6 +1559,7 @@ func buildRoutePolicyPlan(
 			plan = append(plan, step)
 		} else if headersUpdate {
 			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHeaders, id: policy.ID,
+				policy:                  desiredPolicy{grpcContentTypeRule: wantedPolicy.grpcContentTypeRule},
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch})
 		}
 		policyActionUpdate := weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, observedPolicy, poolID)

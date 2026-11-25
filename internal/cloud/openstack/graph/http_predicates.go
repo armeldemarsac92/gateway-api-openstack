@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
@@ -57,9 +58,7 @@ var (
 			return policy.grpcContentTypeRule == grpcContentTypeRuleType
 		},
 		observed: func(policy observedRoutePolicy) bool {
-			return !observedPolicyDisabled(policy) && slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
-				return rule.base == openstackidentity.RoleRuleGRPCContentType && rule.rule.RuleType == string(grpcContentTypeRuleType)
-			})
+			return !observedPolicyDisabled(policy) && policy.hasNativeGRPCContentType()
 		},
 	}
 	responseHeaderModifierPolicy = protectedHTTPPredicate{
@@ -73,7 +72,30 @@ var (
 			return slices.Equal(wanted.responseHeaderOperations, observed.responseHeaderOperations)
 		},
 	}
+	grpcBinaryResponseMetadataPolicy = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityGRPCBinaryMetadata,
+		label:      "gRPC binary response metadata",
+		required: func(policy desiredPolicy) bool {
+			return policy.grpcContentTypeRule == grpcContentTypeRuleType && hasGRPCBinaryMetadataList(policy.responseHeaderOperations)
+		},
+		observed: func(policy observedRoutePolicy) bool {
+			return !observedPolicyDisabled(policy) && policy.hasNativeGRPCContentType() && hasGRPCBinaryMetadataList(policy.responseHeaderOperations)
+		},
+		settled: responseHeaderModifierPolicy.settled,
+	}
 )
+
+func (policy observedRoutePolicy) hasNativeGRPCContentType() bool {
+	return slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+		return rule.base == openstackidentity.RoleRuleGRPCContentType && rule.rule.RuleType == string(grpcContentTypeRuleType)
+	})
+}
+
+func hasGRPCBinaryMetadataList(operations []cloud.HTTPHeaderOperation) bool {
+	return slices.ContainsFunc(operations, func(operation cloud.HTTPHeaderOperation) bool {
+		return operation.Operation != cloud.HTTPHeaderRemove && strings.HasSuffix(operation.Name, "-bin") && strings.Contains(operation.Value, ",")
+	})
+}
 
 func (policy desiredPolicy) requiresExactQueryParams() bool {
 	return len(policy.queryParams) != 0 || policy.redirect != nil &&

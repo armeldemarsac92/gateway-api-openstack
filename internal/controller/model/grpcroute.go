@@ -17,11 +17,16 @@ limitations under the License.
 package model
 
 import (
+	"encoding/base64"
+	"fmt"
 	"regexp"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 const (
@@ -69,13 +74,18 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 			lowered.BackendRefs = append(lowered.BackendRefs, gatewayv1.HTTPBackendRef{BackendRef: *backend.BackendRef.DeepCopy()})
 		}
 		for _, filter := range rule.Filters {
-			if filter.Type != gatewayv1.GRPCRouteFilterRequestHeaderModifier {
+			var header gatewayv1.HTTPRouteFilter
+			switch filter.Type {
+			case gatewayv1.GRPCRouteFilterRequestHeaderModifier:
+				header.Type = gatewayv1.HTTPRouteFilterRequestHeaderModifier
+				header.RequestHeaderModifier = filter.RequestHeaderModifier.DeepCopy()
+			case gatewayv1.GRPCRouteFilterResponseHeaderModifier:
+				header.Type = gatewayv1.HTTPRouteFilterResponseHeaderModifier
+				header.ResponseHeaderModifier = filter.ResponseHeaderModifier.DeepCopy()
+			default:
 				return projected
 			}
-			lowered.Filters = append(lowered.Filters, gatewayv1.HTTPRouteFilter{
-				Type:                  gatewayv1.HTTPRouteFilterRequestHeaderModifier,
-				RequestHeaderModifier: filter.RequestHeaderModifier.DeepCopy(),
-			})
+			lowered.Filters = append(lowered.Filters, header)
 		}
 		for _, match := range rule.Matches {
 			projectedMatch, ok := projectGRPCMatch(match)
@@ -88,6 +98,42 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 	}
 	projected.Spec.Rules = rules
 	return projected
+}
+
+// gRPC status can share a headers block with application metadata on an
+// immediate error. Leave protocol fields under the origin and transport's control.
+func validateGRPCResponseMetadata(operations []cloud.HTTPHeaderOperation) *Diagnostic {
+	fields := 0
+	for _, op := range operations {
+		switch {
+		case op.Name == "content-type" || strings.HasPrefix(op.Name, "grpc-"):
+			return unsupported(fmt.Sprintf("response header %q is managed by gRPC", op.Name), ScopeRule)
+		case !cloud.ValidGRPCMetadataName(op.Name):
+			return unsupported(fmt.Sprintf("invalid gRPC response metadata name %q", op.Name), ScopeRule)
+		case op.Operation == cloud.HTTPHeaderRemove:
+			continue
+		case strings.HasSuffix(op.Name, "-bin"):
+			fields += 1 + strings.Count(op.Value, ",")
+			for value := range strings.SplitSeq(op.Value, ",") {
+				value = strings.Trim(value, " ")
+				encoding := base64.RawStdEncoding
+				if strings.HasSuffix(value, "=") {
+					encoding = base64.StdEncoding
+				}
+				if _, err := encoding.Strict().DecodeString(value); err != nil {
+					return unsupported(fmt.Sprintf("gRPC binary metadata %q requires base64 values", op.Name), ScopeRule)
+				}
+			}
+		case strings.ContainsFunc(op.Value, func(r rune) bool { return r < ' ' || r > '~' }):
+			return unsupported(fmt.Sprintf("gRPC response metadata %q requires printable ASCII", op.Name), ScopeRule)
+		default:
+			fields++
+		}
+		if fields > cloud.MaxHTTPHeaderOperations {
+			return unsupported(fmt.Sprintf("gRPC response metadata can set or add at most %d fields after expanding binary values", cloud.MaxHTTPHeaderOperations), ScopeRule)
+		}
+	}
+	return nil
 }
 
 func projectGRPCMatch(match gatewayv1.GRPCRouteMatch) (gatewayv1.HTTPRouteMatch, bool) {

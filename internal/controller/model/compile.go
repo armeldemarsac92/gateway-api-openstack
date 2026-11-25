@@ -203,7 +203,8 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	for i, rule := range route.Spec.Rules {
 		// Rule names identify API sections. The index groups matches by rule and breaks precedence ties.
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
-		ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
+		kind := HTTPProfileRouteKind(route)
+		ordinaryHTTP := kind == HTTPRouteKind
 		mirrorEnabled := input.HTTPRequestMirror && ordinaryHTTP
 		mirrors, diagnostic := NormalizeRequestMirrors(rule.Filters, mirrorEnabled, len(rule.BackendRefs) > 0)
 		if diagnostic != nil {
@@ -229,8 +230,8 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 		} else {
 			forwarding := rule
 			forwarding.Filters = WithoutRequestMirrorFilters(rule.Filters)
-			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(forwarding, input.RequestHeaderModifier,
-				input.ResponseHeaderModifier && ordinaryHTTP, input.HTTPRequestURLRewrite && ordinaryHTTP, input.HTTPCORS && ordinaryHTTP)
+			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(forwarding, kind, input.RequestHeaderModifier,
+				input.ResponseHeaderModifier, input.HTTPRequestURLRewrite && ordinaryHTTP, input.HTTPCORS && ordinaryHTTP)
 			if diagnostic != nil {
 				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
 					diagnostic.Scope = ScopeRoute

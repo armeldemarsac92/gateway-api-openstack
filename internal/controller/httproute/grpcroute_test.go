@@ -171,6 +171,67 @@ func TestGRPCRequestHeaderModifierFollowsItsMethod(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("request headers by method = %#v, want %#v", got, want)
 	}
+
+	response := &gatewayv1.HTTPHeaderFilter{
+		Set:    []gatewayv1.HTTPHeader{{Name: "X-Reply", Value: "blue"}},
+		Add:    []gatewayv1.HTTPHeader{{Name: "Trace-Bin", Value: "YQ==, Yg"}},
+		Remove: []string{"X-Private"},
+	}
+	route.Spec.Rules[0].Filters = append(route.Spec.Rules[0].Filters, gatewayv1.GRPCRouteFilter{
+		Type: gatewayv1.GRPCRouteFilterResponseHeaderModifier, ResponseHeaderModifier: response,
+	})
+	r := &Reconciler{Config: cfg}
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil {
+		t.Fatal("response header operations require their own enrollment")
+	}
+	r.Config.ResponseHeaderModifier = true
+	desired, err = r.buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReply := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-reply", Value: "blue"},
+		{Operation: cloud.HTTPHeaderAdd, Name: "trace-bin", Value: "YQ==, Yg"},
+		{Operation: cloud.HTTPHeaderRemove, Name: "x-private"},
+	}
+	if len(desired.HTTPBackends) != 1 || len(desired.HTTPBackends[0].Matches) != 2 {
+		t.Fatalf("want both methods on their shared backend, got %#v", desired.HTTPBackends)
+	}
+	for _, match := range desired.HTTPBackends[0].Matches {
+		var reply []cloud.HTTPHeaderOperation
+		if match.PathValue == "/example.Echo/Marked" {
+			reply = wantReply
+		}
+		if !reflect.DeepEqual(match.ResponseHeaderOperations, reply) || !reflect.DeepEqual(match.RequestHeaderOperations, want[match.PathValue]) {
+			t.Fatalf("incorrect request or response metadata for %s: %#v", match.PathValue, match)
+		}
+	}
+	for _, invalid := range []gatewayv1.HTTPHeader{
+		{Name: "GRPC-Status", Value: "0"}, {Name: "Content-Type", Value: "text/plain"},
+		{Name: "bad+name", Value: "v"}, {Name: "trace-bin", Value: "%%%"},
+		{Name: "trace-bin", Value: "Yh=="}, {Name: "trace-bin", Value: "Yh"},
+		{Name: "reply", Value: "café"},
+	} {
+		response.Set = []gatewayv1.HTTPHeader{invalid}
+		response.Add = nil
+		_, err := r.validateRouteStructure(model.ProjectGRPCRoute(route))
+		if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(string(invalid.Name))) {
+			t.Errorf("want a diagnostic for %q, got %v", invalid.Name, err)
+		}
+	}
+	response.Set = []gatewayv1.HTTPHeader{
+		{Name: "replace-bin", Value: strings.Repeat("YQ==, ", 22) + "YQ=="},
+		{Name: "x-reply", Value: "blue"},
+	}
+	response.Add = []gatewayv1.HTTPHeader{{Name: "trace-bin", Value: strings.Repeat("Yg, ", 23) + "Yg"}}
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err != nil {
+		t.Fatalf("48 output fields plus REMOVE should be accepted: %v", err)
+	}
+	response.Add[0].Value += ", Yg"
+	_, err = r.validateRouteStructure(model.ProjectGRPCRoute(route))
+	if unsupported, ok := err.(*routeBuildError); !ok || unsupported.kind != routeErrorUnsupported || !strings.Contains(err.Error(), "48 fields") {
+		t.Fatalf("49 output fields should be rejected as unsupported: %v", err)
+	}
 }
 
 func TestGRPCRouteWeightedH2CBackends(t *testing.T) {

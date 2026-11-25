@@ -806,7 +806,8 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityRequestCORS ||
 		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityHTTPRequestMirror ||
 		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
-		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
+		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType ||
+		blocked.capability == octavia.GatewayCapabilityGRPCBinaryMetadata
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -918,6 +919,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if len(step.route.responseHeaderOperations) != 0 || requiresRewrite && len(step.route.policy.responseHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityResponseHeaderOperations)
 		}
+		if step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType && hasGRPCBinaryMetadataList(step.route.responseHeaderOperations) {
+			required = append(required, octavia.GatewayCapabilityGRPCBinaryMetadata)
+		}
 		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
@@ -963,13 +967,11 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	}
 	var missingResponseHeaders *octavia.MissingGatewayCapability
 	if withdrawTarget && len(step.route.responseHeaderOperations) != 0 &&
-		errors.As(err, &missingResponseHeaders) && missingResponseHeaders.Capability == octavia.GatewayCapabilityResponseHeaderOperations {
+		errors.As(err, &missingResponseHeaders) && isResponseHeaderCapability(missingResponseHeaders.Capability) {
 		// Retain the installed operations if the region no longer accepts
 		// new ones. The restrictive action still needs its own capability.
 		step.route.responseHeaderOperations = nil
-		required = slices.DeleteFunc(required, func(capability string) bool {
-			return capability == octavia.GatewayCapabilityResponseHeaderOperations
-		})
+		required = slices.DeleteFunc(required, isResponseHeaderCapability)
 		err = verify(ctx, desired, actual, required)
 	}
 	if err != nil {
@@ -1003,6 +1005,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityResponseHeaderOperations) && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityResponseHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityResponseHeaderOperations}
+			} else if slices.Contains(required, octavia.GatewayCapabilityGRPCBinaryMetadata) && !step.withdrawHTTPPolicy &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityGRPCBinaryMetadata) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityGRPCBinaryMetadata}
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}
@@ -1033,6 +1038,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		return step, err
 	}
 	return p.preparePolicyCreation(ctx, actual, desired, step)
+}
+
+func isResponseHeaderCapability(capability string) bool {
+	return capability == octavia.GatewayCapabilityResponseHeaderOperations || capability == octavia.GatewayCapabilityGRPCBinaryMetadata
 }
 
 func (actual observedGatewayGraph) policyListener(route observedRouteGraph, id string) *listeners.Listener {
