@@ -19,6 +19,7 @@ package graph
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 
@@ -36,6 +37,7 @@ type protectedHTTPPredicate struct {
 	observed               func(observedRoutePolicy) bool
 	settled                func(desiredPolicy, observedRoutePolicy) bool
 	additionalCapabilities func(desiredPolicy) []string
+	stageWhileClosed       bool
 }
 
 var (
@@ -83,6 +85,36 @@ var (
 		},
 		settled: responseHeaderModifierPolicy.settled,
 	}
+	grpcBinaryRequestMetadataPolicy = protectedHTTPPredicate{
+		capability:       octavia.GatewayCapabilityGRPCBinaryRequestMetadata,
+		label:            "gRPC binary request metadata",
+		stageWhileClosed: true,
+		additionalCapabilities: func(policy desiredPolicy) []string {
+			required := []string{octavia.GatewayCapabilityGRPCContentType}
+			if len(policy.requestHeaderOperations) != 0 {
+				required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
+			}
+			if policy.weighted {
+				required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses)
+			}
+			if policy.targetRequestFilters != nil {
+				required = append(required, octavia.GatewayCapabilityTargetRequestFilters)
+			}
+			return required
+		},
+		required: func(policy desiredPolicy) bool {
+			return policy.grpcContentTypeRule == grpcContentTypeRuleType &&
+				(hasGRPCBinaryMetadataList(policy.requestHeaderOperations) || hasGRPCBinaryTargetMetadata(policy.targetRequestFilters))
+		},
+		observed: func(policy observedRoutePolicy) bool {
+			return !observedPolicyDisabled(policy) && policy.hasNativeGRPCContentType() &&
+				(hasGRPCBinaryMetadataList(policy.requestHeaderOperations) || hasGRPCBinaryTargetMetadata(policy.weightedTargets))
+		},
+		settled: func(wanted desiredPolicy, observed observedRoutePolicy) bool {
+			return slices.Equal(wanted.requestHeaderOperations, observed.requestHeaderOperations) &&
+				(wanted.weightedPlan == nil || slices.EqualFunc(wanted.weightedPlan.targets, observed.weightedTargets, weightedTargetsEqual))
+		},
+	}
 )
 
 func (policy observedRoutePolicy) hasNativeGRPCContentType() bool {
@@ -94,6 +126,12 @@ func (policy observedRoutePolicy) hasNativeGRPCContentType() bool {
 func hasGRPCBinaryMetadataList(operations []cloud.HTTPHeaderOperation) bool {
 	return slices.ContainsFunc(operations, func(operation cloud.HTTPHeaderOperation) bool {
 		return operation.Operation != cloud.HTTPHeaderRemove && strings.HasSuffix(operation.Name, "-bin") && strings.Contains(operation.Value, ",")
+	})
+}
+
+func hasGRPCBinaryTargetMetadata(targets []octavia.WeightedHTTPTarget) bool {
+	return slices.ContainsFunc(targets, func(target octavia.WeightedHTTPTarget) bool {
+		return hasGRPCBinaryMetadataList(target.RequestHeaderOperations)
 	})
 }
 
@@ -113,8 +151,9 @@ type guardedHTTPListener struct {
 
 // protectHTTPPredicateTraffic uses the same verified listener and policy inventory
 // as the graph writer. A confirmed revocation closes the port before changing
-// its predicates. A discovery error alone leaves an existing port serving. The
-// second result reports whether a revoked listener was observed closed.
+// its predicates. Transitions that must preserve priority also close the port
+// before changing its policies. The second result reports whether a revoked
+// listener was observed closed.
 func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult, predicate protectedHTTPPredicate) ([]graphMutation, bool) {
 	if desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return plan, false
@@ -137,16 +176,15 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 	if len(states) == 0 {
 		return plan, false
 	}
-	if predicate.observed != nil {
-		// Creation and activation have their own capability checks. Reprobe
-		// here only when readback shows previously installed operations.
-		installed := false
-		for _, state := range states {
-			installed = installed || state.installed
-		}
-		if !installed {
-			return plan, false
-		}
+	installed, staging := false, false
+	for _, state := range states {
+		installed = installed || state.installed
+		staging = staging || predicate.stageWhileClosed && state.unsettledDesired
+	}
+	if predicate.observed != nil && !installed && !staging {
+		// New policies have their own write and activation checks unless
+		// their transition also needs a closed listener.
+		return plan, false
 	}
 	policyListeners := make(map[string]string)
 	for _, listener := range observedListeners {
@@ -167,13 +205,15 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		return step.listenerID
 	}
 	var discoveryErr error
-	if actual.loadBalancer != nil {
+	if actual.loadBalancer != nil && (installed || !predicate.stageWhileClosed) {
 		discoveryErr = p.verifyGatewayHTTPCapabilities(ctx, desired, actual, []string{predicate.capability})
 	}
 	var missing *octavia.MissingGatewayCapability
 	confirmedMissing := errors.As(discoveryErr, &missing)
 	frontendBlocked := make(map[string]bool)
 	closedByID := make(map[string]bool, len(observedListeners))
+	stagingByID := make(map[string]bool)
+	discoveryByRequirements := make(map[string]error)
 	waiting := "Waiting for Octavia " + predicate.label + " policies to be verified"
 	unavailable := "Octavia withdrew the " + predicate.label + " capability on this listener"
 	// An explicit route withdrawal must remain possible during a discovery
@@ -199,6 +239,32 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		}
 		closed := actual.adminObserved[listener.ID] && !listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
 		closedByID[listener.ID] = closed
+		if predicate.stageWhileClosed && state.unsettledDesired {
+			// A disabled legacy predicate would expose lower-priority
+			// policies before Octavia can install or activate its replacement.
+			required := append([]string{predicate.capability}, slices.Sorted(maps.Keys(state.additionalCapabilities))...)
+			key := strings.Join(required, ",")
+			err, checked := discoveryByRequirements[key]
+			if !checked && actual.loadBalancer != nil {
+				err = p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, required)
+				discoveryByRequirements[key] = err
+			}
+			reason := waiting
+			var missingCapability *octavia.MissingGatewayCapability
+			if errors.As(err, &missingCapability) {
+				reason = "Octavia does not advertise " + missingCapability.Capability
+			} else if err != nil {
+				reason = "Could not verify Octavia capability " + strings.Join(required, ", ")
+			}
+			p.markGuardedHTTPListener(result, listener.ProtocolPort, state.frontendRoutes, reason)
+			result.Gateway.HTTPPolicyTransition = true
+			frontendBlocked[listener.ID] = true
+			stagingByID[listener.ID] = actual.loadBalancer != nil && err == nil
+			if !closed && (listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR") {
+				return []graphMutation{closeGuardedHTTPListener(listener, reason)}, confirmedClosed
+			}
+			continue
+		}
 		// New policies are gated separately. Close a listener only when
 		// ownership inventory proves an installed dependency was withdrawn.
 		if confirmedMissing && !state.installed {
@@ -228,7 +294,9 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		switch step.kind {
 		case graphEnableListener:
 			if frontendBlocked[listenerID] {
-				p.markGuardedHTTPListener(result, portByID[listenerID], state.frontendRoutes, waiting)
+				if _, staging := stagingByID[listenerID]; !staging {
+					p.markGuardedHTTPListener(result, portByID[listenerID], state.frontendRoutes, waiting)
+				}
 				return true
 			}
 		case graphEnableLoadBalancer:
@@ -239,6 +307,13 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 				}
 			}
 		case graphRouteMutation:
+			if available, staging := stagingByID[listenerID]; staging && isHTTPPolicyMutation(step.route.kind) {
+				clearRequestHeaders := step.route.kind == routeMutationSetPolicyHeaders &&
+					step.route.requestHeaderOperations != nil && len(step.route.requestHeaderOperations) == 0
+				if !closedByID[listenerID] || !available && !step.withdrawHTTPPolicy && !clearRequestHeaders {
+					return true
+				}
+			}
 			// Restrictive target updates leave the guarded predicate in place.
 			if step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget {
 				return false

@@ -460,6 +460,42 @@ independently of the fixed-response and weighted-target flags.
 Kustomize deployments can add the standalone `config/components/octavia-request-header-modifier` component.
 [Provider setup and API contract](qualification/v1.7.0/provider/octavia-policy-header-proposal.md) · [Local qualification](qualification/v1.7.0/provider/opt-in-request-header-modifier.md)
 
+### Request metadata on a GRPCRoute
+
+With the gRPC transport profile enabled, put `RequestHeaderModifier` in a
+GRPCRoute rule to modify request metadata for the selected RPC. The rule uses
+`--octavia-request-header-modifier` and `request_header_operations_v1`.
+
+To edit metadata only for a selected backend, put the same filter under its
+`backendRefs[].filters` entry. Enable `--octavia-fixed-http-responses`,
+`--octavia-weighted-http-targets` and `--octavia-http-backend-request-filters`.
+The Octavia region must advertise `fixed_http_responses_v1`,
+`weighted_http_targets_v1` and `weighted_http_target_request_filters_v1`.
+The controller uses a weighted target even for a single filtered backend. Rule
+operations run first, then the operations for the selected backend. Each
+backend keeps its configured weight and its own set, add and remove operations.
+Removing a filter withdraws its operations from Octavia. Backend-level
+`ResponseHeaderModifier` and `RequestMirror` are separate features.
+
+Custom metadata uses printable ASCII, or standard base64 for names ending in
+`-bin`. The gRPC transport manages the `grpc-` namespace, `content-type`,
+`host` and HTTP/2 framing headers including `te` and `content-length`. Each
+modifier list, at the rule or at a backend, can set or add up to 48 fields
+after expansion. Remove operations create no fields.
+
+A comma-separated list for a gRPC binary set or add uses a native
+`GRPC_CONTENT_TYPE` match and requires `grpc_content_type_v1` and
+`grpc_binary_request_metadata_v1` in addition to the capability for its scope.
+The controller selects the native match automatically for these RPCs. Amphora
+sends each base64 value as a separate request field. Single binary values keep
+the existing capability requirements. When an existing rule needs this
+transition, the controller closes the affected listener before changing the
+serving policy. It reopens the listener after verifying that the updated policy
+is active in its original order. Removing the list can proceed during a
+regional capability withdrawal.
+
+### Response header modification
+
 With a compatible provider advertising `response_header_operations_v1`, add
 `--octavia-response-header-modifier` or use
 `config/octavia-response-header-modifier` to enable rule-level
@@ -483,9 +519,9 @@ response, gRPC carries all fields in one header block and the client receives
 that block's modified custom metadata as trailers.
 
 The modifier works with configured forwarding, weighted and fixed HTTP
-actions. A rule combining this filter with `RequestRedirect`, a filter on a
-`backendRef`, or a modification to a listener-managed connection or framing
-header is rejected. Removing the filter clears its operations in Octavia.
+actions. A rule that combines this filter with `RequestRedirect` or modifies a
+listener-managed connection or framing header is rejected. Response modifiers
+apply at rule scope. Removing the filter clears its operations in Octavia.
 If reconciliation confirms that an active policy's provider stopped
 advertising the capability, the controller closes the affected listener until
 it can verify the policy again or withdraw the response operations. [Provider packages and local traffic results](qualification/v1.7.0/provider/opt-in-response-header-modifier.md)

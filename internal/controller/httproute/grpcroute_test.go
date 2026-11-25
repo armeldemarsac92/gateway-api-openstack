@@ -290,6 +290,154 @@ func TestGRPCRouteWeightedH2CBackends(t *testing.T) {
 	}
 }
 
+func TestGRPCRouteBackendRequestHeaderModifierStaysOnSelectedTarget(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets = true, true, true
+	cfg.RequestHeaderModifier, cfg.BackendRequestFilters = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	v1, ep1, node := validNodePortBackend(gateway.Namespace, "v1")
+	v2, ep2, _ := validNodePortBackend("services", "v2")
+	for _, service := range []*corev1.Service{v1, v2} {
+		service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	}
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: v2.Namespace, Name: "grant"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: model.GRPCRouteKind, Namespace: gatewayv1.Namespace(gateway.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(v2.Name))}},
+		},
+	}
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(v1, ep1, v2, ep2, node, grant).Build()
+	match := func(method string) gatewayv1.GRPCRouteMatch {
+		return gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To(method)}}
+	}
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "request-metadata", UID: "route-uid"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
+	rule := grpcRule("v1", match("Filtered"))
+	rule.Filters = []gatewayv1.GRPCRouteFilter{{
+		Type: gatewayv1.GRPCRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+			Set: []gatewayv1.HTTPHeader{{Name: "X-Mode", Value: "rule"}, {Name: "Trace-Bin", Value: "YQ=="}},
+		},
+	}}
+	target := grpcRule("v2").BackendRefs[0]
+	target.Namespace, target.Weight = ptr.To(gatewayv1.Namespace(v2.Namespace)), ptr.To[int32](25)
+	target.Filters = []gatewayv1.GRPCRouteFilter{{
+		Type: gatewayv1.GRPCRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+			Set:    []gatewayv1.HTTPHeader{{Name: "X-Mode", Value: "target"}},
+			Add:    []gatewayv1.HTTPHeader{{Name: "Trace-Bin", Value: "Yg, Yw=="}},
+			Remove: []string{"X-Legacy"},
+		},
+	}}
+	rule.BackendRefs[0].Weight = ptr.To[int32](75)
+	rule.BackendRefs = append(rule.BackendRefs, target)
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{rule, grpcRule("v1", match("Plain"))}
+	r := &Reconciler{Config: cfg}
+	build := func() *cloud.RouteSpec {
+		t.Helper()
+		desired, err := r.buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !desired.GRPC || len(desired.WeightedHTTPRules) != 1 {
+			t.Fatalf("expected one weighted gRPC rule: %#v", desired)
+		}
+		return &desired
+	}
+	desired := build()
+	weighted := desired.WeightedHTTPRules[0]
+	wantRule := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-mode", Value: "rule"},
+		{Operation: cloud.HTTPHeaderSet, Name: "trace-bin", Value: "YQ=="},
+	}
+	wantTarget := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-mode", Value: "target"},
+		{Operation: cloud.HTTPHeaderAdd, Name: "trace-bin", Value: "Yg, Yw=="},
+		{Operation: cloud.HTTPHeaderRemove, Name: "x-legacy"},
+	}
+	if len(weighted.Matches) != 1 || !reflect.DeepEqual(weighted.Matches[0].RequestHeaderOperations, wantRule) ||
+		len(weighted.Targets) != 2 || weighted.Targets[0].Weight != 75 || weighted.Targets[1].Weight != 25 ||
+		len(weighted.Targets[0].RequestHeaderOperations) != 0 || !reflect.DeepEqual(weighted.Targets[1].RequestHeaderOperations, wantTarget) {
+		t.Fatalf("incorrect rule and target scopes: %#v", weighted)
+	}
+	for i, ref := range rule.BackendRefs {
+		index := weighted.Targets[i].BackendIndex
+		if index == nil || desired.HTTPBackends[*index].Name != string(ref.Name) || !desired.HTTPBackends[*index].BackendH2C {
+			t.Fatalf("target %d lost the selected h2c Service: %#v", i, desired.HTTPBackends)
+		}
+	}
+	plain := desired.HTTPBackends[*weighted.Targets[0].BackendIndex].Matches
+	if len(plain) != 1 || plain[0].PathValue != "/example.Echo/Plain" || len(plain[0].RequestHeaderOperations) != 0 {
+		t.Fatalf("metadata leaked into the plain method on a shared Service: %#v", plain)
+	}
+
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.GRPCBackendRef{target}
+	weighted = build().WeightedHTTPRules[0]
+	if len(weighted.Targets) != 1 || !reflect.DeepEqual(weighted.Targets[0].RequestHeaderOperations, wantTarget) ||
+		len(weighted.Matches) != 1 || !reflect.DeepEqual(weighted.Matches[0].RequestHeaderOperations, wantRule) {
+		t.Fatalf("a sole filtered backend should still use its own weighted target: %#v", weighted)
+	}
+	r.Config.WeightedHTTPTargets = false
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil || !strings.Contains(err.Error(), "--octavia-weighted-http-targets") {
+		t.Fatalf("want the weighted target opt-in diagnostic, got %v", err)
+	}
+	r.Config.WeightedHTTPTargets = true
+	r.Config.BackendRequestFilters = false
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil || !strings.Contains(err.Error(), "--octavia-http-backend-request-filters") {
+		t.Fatalf("want the backend request filter opt-in diagnostic, got %v", err)
+	}
+	r.Config.BackendRequestFilters = true
+
+	route.Spec.Rules[0].BackendRefs = rule.BackendRefs
+	grant.Spec.From[0].Kind = model.HTTPRouteKind
+	if err := reader.Update(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	weighted = build().WeightedHTTPRules[0]
+	revoked := weighted.Targets[1]
+	if revoked.Weight != 25 || revoked.BackendIndex != nil || len(revoked.RequestHeaderOperations) != 0 || weighted.Targets[0].BackendIndex == nil {
+		t.Fatalf("withdrawing the GRPCRoute grant must retain the failure share: %#v", weighted.Targets)
+	}
+}
+
+func TestGRPCRequestMetadataValidatesRuleAndBackendScopes(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets = true, true, true
+	cfg.RequestHeaderModifier, cfg.BackendRequestFilters = true, true
+	r := &Reconciler{Config: cfg}
+	route := &gatewayv1.GRPCRoute{}
+	ruleFilter := &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "trace-bin", Value: strings.Repeat("YQ==, ", 47) + "YQ=="}}}
+	targetFilter := &gatewayv1.HTTPHeaderFilter{Add: []gatewayv1.HTTPHeader{{Name: "trace-bin", Value: strings.Repeat("Yg, ", 47) + "Yg"}}, Remove: []string{"private-bin"}}
+	rule := grpcRule("v1")
+	rule.Filters = []gatewayv1.GRPCRouteFilter{{Type: gatewayv1.GRPCRouteFilterRequestHeaderModifier, RequestHeaderModifier: ruleFilter}}
+	rule.BackendRefs[0].Filters = []gatewayv1.GRPCRouteFilter{{Type: gatewayv1.GRPCRouteFilterRequestHeaderModifier, RequestHeaderModifier: targetFilter}}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{rule}
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err != nil {
+		t.Fatalf("the rule and target each have an independent 48-field budget: %v", err)
+	}
+	targetFilter.Add[0].Value += ", Yg"
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil || !strings.Contains(err.Error(), "48 fields") {
+		t.Fatalf("want the expanded field limit diagnostic, got %v", err)
+	}
+	targetFilter.Add = nil
+	for _, invalid := range []gatewayv1.HTTPHeader{
+		{Name: "GRPC-Timeout", Value: "1S"}, {Name: "Content-Type", Value: "text/plain"},
+		{Name: "Host", Value: "example.test"}, {Name: "TE", Value: "trailers"}, {Name: "Content-Length", Value: "1"},
+		{Name: "bad+name", Value: "blue"}, {Name: "trace-bin", Value: "Yh=="}, {Name: "mode", Value: "café"},
+	} {
+		ruleFilter.Set = []gatewayv1.HTTPHeader{invalid}
+		if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(string(invalid.Name))) {
+			t.Errorf("want a diagnostic for %q, got %v", invalid.Name, err)
+		}
+	}
+	ruleFilter.Set = nil
+	route.Spec.Rules[0].BackendRefs[0].Filters[0].Type = gatewayv1.GRPCRouteFilterResponseHeaderModifier
+	if _, err := r.validateRouteStructure(model.ProjectGRPCRoute(route)); err == nil {
+		t.Fatal("unsupported backend filters must reject the route")
+	}
+}
+
 func TestGRPCDefaultAndServiceRulesUseMethodPrecedence(t *testing.T) {
 	cfg := testConfig()
 	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true

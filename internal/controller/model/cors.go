@@ -47,7 +47,11 @@ func NormalizeHTTPForwardingRuleFilters(rule gatewayv1.HTTPRouteRule, kind gatew
 	}
 	request, response, rewrite, diagnostic := NormalizeHTTPRuleFilters(rule, requestEnabled, responseEnabled, rewriteEnabled)
 	if diagnostic == nil && kind == GRPCRouteKind {
-		diagnostic = validateGRPCResponseMetadata(response)
+		if err := cloud.ValidateGRPCRequestMetadata(request); err != nil {
+			diagnostic = unsupported(err.Error(), ScopeRule)
+		} else if err := cloud.ValidateGRPCResponseMetadata(response); err != nil {
+			diagnostic = unsupported(err.Error(), ScopeRule)
+		}
 	}
 	if diagnostic == nil && cors != nil {
 		diagnostic = ValidateCORSHeaderComposition(request, response)

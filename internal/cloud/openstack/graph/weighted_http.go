@@ -81,8 +81,11 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 			total += target.Weight
 			wanted := desiredHTTPWeightedTarget{weight: target.Weight}
 			if len(target.RequestHeaderOperations) != 0 || target.URLRewrite != nil {
-				if !p.backendRequestFilters || spec.GRPC || target.BackendIndex == nil || target.Weight == 0 {
+				if !p.backendRequestFilters || target.BackendIndex == nil || target.Weight == 0 {
 					return invalid(errors.New("HTTP backend request filters require opt-in and a positive forwarding target"))
+				}
+				if spec.GRPC && target.URLRewrite != nil {
+					return invalid(errors.New("GRPCRoute backendRef request filters support only request header operations"))
 				}
 				wanted.requestHeaderOperations, wanted.requestURLRewrite = target.RequestHeaderOperations, target.URLRewrite
 			}
@@ -539,6 +542,9 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			}
 			if authorized {
 				withdrawn[i].Weight = 0
+				if desired.spec.GRPC {
+					withdrawn[i].RequestHeaderOperations = nil
+				}
 				zeroed = i
 			} else {
 				withdrawn[i] = failureTarget(target.Weight)
@@ -578,6 +584,9 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			}
 			step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn,
 				policyTags: backendRequestFilterTags(withdrawn, policy, nil), retry: retry, withdrawHTTPPolicy: true}
+			if policy.hasNativeGRPCContentType() {
+				step.policy.grpcContentTypeRule = grpcContentTypeRuleType
+			}
 			if policy.hasHTTPRequestPolicy() && desired.policies[wantedIndex].requestPolicy == nil {
 				step.clearHTTPRequestPolicy(policy)
 			}

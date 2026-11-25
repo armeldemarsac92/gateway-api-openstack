@@ -154,7 +154,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "validate client certificates on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
-	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
+	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTPRoute and GRPCRoute backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject unavailable TCPRoute and TLSRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
