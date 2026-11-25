@@ -20,9 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
@@ -145,6 +147,160 @@ func TestRouteExternalAuthOptOutStagesLocalResponseWithListenerClosed(t *testing
 	require.Equal(t, graphDisableListener, plan[0].kind)
 	actual.listener.AdminStateUp = false
 	require.Equal(t, []graphMutation{create}, filter())
+}
+
+func TestGRPCAuthorizerWithdrawalOnSharedListener(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		constrain func(*desiredRoute, *observedRoutePolicy, *observedAuthPool)
+	}{
+		{name: "active mTLS pool"},
+		{name: "pool referenced from another listener", constrain: func(_ *desiredRoute, _ *observedRoutePolicy, pool *observedAuthPool) {
+			pool.pool.Listeners = append(pool.pool.Listeners, pools.ListenerID{ID: "listener-2"})
+		}},
+		{name: "changed path", constrain: func(fixed *desiredRoute, _ *observedRoutePolicy, _ *observedAuthPool) {
+			fixed.policies[0].path = "/different"
+		}},
+		{name: "changed rank", constrain: func(fixed *desiredRoute, _ *observedRoutePolicy, _ *observedAuthPool) {
+			fixed.policies[0].position++
+		}},
+		{name: "different route owner", constrain: func(_ *desiredRoute, old *observedRoutePolicy, _ *observedAuthPool) {
+			old.policy.Tags = []string{routeExternalAuthTag}
+		}},
+		{name: "live policy is not confirmed", constrain: func(_ *desiredRoute, old *observedRoutePolicy, _ *observedAuthPool) {
+			old.policy.ProvisioningStatus = "ERROR"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const poolID = "b5f68fe4-1d6d-4bba-8be6-cdd310ae6896"
+			identity := safetyTestIdentity(t)
+			originKey, fixedKey := openstackidentity.HTTPBackendKey("application", "origin", 80), openstackidentity.HTTPFixedRuleKey(1)
+			matchKey := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/secure", "")
+			oldRole := openstackidentity.HTTPFragmentRole(rolePolicyExact, originKey, matchKey)
+			fixedRole := openstackidentity.HTTPFragmentRole(rolePolicyExact, fixedKey, matchKey)
+			auth := cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC, ServiceUID: "authorizer", ServicePort: 443}
+			wanted := desiredPolicy{role: fixedRole, path: "/secure", compareType: l7policies.CompareTypeEqual, position: 2}
+			fixed := desiredRoute{identity: identity, backendKey: fixedKey, fixedResponse: true, policies: []desiredPolicy{wanted}}
+			tags := safetyRouteTags(t, identity, oldRole)
+			old := observedRoutePolicy{role: oldRole, adminObserved: true, versioned: true, targetObserved: true,
+				externalAuthPresent: true, externalAuthTagged: true, externalAuthReported: true, externalAuth: policyAuthorizer(poolID, auth),
+				policy: l7policies.L7Policy{ID: "protected", ListenerID: "listener-1", ProjectID: "project-a",
+					Position: 2, ProvisioningStatus: "ACTIVE", AdminStateUp: true, Action: string(l7policies.ActionRedirectToPool),
+					RedirectPoolID: "origin", Tags: append(slices.Clone(tags), routeExternalAuthTag)},
+				rules: []observedRouteRule{{role: openstackidentity.HTTPFragmentRole(roleRulePath, originKey, matchKey), flagsObserved: true,
+					rule: l7policies.Rule{ID: "secure-path", RuleType: string(l7policies.TypePath), CompareType: string(l7policies.CompareTypeEqual),
+						Value: "/secure", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}}}
+			authPool := observedAuthPool{pool: pools.Pool{ID: poolID, ProjectID: "project-a", Tags: []string{grpcAuthPoolTag},
+				AdminStateUp: true, ProvisioningStatus: "ACTIVE", Listeners: []pools.ListenerID{{ID: "listener-1"}},
+				TLSContainerRef: "https://barbican.example/v1/secrets/client"},
+				admin: true, members: []pools.Member{{ID: "authorizer-member", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}}
+			if test.constrain != nil {
+				test.constrain(&fixed, &old, &authPool)
+			}
+			public := desiredRoute{identity: identity, backendKey: "public",
+				policies: []desiredPolicy{{role: rolePolicyExact, path: "/public", compareType: l7policies.CompareTypeEqual, position: 1}}}
+			publicPolicy := old
+			publicPolicy.role = rolePolicyExact
+			publicPolicy.policy.ID, publicPolicy.policy.Position = "public", 1
+			publicPolicy.policy.ProvisioningStatus = "ACTIVE"
+			publicPolicy.policy.Tags = safetyRouteTags(t, identity, rolePolicyExact)
+			publicPolicy.externalAuth, publicPolicy.externalAuthPresent, publicPolicy.externalAuthTagged = nil, false, false
+			publicPolicy.rules = slices.Clone(old.rules)
+			publicPolicy.rules[0].rule.Value = "/public"
+			desired, actual := fixedHTTPPlanFixture(desiredRoute{identity: identity, httpParts: []desiredRoute{public, fixed}},
+				observedRouteGraph{httpParts: map[string]*observedRouteGraph{
+					originKey: {policies: []observedRoutePolicy{old}},
+					"public":  {policies: []observedRoutePolicy{publicPolicy}, pool: &pools.Pool{ID: "origin"}},
+				}})
+			desired.protocol, desired.spec.Gateway.Spec.ListenerPort = cloud.ListenerProtocolHTTP, 80
+			actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora", "ACTIVE"
+			actual.listener.ProtocolPort, actual.listener.ProvisioningStatus = 80, "ACTIVE"
+			actual.listener.L7Policies = []l7policies.L7Policy{{ID: publicPolicy.policy.ID}, {ID: old.policy.ID}}
+			actual.adminObserved = map[string]bool{actual.listener.ID: true}
+			actual.httpPools = &listenerFilterPoolInventory{auth: map[string]observedAuthPool{"authorizer": authPool}}
+
+			var writes []string
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
+					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": grpcAuthorizerCapabilities(nil)})
+					return
+				}
+				writes = append(writes, r.Method+" "+r.URL.Path)
+				var body struct {
+					L7Policy json.RawMessage `json:"l7policy"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				want, err := json.Marshal(map[string]any{"action": "FIXED_RESPONSE", "external_auth": nil,
+					"fixed_response": map[string]int{"status_code": 500}, "tags": append(slices.Clone(tags), grpcAuthWithdrawalTag)})
+				require.NoError(t, err)
+				require.JSONEq(t, string(want), string(body.L7Policy))
+				safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": old.policy.ID}})
+			}))
+			provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
+				ProviderConfig{RouteExternalAuthGRPC: true, FixedHTTPResponses: true})
+			result := &cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{ScopedListenerServingPorts: []int{80}}}
+			staging := graphMutation{kind: graphRouteMutation, listenerID: actual.listener.ID, backendKey: fixedKey,
+				route: routeMutation{kind: routeMutationCreatePolicy, policy: wanted}}
+			plan := provider.protectRouteAuthTraffic(t.Context(), desired, actual, []graphMutation{staging}, result)
+			require.Len(t, plan, 1)
+			if test.constrain != nil {
+				require.Equal(t, graphDisableListener, plan[0].kind)
+				require.Empty(t, result.Gateway.ScopedListenerServingPorts)
+				require.Empty(t, writes)
+				return
+			}
+			require.Equal(t, graphRouteMutation, plan[0].kind)
+			require.Equal(t, routeMutationSetPolicyTarget, plan[0].route.kind)
+			require.Equal(t, []int{80}, result.Gateway.ScopedListenerServingPorts)
+			prepared, err := provider.prepareGraphMutation(t.Context(), desired, actual, plan[0])
+			require.NoError(t, err)
+			require.NoError(t, provider.executeGraphMutation(t.Context(), desired, actual, prepared))
+			require.Equal(t, []string{"PUT /lbaas/l7policies/protected"}, writes)
+
+			// An ordinary policy in flight invalidates the whole-table proof.
+			actual.routes[0].httpParts["public"].policies[0].policy.ProvisioningStatus = "PENDING_UPDATE"
+			plan = provider.protectRouteAuthTraffic(t.Context(), desired, actual, []graphMutation{staging}, result)
+			require.Len(t, plan, 1)
+			require.Equal(t, graphDisableListener, plan[0].kind)
+			actual.routes[0].httpParts["public"].policies[0].policy.ProvisioningStatus = "ACTIVE"
+
+			// A failed reload can show the new database values while Amphora
+			// still routes to the previously active authorizer.
+			old.policy.Action, old.policy.RedirectPoolID = string(octavia.ActionFixedResponse), ""
+			old.externalAuth, old.externalAuthPresent, old.externalAuthTagged, old.fixedResponse = nil, false, false, true
+			old.policy.Tags = append(slices.Clone(tags), grpcAuthWithdrawalTag)
+			old.policy.ProvisioningStatus = "ERROR"
+			actual.routes[0].httpParts[originKey].policies[0] = old
+			plan = provider.protectRouteAuthTraffic(t.Context(), desired, actual, []graphMutation{staging}, result)
+			require.Len(t, plan, 1)
+			require.Equal(t, graphDisableListener, plan[0].kind)
+
+			old.policy.ProvisioningStatus = "ACTIVE"
+			actual.routes[0].httpParts[originKey].policies[0] = old
+			require.Equal(t, []graphMutation{staging}, provider.protectRouteAuthTraffic(t.Context(), desired, actual, []graphMutation{staging}, result))
+			parts, observed, owners := httpPlanningParts(desired, actual)
+			require.True(t, planHTTPPolicyHandovers(desired, parts, observed, owners).protected[old.policy.ID])
+
+			// Restore the grant. The fixed barrier cannot become a forwarding
+			// policy before the old authorization pool has a ready replacement.
+			forward := wanted
+			forward.role, forward.externalAuth = oldRole, &auth
+			desired.routes[0].httpParts[1] = desiredRoute{identity: identity, backendKey: originKey, policies: []desiredPolicy{forward}}
+			plan = provider.protectRouteAuthTraffic(t.Context(), desired, actual, nil, result)
+			require.Len(t, plan, 1)
+			require.Equal(t, graphDisableListener, plan[0].kind)
+			old.policy.ProvisioningStatus, old.policy.AdminStateUp = "ACTIVE", false
+			steps, _, _ := buildRoutePolicyPlan(desired.routes[0].httpParts[1], []observedRoutePolicy{old}, "origin")
+			require.Empty(t, steps)
+			forward.resolvedExternalAuth = policyAuthorizer(poolID, auth)
+			desired.routes[0].httpParts[1].policies[0] = forward
+			steps, _, _ = buildRoutePolicyPlan(desired.routes[0].httpParts[1], nil, "origin")
+			require.Len(t, steps, 1)
+			require.Equal(t, routeMutationCreatePolicy, steps[0].kind)
+			require.Equal(t, forward.resolvedExternalAuth, steps[0].policy.resolvedExternalAuth)
+		})
+	}
 }
 
 func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) {

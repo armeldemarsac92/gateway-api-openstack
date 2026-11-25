@@ -1046,6 +1046,7 @@ type routeMutation struct {
 	requestCORSUpdate        *octavia.RequestCORSUpdate
 	requestPolicyUpdate      *octavia.HTTPRequestPolicyUpdate
 	requestMirrorsUpdate     *octavia.RequestMirrorsUpdate
+	externalAuthUpdate       *octavia.PolicyExternalAuthUpdate
 	policyTags               []string
 	requiresExactHeaders     bool
 	requiresExactQueryParams bool
@@ -2175,7 +2176,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			octavia.PolicyFilters{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations, URLRewrite: step.requestURLRewriteUpdate, CORS: step.requestCORSUpdate})
 	case routeMutationSetPolicyTarget:
 		filters := octavia.PolicyFilters{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations,
-			URLRewrite: step.requestURLRewriteUpdate, CORS: step.requestCORSUpdate, RequestPolicy: step.requestPolicyUpdate, RequestMirrors: step.requestMirrorsUpdate, Tags: step.policyTags}
+			URLRewrite: step.requestURLRewriteUpdate, CORS: step.requestCORSUpdate, RequestPolicy: step.requestPolicyUpdate,
+			RequestMirrors: step.requestMirrorsUpdate, ExternalAuth: step.externalAuthUpdate, Tags: step.policyTags}
 		if step.weightedTargets != nil {
 			_, err = p.octavia.SetPolicyWeightedTargets(ctx, step.id, *step.weightedTargets, filters)
 		} else if desired.fixedResponse {

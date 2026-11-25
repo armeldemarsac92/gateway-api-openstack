@@ -78,6 +78,7 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	unverifiedClosed := make(map[string]bool)
 	requiresWithdrawal := make(map[string]bool)
 	installedOn := make(map[string]string)
+	var grpcWithdrawal *graphMutation
 	for _, listener := range frontends {
 		state, relevant := states[listener.ProtocolPort]
 		if !relevant {
@@ -117,6 +118,15 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		if available && !state.unsettled && !retryClosure {
 			continue
 		}
+		if available && predicate.capability == octavia.GatewayCapabilityPolicyExternalAuthGRPC &&
+			!state.unsettledDesired && !isHTTPListenerWithdrawal(plan) {
+			if step, ok := p.planGRPCAuthorizerWithdrawal(desired, actual, listener, state); ok {
+				if grpcWithdrawal == nil {
+					grpcWithdrawal = &step
+				}
+				continue
+			}
+		}
 		reason := "Waiting for verified Octavia " + predicate.label + " policies on this listener"
 		if !available && state.desired {
 			reason = waiting
@@ -132,6 +142,9 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		if listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR" {
 			return []graphMutation{closeGuardedHTTPListener(listener, reason)}
 		}
+	}
+	if grpcWithdrawal != nil {
+		return []graphMutation{*grpcWithdrawal}
 	}
 	return slices.DeleteFunc(plan, func(step graphMutation) bool {
 		listenerID := step.listenerID

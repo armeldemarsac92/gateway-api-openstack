@@ -595,6 +595,10 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if err != nil {
 		if step.kind == graphRouteMutation {
+			if step.route.externalAuthUpdate != nil {
+				err = p.closeAfterFailedGRPCAuthorizerWithdrawal(ctx, desired, actual, step, &result, err)
+				return result, err
+			}
 			if step.route.kind == routeMutationReplaceTransportMembers {
 				withdrawn, withdrawalErr := p.withdrawAfterRejectedTransportBatch(ctx, desired, step.routeIndex, &result, err)
 				if withdrawn {

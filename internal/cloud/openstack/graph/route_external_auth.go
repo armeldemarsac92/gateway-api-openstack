@@ -28,6 +28,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
@@ -35,6 +36,7 @@ import (
 const routeExternalAuthTag = "gw-api-route-http-external-auth-v1"
 const grpcAuthPoolTag = "gw-api-grpc-auth-pool-v1"
 const grpcAuthPoolNamePrefix = "gateway-api-grpc-auth-"
+const grpcAuthWithdrawalTag = "gw-api-grpc-auth-withdrawal-v1"
 
 var routeExternalAuthPolicy = routeAuthorizerPredicate(octavia.GatewayCapabilityPolicyExternalAuth, "")
 var routeExternalAuthGRPCPolicy = routeAuthorizerPredicate(octavia.GatewayCapabilityPolicyExternalAuthGRPC, cloud.ExternalAuthProtocolGRPC)
@@ -51,7 +53,8 @@ func routeAuthorizerPredicate(capability, protocol string) protectedHTTPPredicat
 			return wanted.externalAuth != nil && wanted.externalAuth.Protocol == protocol
 		},
 		observed: func(observed observedRoutePolicy) bool {
-			return observed.hasExternalAuth() && (observed.externalAuth == nil || observed.externalAuth.Protocol == protocol)
+			return protocol == cloud.ExternalAuthProtocolGRPC && observed.unverifiedGRPCAuthorizerWithdrawal() ||
+				observed.hasExternalAuth() && (observed.externalAuth == nil || observed.externalAuth.Protocol == protocol)
 		},
 		settled: desiredPolicy.externalAuthMatches,
 		additionalCapabilities: func(policy desiredPolicy) []string {
@@ -145,6 +148,11 @@ func policyAuthorizer(poolID string, auth cloud.ListenerExternalAuth) *octavia.P
 
 func (observed observedRoutePolicy) hasExternalAuth() bool {
 	return observed.externalAuthPresent || observed.externalAuthTagged
+}
+
+func (observed observedRoutePolicy) unverifiedGRPCAuthorizerWithdrawal() bool {
+	return slices.Contains(observed.policy.Tags, grpcAuthWithdrawalTag) &&
+		(!observed.fixedResponse || !observed.targetObserved || !observedForwardPolicySettled(observed))
 }
 
 func (observed observedRoutePolicy) externalAuthReadable() bool {
@@ -386,6 +394,144 @@ func (p *Provider) protectRouteAuthTraffic(ctx context.Context, desired desiredG
 		}
 	}
 	return plan
+}
+
+// An atomic fixed response preserves the position and predicates of one
+// revoked policy. Prove the rest of the table identical so that an ordinary
+// route being moved, removed or replaced cannot alter which policy wins.
+func (p *Provider) planGRPCAuthorizerWithdrawal(desired desiredGatewayGraph, actual observedGatewayGraph,
+	listener listeners.Listener, state guardedHTTPListener) (graphMutation, bool) {
+	if !desired.fixedHTTPResponses || actual.addressReadError != nil || actual.httpPools == nil ||
+		actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" ||
+		listener.ProvisioningStatus != "ACTIVE" || !actual.adminObserved[listener.ID] || !listener.AdminStateUp ||
+		listener.DefaultPoolID != "" || listener.L7Policies == nil || len(state.obsoleteIDs) != 1 {
+		return graphMutation{}, false
+	}
+	parts, observed, owners := httpPlanningParts(desired, actual)
+	type wantedPolicy struct {
+		part   int
+		policy desiredPolicy
+	}
+	positions := make(map[int32]wantedPolicy)
+	for index, part := range parts.routes {
+		if parts.spec.Routes[index].Disposition != cloud.GraphEnsure || httpURLPolicyRoutePort(desired, part) != listener.ProtocolPort {
+			continue
+		}
+		for _, policy := range part.policies {
+			if _, duplicate := positions[policy.position]; policy.position <= 0 || duplicate {
+				return graphMutation{}, false
+			}
+			positions[policy.position] = wantedPolicy{index, policy}
+		}
+	}
+	if len(positions) != len(listener.L7Policies) {
+		return graphMutation{}, false
+	}
+	references := make(map[string]bool, len(listener.L7Policies))
+	for _, ref := range listener.L7Policies {
+		if ref.ID == "" || references[ref.ID] {
+			return graphMutation{}, false
+		}
+		references[ref.ID] = true
+	}
+	var withdrawal graphMutation
+	for index, part := range observed.routes {
+		for _, old := range part.policies {
+			if old.policy.ListenerID != listener.ID {
+				continue
+			}
+			wanted, exists := positions[old.policy.Position]
+			if !exists || !references[old.policy.ID] || old.policy.ProjectID != p.projectID ||
+				!old.policy.AdminStateUp || !observedForwardPolicySettled(old) || old.initialRulesPartial ||
+				!desired.routes[owners[index]].identity.MatchesRoute(old.policy.Tags, old.role) {
+				return graphMutation{}, false
+			}
+			delete(positions, old.policy.Position)
+			delete(references, old.policy.ID)
+			replacement := parts.routes[wanted.part]
+			if !state.obsoleteIDs[old.policy.ID] {
+				if wanted.part != index || !isolatedPolicyMatches(replacement, part, wanted.policy, old) {
+					return graphMutation{}, false
+				}
+				continue
+			}
+			if owners[index] != owners[wanted.part] ||
+				!p.canReplaceGRPCAuthorizer(actual, listener, old, replacement, wanted.policy) {
+				return graphMutation{}, false
+			}
+			tags := slices.DeleteFunc(slices.Clone(old.policy.Tags), func(tag string) bool { return tag == routeExternalAuthTag })
+			withdrawal = graphMutation{kind: graphRouteMutation, listenerID: listener.ID, routeIndex: owners[index], backendKey: replacement.backendKey,
+				route: routeMutation{kind: routeMutationSetPolicyTarget, id: old.policy.ID, externalAuthUpdate: &octavia.PolicyExternalAuthUpdate{},
+					policyTags: append(tags, grpcAuthWithdrawalTag), withdrawHTTPPolicy: true},
+				withdrawHTTPPolicy: true, message: "Replacing the revoked gRPC authorizer with a fixed HTTP response"}
+		}
+	}
+	return withdrawal, withdrawal.route.id != "" && len(references) == 0
+}
+
+func (p *Provider) canReplaceGRPCAuthorizer(actual observedGatewayGraph, listener listeners.Listener,
+	old observedRoutePolicy, replacement desiredRoute, wanted desiredPolicy) bool {
+	policy, auth := old.policy, old.externalAuth
+	if policy.Action != string(l7policies.ActionRedirectToPool) || policy.RedirectPoolID == "" || !old.targetObserved ||
+		!old.versioned || len(old.rules) == 0 ||
+		!old.externalAuthReported || !old.externalAuthTagged || !old.externalAuthPresent ||
+		auth == nil || auth.Protocol != cloud.ExternalAuthProtocolGRPC ||
+		old.hasHTTPRequestPolicy() || old.hasRequestURLRewrite() || old.hasRequestCORS() ||
+		len(old.requestHeaderOperations) != 0 || len(old.responseHeaderOperations) != 0 ||
+		old.requestMirrorsUnknown || old.hasRequestMirrors() ||
+		replacement.backendKey == "" || !replacement.rejectsWithoutForwarding() ||
+		len(wanted.responseHeaderOperations) != 0 || wanted.requestCORS != nil ||
+		wanted.httpsListenerHostname != old.httpsListenerHostname ||
+		!observedHTTPPredicateMatches(old, rulesFor(wanted, replacement.hostnameRuleValue)) {
+		return false
+	}
+	// The complete pool inventory proves that this is an authorization pool,
+	// and the policy inventory proves that no other policy will keep using it.
+	// Its current admin state does not establish what Amphora is serving.
+	for _, observation := range actual.httpPools.auth {
+		pool := observation.pool
+		if pool.ID != auth.PoolID {
+			continue
+		}
+		return isGRPCAuthPool(pool) && pool.ProjectID == p.projectID &&
+			slices.Equal(pool.Listeners, []pools.ListenerID{{ID: listener.ID}}) &&
+			soleGRPCAuthorizerConsumer(actual.routes, auth.PoolID)
+	}
+	return false
+}
+
+func soleGRPCAuthorizerConsumer(routes []observedRouteGraph, poolID string) bool {
+	consumers := 0
+	for _, route := range routes {
+		for _, part := range route.parts() {
+			for _, policy := range part.policies {
+				if policy.externalAuth != nil && policy.externalAuth.PoolID == poolID {
+					consumers++
+				}
+			}
+		}
+	}
+	return consumers == 1
+}
+
+func (p *Provider) closeAfterFailedGRPCAuthorizerWithdrawal(ctx context.Context, desired desiredGatewayGraph,
+	actual observedGatewayGraph, step graphMutation, result *cloud.GatewayGraphResult, cause error) error {
+	listener := actual.policyListener(actual.routes[step.routeIndex], step.route.id)
+	if listener != nil {
+		if validate := desired.spec.ValidateMutation; validate != nil {
+			if err := validate(ctx); err != nil {
+				return errors.Join(cause, err)
+			}
+		}
+		close := closeGuardedHTTPListener(*listener, "Closing the listener after Octavia could not withdraw the gRPC authorizer")
+		if err := p.executeGraphMutation(ctx, desired, actual, close); err == nil {
+			p.recordGraphMutationOutcome(result, close)
+			return nil
+		} else {
+			cause = errors.Join(cause, err)
+		}
+	}
+	return &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: cause}
 }
 
 // A fixed response can replace an obsolete authorization policy while its
