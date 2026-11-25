@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-On Standard and Experimental kind, the signed linux/amd64 controller applied gRPC request metadata on the rule and on the selected weighted backend. [Build record](image.json) · [Grant transitions and RPC results](provider/grpc-request-metadata-evidence/receipt.json)
+On Standard and Experimental kind, the signed linux/amd64 controller mirrored gRPC calls from matching rules and selected weighted backends. [Build record](image.json) · [Primary replies, mirror copies and grant transitions](provider/grpc-request-mirror-evidence/receipt.json)
+
+On Standard and Experimental kind, the signed linux/amd64 controller applied gRPC request metadata on the rule and on the selected weighted backend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-1063621c0a8ad956ab39521aa79c594acb756fe0/image.json) · [Grant transitions and RPC results](provider/grpc-request-metadata-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-1063621c0a8ad956ab39521aa79c594acb756fe0)
 
 Local Experimental kind verified OTLP export header rotation and withdrawal on the signed linux/amd64 controller image. Standard forwarded the witness and application requests. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-b2d3e2179102a6a5015663427c019b9ba55a5579/image.json) · [Collector traffic](provider/otlp-collector-headers-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-b2d3e2179102a6a5015663427c019b9ba55a5579)
 
