@@ -32,6 +32,8 @@ The [Magnum operator guide](magnum-operator.md) covers how to build the patch, s
 
 The signed controller `598db990b3ba` passed all 40 upstream GATEWAY-HTTP Core cases on each of two separate local clusters, Standard and Experimental, with zero Core skips. The fixtures used kind, the Octavia and Barbican APIs and native HAProxy. [Full and targeted reports with exact inputs](provider/unified-http-core-598db990b3ba/README.md)
 
+The signed controller `9388be4580dd` passed all 21 GATEWAY-TLS Core and all 21 GATEWAY-UDP Core cases on each v1.7.0 channel in disposable local kind clusters. Native HAProxy handled TLS passthrough and Keepalived with kernel IPVS forwarded UDP to Pods. [Original reports and fixture limits](provider/tls-udp-core.md)
+
 For east-west traffic, the operator can enroll selected namespaces and Services in Istio ambient on a single-stack IPv4 workload cluster. Both mesh Core profiles passed on separate local Standard and Experimental clusters. The table below tracks deployed Hibiscus runs. [Local waypoint results](provider/ambient-waypoint.md)
 
 An **Unrun** entry means the profile has not run on a deployed Hibiscus cluster. The local qualification records below give case counts and setup failures for the disposable fixtures. The Experimental suite may exercise additional fields on the shared Gateway API kinds. Each applicable Core and Extended case still needs its own result. The [matrix](matrix/README.md) relates features, cases, both schemas and unflagged API requirements.
