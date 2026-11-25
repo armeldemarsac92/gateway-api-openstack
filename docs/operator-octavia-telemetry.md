@@ -97,6 +97,8 @@ The collector receives these field values on OTLP export requests. Application r
 
 A policy can list up to 16 headers. Each name can be up to 256 bytes and each printable ASCII value up to 4,096 bytes. If names differ only by case, the first entry supplies the value. The exporter reserves `Host`, `Connection`, `Content-Length`, `Content-Type`, `Content-Encoding`, `Transfer-Encoding`, `TE`, `Trailer`, `Upgrade`, `Proxy-Connection`, `Keep-Alive` and `Expect` for its HTTP transport.
 
+On local Experimental kind, the Collector received the configured header on a correlated application span, then the replacement value after rotation. The application and a second Gateway's witness route kept serving HTTP without receiving the export header. After removal of the collector ReferenceGrant, the exporter stopped and both routes served 20 HTTP 200 probes with zero matching spans over 6.608 seconds. Restoring the grant restored the rotated header. The Standard cluster served both routes and omitted the telemetry policy CRD. [Conditions and observed traffic](qualification/v1.7.0/provider/otlp-collector-headers-evidence/receipt.json) · [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-collector-request-headers-0c4bdf40d7d2)
+
 ## Add attributes to request spans
 
 Enable `[api_settings] enabled_listener_otlp_span_attributes_providers = amphora` after upgrading the API, workers and Amphora agents with the corresponding tracing Lua script. Check that the region advertises `listener_otlp_tracing_v1` and `listener_otlp_span_attributes_v1`. Add attributes under `spec.tracing` on an Experimental policy.
