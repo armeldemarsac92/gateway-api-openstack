@@ -15,8 +15,19 @@ Each of the 400 connections had a distinct open/close cycle and sent a 256-byte 
 
 After deleting the TCPRoute and Gateway, each run verified an empty Octavia load-balancer, listener, pool and health-monitor inventory and a closed TCP VIP. The two Services and their EndpointSlices were still readable.
 
-The control plane was Kubernetes v1.36.2 via envtest. Octavia 19.0.0 (`93689cb7701da65b5aad387bb824c477c64b0f2b`) and octavia-lib 3.12.0 (`bc03e1856b60517e1b75db4fdf9b3edf55f3a019`) used their tagged source trees. The stock Octavia WSGI API ran over loopback HTTP with SQLite and the Amphora renderer supplied the configuration consumed by HAProxy 3.0.19. The fixture supplied Keystone, Neutron, provisioning completion and the Amphora transport. It represented the workers with local TCP echo servers bound to the worker IP and NodePort pairs in an isolated network namespace. The evidence covers this single TCPRoute through reconciliation, the Octavia API and real HAProxy TCP traffic. Kube-proxy, real Kubernetes workers, deployed Amphora and full upstream conformance remain unqualified.
+The control plane was Kubernetes v1.36.2 via envtest. Octavia 19.0.0 (`93689cb7701da65b5aad387bb824c477c64b0f2b`) and octavia-lib 3.12.0 (`bc03e1856b60517e1b75db4fdf9b3edf55f3a019`) used their tagged source trees. The stock Octavia WSGI API ran over loopback HTTP with SQLite and the Amphora renderer supplied the configuration consumed by HAProxy 3.0.19. The fixture supplied Keystone, Neutron, provisioning completion and the Amphora transport. It represented the workers with local TCP echo servers bound to the worker IP and NodePort pairs in an isolated network namespace. The evidence covers this single TCPRoute through reconciliation, the Octavia API and real HAProxy TCP traffic. This first run exercised simulated worker NodePorts. The follow-up below exercised kube-proxy on kind workers.
 
 Both receipts record the OCI manifest and manager digests and the revision logged at startup. [OCI build record](https://github.com/armeldemarsac92/gateway-api-openstack/blob/1cefeb4523f9a5a5564663a40f89303405095c47/docs/qualification/v1.7.0/image.json) · [Reproduce the OCI build](https://github.com/armeldemarsac92/gateway-api-openstack/blob/1cefeb4523f9a5a5564663a40f89303405095c47/docs/qualification/v1.7.0/image-build.md)
 
 The source replay asset `hibiscus-weighted-tcp-nodeport-41c3b27c85c4.tar.gz` contains the runner, extraction and replay instructions, and both receipts.
+
+## TCP through kube-proxy on two kind workers
+
+A separate run used the published controller `04bb56309d8a` on two Kubernetes v1.36.4 kind workers. Both Services used `externalTrafficPolicy: Local`. In each cluster the primary Service had one ready pod on each worker. The secondary Service had one ready pod on worker A. Local Octavia and native HAProxy forwarded connections through kube-proxy iptables to the echo pods. [Image and publisher](https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45656381435)
+
+| Channel | Primary on A | Primary on B | Secondary on A | Total |
+| --- | ---: | ---: | ---: | ---: |
+| Standard | 152 | 151 | 97 | 400 |
+| Experimental | 151 | 152 | 97 | 400 |
+
+The three members had weights 3, 3 and 2. Each new TCP connection verified the responding pod and its 256-byte payload. HAProxy counted the same connections with zero retries, redispatches or connection errors. After deletion, the VIP refused connections, all four Octavia resource collections were empty and the Services and their ready EndpointSlices still served the expected NodePorts. Keystone, Neutron, worker completion and Amphora transport were supplied by local fixtures. [Results for both channels](weighted-tcp-kind-nodeports/receipt.json)

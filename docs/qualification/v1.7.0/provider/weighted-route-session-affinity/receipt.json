@@ -1,0 +1,952 @@
+{
+  "scope": "HTTP/1.1 fresh connections with generated cookies and grpcio/h2c metadata on a channel per phase. Two Services with two ready EndpointSlice addresses each. Traffic measured after convergence. No in-flight revocation timing, failover, timeout, TLS, kind, deployed OpenStack or production proof.",
+  "boundary": "Private envtest API and etcd, Octavia WSGI and SQL, installed L7 worker flows and Amphora driver, in-process agent request context and real local HAProxy. Keystone, Neutron, most other RPC completions, agent network transport, systemd and VIP advertisement are simulated.",
+  "sampling": {
+    "weightedRequestsPerReplay": 256,
+    "minorityCountBoundsInclusive": [
+      38,
+      90
+    ],
+    "expectedMinority": "1/4",
+    "singleServiceRequestsPerReplay": 12,
+    "siblingRequestsPerPhase": 4
+  },
+  "schema": {
+    "HTTPRoute": {
+      "inlineField": true,
+      "v1SchemaSHA256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d"
+    },
+    "GRPCRoute": {
+      "inlineField": true,
+      "v1SchemaSHA256": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+    }
+  },
+  "kubernetesVersion": "v1.36.2",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "octavia": {
+    "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+    "version": "19.0.1.dev92",
+    "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+    "filesVerified": 670
+  },
+  "octaviaLib": {
+    "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+    "version": "3.12.1.dev21",
+    "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+    "filesVerified": 24
+  },
+  "octaviaAPIVersion": "v2.30",
+  "haproxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+    "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+  },
+  "grpcio": "1.83.0",
+  "verifiedAmphoraCapabilities": [
+    "backend_h2c_v1",
+    "fixed_http_responses_v1",
+    "grpc_content_type_v1",
+    "http_cookie_name_v1",
+    "http_header_persistence_v1",
+    "weighted_http_targets_v1"
+  ],
+  "channel": "experimental",
+  "rawReceiptSHA256": "59df89324f9c023aba117b25005057c6c4333464795c96e97648d7feac1031d3",
+  "image": {
+    "manifestDigest": "sha256:1edbf032630c3ce473104a99a369495acf273fe27813e2bf753256b19f6e1aac",
+    "configDigest": "sha256:6c4f83e574a3de4844e3c9500f2093d6077317b2812537579cc95b2176ed6f8a",
+    "ociArchiveSHA256": "ae757001ad89efe72cca64e3af63cb96592f6d9ce0c621a218684b3d418fa7c8",
+    "managerSHA256": "4e36a60d770a6985d39f5338e62829a62e9c2eb427bd545d89cbb601f598ae85",
+    "platform": "linux/amd64",
+    "sourceRevision": "d0cbbc961e58ced3e5c4df01ab33fd9b6d4c7d6a"
+  },
+  "phases": {
+    "initial-A": {
+      "convergenceSeconds": 28.921,
+      "configSHA256": "a180ae74caa84f22bbe490b25eef0bbb61bf09bab94411b4c3a8be414ab2218d",
+      "protocols": {
+        "http": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "4983f6eb70ae7a94794df4f034f6f7e93d6594b661e10730130834f07c7e8e8a",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "ccabadd56f8e2c61d6b7e52375d860bd8ae7725a05d0976df4f325329240afa6",
+                  "8f0a6eb3d7e7d3dd8eae75ad05ef255d7d3473ebc01fc6810e2f2b769322724b"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "1213dbc76c7c14f6aafbbb4ce86656636cae4fdc658650a93ab157dfb5ac18fc",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "29bf38430c9b7bbabae2d59a8c97d2a62002e2a4c691a2db837316f8fb97ed46",
+                  "82f6bf96e522d0bf9ac5524a34e9fc86e8909427c82cb5d1c5153b78cdbd768e"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 12,
+              "completed": 12,
+              "outcomes": {
+                "A1": 12
+              },
+              "statuses": {
+                "200": 12
+              },
+              "originCalls": {
+                "A1": 12,
+                "A2": 0,
+                "B1": 0,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        },
+        "grpc": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "8d19c99978c8f7f182971f8842573747caebd7eb71d7b741d768485834cb8cac",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "8d1189adddfbc1cab6989cd7bee1b1ee254e9f8cd6ddd847361040b4c5627ca8",
+                  "912cb4fa8e79f76d9284e138081032448e1b54094e9dd4b2c75f7aa22f61bb6b"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "f7d3fc5015dfc8cc70b8140785c73700ad2429a51dcdb45298dc231a99abbf18",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "427be59b3539c7870343bc47fbb5e6acb70a15bdddbf5071b65f00083f7f2183",
+                  "498837fd426fe1d8e9ee4d8af59da385bf1c85d0428d3f57d3c9ea732e66e8aa"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 12,
+              "completed": 12,
+              "outcomes": {
+                "A1": 12
+              },
+              "statuses": {
+                "OK": 12
+              },
+              "originCalls": {
+                "A1": 12,
+                "A2": 0,
+                "B1": 0,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        }
+      }
+    },
+    "added-B-3-to-1": {
+      "convergenceSeconds": 42.231,
+      "configSHA256": "baf47adeb056f72a5043e8b78a6ae744cf8af0b125a780236fa8f42e00cddfb0",
+      "protocols": {
+        "http": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3,
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": 3,
+                "nativeInterval": [
+                  0,
+                  2
+                ],
+                "poolSHA256": "4983f6eb70ae7a94794df4f034f6f7e93d6594b661e10730130834f07c7e8e8a",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "ccabadd56f8e2c61d6b7e52375d860bd8ae7725a05d0976df4f325329240afa6",
+                  "8f0a6eb3d7e7d3dd8eae75ad05ef255d7d3473ebc01fc6810e2f2b769322724b"
+                ]
+              },
+              {
+                "service": "B",
+                "weight": 1,
+                "nativeInterval": [
+                  3,
+                  3
+                ],
+                "poolSHA256": "eeb8dc2ad553a7f4c81cfca2107edb851f3014dc6e5bd10f15195bd978a092ce",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "03a3fa5c8f21fe8bbcdafb1ffa77fff52ad766fe706216e83500077b8d3e9a29",
+                  "b122204e1dbc1ce27fc31bb1c450a4b74cd3e53e32aac5ab926a45ae7ff4e028"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "1213dbc76c7c14f6aafbbb4ce86656636cae4fdc658650a93ab157dfb5ac18fc",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "29bf38430c9b7bbabae2d59a8c97d2a62002e2a4c691a2db837316f8fb97ed46",
+                  "82f6bf96e522d0bf9ac5524a34e9fc86e8909427c82cb5d1c5153b78cdbd768e"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 202,
+                "B1": 27,
+                "B2": 27
+              },
+              "statuses": {
+                "200": 256
+              },
+              "originCalls": {
+                "A1": 202,
+                "A2": 0,
+                "B1": 27,
+                "B2": 27
+              }
+            },
+            "replayBothCookies": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 197,
+                "B1": 59
+              },
+              "statuses": {
+                "200": 256
+              },
+              "originCalls": {
+                "A1": 197,
+                "A2": 0,
+                "B1": 59,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        },
+        "grpc": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3,
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": 3,
+                "nativeInterval": [
+                  0,
+                  2
+                ],
+                "poolSHA256": "8d19c99978c8f7f182971f8842573747caebd7eb71d7b741d768485834cb8cac",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "8d1189adddfbc1cab6989cd7bee1b1ee254e9f8cd6ddd847361040b4c5627ca8",
+                  "912cb4fa8e79f76d9284e138081032448e1b54094e9dd4b2c75f7aa22f61bb6b"
+                ]
+              },
+              {
+                "service": "B",
+                "weight": 1,
+                "nativeInterval": [
+                  3,
+                  3
+                ],
+                "poolSHA256": "9eabab300f4024b780b8c617a6eba4586fbfa37b9ab9efe0f6ac918eb0377937",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "61c60752d4834c359839d09df47d769ce91f65c7599019f889e30fa6a24ddc69",
+                  "f270988fb1c041d2b870090abbca832957862e9660af384e2180fc2c693b35fd"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "f7d3fc5015dfc8cc70b8140785c73700ad2429a51dcdb45298dc231a99abbf18",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "427be59b3539c7870343bc47fbb5e6acb70a15bdddbf5071b65f00083f7f2183",
+                  "498837fd426fe1d8e9ee4d8af59da385bf1c85d0428d3f57d3c9ea732e66e8aa"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 179,
+                "B1": 38,
+                "B2": 39
+              },
+              "statuses": {
+                "OK": 256
+              },
+              "originCalls": {
+                "A1": 179,
+                "A2": 0,
+                "B1": 38,
+                "B2": 39
+              }
+            },
+            "replayB": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 95,
+                "A2": 94,
+                "B1": 67
+              },
+              "statuses": {
+                "OK": 256
+              },
+              "originCalls": {
+                "A1": 95,
+                "A2": 94,
+                "B1": 67,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        }
+      }
+    },
+    "grant-revoked": {
+      "convergenceSeconds": 22.742,
+      "configSHA256": "b7b2a413645437311021d2b23c8e3a6df3fbbbf569c6009965bb9976f236ebc5",
+      "protocols": {
+        "http": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3,
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": 3,
+                "nativeInterval": [
+                  0,
+                  2
+                ],
+                "poolSHA256": "4983f6eb70ae7a94794df4f034f6f7e93d6594b661e10730130834f07c7e8e8a",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "ccabadd56f8e2c61d6b7e52375d860bd8ae7725a05d0976df4f325329240afa6",
+                  "8f0a6eb3d7e7d3dd8eae75ad05ef255d7d3473ebc01fc6810e2f2b769322724b"
+                ]
+              },
+              {
+                "service": "error",
+                "weight": 1,
+                "nativeInterval": [
+                  3,
+                  3
+                ],
+                "statusCode": 500
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "1213dbc76c7c14f6aafbbb4ce86656636cae4fdc658650a93ab157dfb5ac18fc",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "29bf38430c9b7bbabae2d59a8c97d2a62002e2a4c691a2db837316f8fb97ed46",
+                  "82f6bf96e522d0bf9ac5524a34e9fc86e8909427c82cb5d1c5153b78cdbd768e"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayRevokedB": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 186,
+                "error": 70
+              },
+              "statuses": {
+                "200": 186,
+                "500": 70
+              },
+              "originCalls": {
+                "A1": 186,
+                "A2": 0,
+                "B1": 0,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        },
+        "grpc": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3,
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": 3,
+                "nativeInterval": [
+                  0,
+                  2
+                ],
+                "poolSHA256": "8d19c99978c8f7f182971f8842573747caebd7eb71d7b741d768485834cb8cac",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "8d1189adddfbc1cab6989cd7bee1b1ee254e9f8cd6ddd847361040b4c5627ca8",
+                  "912cb4fa8e79f76d9284e138081032448e1b54094e9dd4b2c75f7aa22f61bb6b"
+                ]
+              },
+              {
+                "service": "empty",
+                "weight": 1,
+                "nativeInterval": [
+                  3,
+                  3
+                ],
+                "poolSHA256": "957bb9564ad779bc62bf424b4b76e34c11d0dc1540809e7acd780c5721b4d707",
+                "persistence": null,
+                "memberIDSHA256": []
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "f7d3fc5015dfc8cc70b8140785c73700ad2429a51dcdb45298dc231a99abbf18",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "427be59b3539c7870343bc47fbb5e6acb70a15bdddbf5071b65f00083f7f2183",
+                  "498837fd426fe1d8e9ee4d8af59da385bf1c85d0428d3f57d3c9ea732e66e8aa"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayRevokedB": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 95,
+                "A2": 95,
+                "error": 66
+              },
+              "statuses": {
+                "OK": 190,
+                "UNAVAILABLE": 66
+              },
+              "originCalls": {
+                "A1": 95,
+                "A2": 95,
+                "B1": 0,
+                "B2": 0
+              }
+            },
+            "replayA": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 189,
+                "error": 67
+              },
+              "statuses": {
+                "OK": 189,
+                "UNAVAILABLE": 67
+              },
+              "originCalls": {
+                "A1": 189,
+                "A2": 0,
+                "B1": 0,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        }
+      }
+    },
+    "grant-restored": {
+      "convergenceSeconds": 26.611,
+      "configSHA256": "cb6e57c4185e226e5f9654e6ec3152c1e57081a929d9d03c656982bc4ac87d7e",
+      "protocols": {
+        "http": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3,
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": 3,
+                "nativeInterval": [
+                  0,
+                  2
+                ],
+                "poolSHA256": "4983f6eb70ae7a94794df4f034f6f7e93d6594b661e10730130834f07c7e8e8a",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "ccabadd56f8e2c61d6b7e52375d860bd8ae7725a05d0976df4f325329240afa6",
+                  "8f0a6eb3d7e7d3dd8eae75ad05ef255d7d3473ebc01fc6810e2f2b769322724b"
+                ]
+              },
+              {
+                "service": "B",
+                "weight": 1,
+                "nativeInterval": [
+                  3,
+                  3
+                ],
+                "poolSHA256": "70ea1a7ff00a474619d95ce5f64fe05d6885944fbc7d7fc18a201d55a63575f7",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "d9ed0938dedd54cdef092a9afc894ad5a59e37cfaddd25b65c998ceb030331c9",
+                  "d5d5e7fe9bba300a2352bef60eba7fe1baf1065c753e40a26ebb4d97b8991226"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "1213dbc76c7c14f6aafbbb4ce86656636cae4fdc658650a93ab157dfb5ac18fc",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "29bf38430c9b7bbabae2d59a8c97d2a62002e2a4c691a2db837316f8fb97ed46",
+                  "82f6bf96e522d0bf9ac5524a34e9fc86e8909427c82cb5d1c5153b78cdbd768e"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 196,
+                "B1": 30,
+                "B2": 30
+              },
+              "statuses": {
+                "200": 256
+              },
+              "originCalls": {
+                "A1": 196,
+                "A2": 0,
+                "B1": 30,
+                "B2": 30
+              }
+            },
+            "replayBothCookies": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 184,
+                "B1": 72
+              },
+              "statuses": {
+                "200": 256
+              },
+              "originCalls": {
+                "A1": 184,
+                "A2": 0,
+                "B1": 72,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        },
+        "grpc": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3,
+            1
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": 3,
+                "nativeInterval": [
+                  0,
+                  2
+                ],
+                "poolSHA256": "8d19c99978c8f7f182971f8842573747caebd7eb71d7b741d768485834cb8cac",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "8d1189adddfbc1cab6989cd7bee1b1ee254e9f8cd6ddd847361040b4c5627ca8",
+                  "912cb4fa8e79f76d9284e138081032448e1b54094e9dd4b2c75f7aa22f61bb6b"
+                ]
+              },
+              {
+                "service": "B",
+                "weight": 1,
+                "nativeInterval": [
+                  3,
+                  3
+                ],
+                "poolSHA256": "d158d7ed69cff6f9f79517aca9341405eeda450902641cf386935128f778c893",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "951cc2345d1b9383f53fdfaf912d42c98c928fe43cf9f1407b4dac1fd0a7960e",
+                  "c0b3750ec85490ea54dc1b99c701acf72f271fb27fa25236328dd9b02d815a12"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "f7d3fc5015dfc8cc70b8140785c73700ad2429a51dcdb45298dc231a99abbf18",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "427be59b3539c7870343bc47fbb5e6acb70a15bdddbf5071b65f00083f7f2183",
+                  "498837fd426fe1d8e9ee4d8af59da385bf1c85d0428d3f57d3c9ea732e66e8aa"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 202,
+                "B1": 27,
+                "B2": 27
+              },
+              "statuses": {
+                "OK": 256
+              },
+              "originCalls": {
+                "A1": 202,
+                "A2": 0,
+                "B1": 27,
+                "B2": 27
+              }
+            },
+            "replayB": {
+              "requests": 256,
+              "completed": 256,
+              "outcomes": {
+                "A1": 105,
+                "A2": 105,
+                "B1": 46
+              },
+              "statuses": {
+                "OK": 256
+              },
+              "originCalls": {
+                "A1": 105,
+                "A2": 105,
+                "B1": 46,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        }
+      }
+    },
+    "removed-B": {
+      "convergenceSeconds": 47.084,
+      "configSHA256": "bf01d6141aa0ddb23e31a49cdad4766ebb58edd48d827b4c08eb19171bbe0d21",
+      "protocols": {
+        "http": {
+          "generation": 3,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "4983f6eb70ae7a94794df4f034f6f7e93d6594b661e10730130834f07c7e8e8a",
+                "persistence": "HTTP_COOKIE",
+                "memberIDSHA256": [
+                  "ccabadd56f8e2c61d6b7e52375d860bd8ae7725a05d0976df4f325329240afa6",
+                  "8f0a6eb3d7e7d3dd8eae75ad05ef255d7d3473ebc01fc6810e2f2b769322724b"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "1213dbc76c7c14f6aafbbb4ce86656636cae4fdc658650a93ab157dfb5ac18fc",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "29bf38430c9b7bbabae2d59a8c97d2a62002e2a4c691a2db837316f8fb97ed46",
+                  "82f6bf96e522d0bf9ac5524a34e9fc86e8909427c82cb5d1c5153b78cdbd768e"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 12,
+              "completed": 12,
+              "outcomes": {
+                "A1": 12
+              },
+              "statuses": {
+                "200": 12
+              },
+              "originCalls": {
+                "A1": 12,
+                "A2": 0,
+                "B1": 0,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        },
+        "grpc": {
+          "generation": 3,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+          },
+          "serviceWeights": [
+            3
+          ],
+          "observedPolicies": {
+            "selected": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "8d19c99978c8f7f182971f8842573747caebd7eb71d7b741d768485834cb8cac",
+                "persistence": "HTTP_HEADER",
+                "memberIDSHA256": [
+                  "8d1189adddfbc1cab6989cd7bee1b1ee254e9f8cd6ddd847361040b4c5627ca8",
+                  "912cb4fa8e79f76d9284e138081032448e1b54094e9dd4b2c75f7aa22f61bb6b"
+                ]
+              }
+            ],
+            "sibling": [
+              {
+                "service": "A",
+                "weight": null,
+                "poolSHA256": "f7d3fc5015dfc8cc70b8140785c73700ad2429a51dcdb45298dc231a99abbf18",
+                "persistence": null,
+                "memberIDSHA256": [
+                  "427be59b3539c7870343bc47fbb5e6acb70a15bdddbf5071b65f00083f7f2183",
+                  "498837fd426fe1d8e9ee4d8af59da385bf1c85d0428d3f57d3c9ea732e66e8aa"
+                ]
+              }
+            ]
+          },
+          "traffic": {
+            "replayA": {
+              "requests": 12,
+              "completed": 12,
+              "outcomes": {
+                "A1": 12
+              },
+              "statuses": {
+                "OK": 12
+              },
+              "originCalls": {
+                "A1": 12,
+                "A2": 0,
+                "B1": 0,
+                "B2": 0
+              }
+            }
+          },
+          "sibling": {
+            "peers": [
+              "A1",
+              "A2",
+              "A1",
+              "A2"
+            ],
+            "noSessionResponse": true
+          }
+        }
+      }
+    }
+  }
+}
