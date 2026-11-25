@@ -1,0 +1,343 @@
+{
+  "passed": true,
+  "registeredGatewayAPICase": null,
+  "scope": "Gateway API v1.7.0 GatewayListenerFilters, HTTP Gateway listeners with HTTP ExternalAuth before HTTPRoute forwarding",
+  "fixtureBoundary": "Real manager, disposable kind API and app Pods, Octavia REST, listener and L7 worker flows, Amphora renderer, live HAProxy, and an isolated HTTP auth service exposed as a Service/EndpointSlice. Cloud provisioning and agent transport are fixture stand-ins.",
+  "controller": {
+    "revision": "ed0ee4dd9591531588582dd3c6f08ea0345d2719",
+    "tree": "f79032439fe073685db1f8bb653a7b28bcdb1c7c",
+    "personalSignatureVerified": true,
+    "previousWireManagerSHA256": "c13c1557a1f8371acd53554dedbd12342b882d44f212a90f38331efca15a6550",
+    "previousWireManagerBuild": "Host Go build with CGO_ENABLED=1 and Git build metadata",
+    "wireManagerSHA256": "114052637ec03f043314f544bd6b8dab1ba7ed2321e5ff26880f3fe2c5c9ca0c",
+    "ociEntrypointSHA256": "114052637ec03f043314f544bd6b8dab1ba7ed2321e5ff26880f3fe2c5c9ca0c",
+    "wireManagerMatchesOCIEntrypoint": true,
+    "ociEntrypointBuild": "Repository Dockerfile with CGO_ENABLED=0, stripped symbols, Git VCS stamping disabled and main.version set to the signed source revision",
+    "ociManifestDigest": "sha256:f2cbb0c25aac0a60a35c4104be6488957b38080042fbd5b5fc115fc4f13bff8a",
+    "normalAndNoCacheOCIBuildsMatch": true
+  },
+  "provider": {
+    "octavia": {
+      "revision": "ef3b2204f472584101991131d5f300b52ca3f616",
+      "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-request-filters-ef3b2204f472"
+    },
+    "octaviaLib": {
+      "revision": "0ca1468da861b188fdca008979e1dfc61894d6ba",
+      "release": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-request-filters-0ca1468da861"
+    },
+    "haproxy": {
+      "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1",
+      "sha256": "a143a8039c0fcc73a68721879370d552f4ff708512a8f533a069a0734a15002b"
+    },
+    "stableInstalledPackageTests": 159
+  },
+  "protocols": {
+    "frontend": {
+      "protocol": "HTTP",
+      "port": 80
+    },
+    "externalAuth": {
+      "protocol": "HTTP",
+      "service": "identity",
+      "port": 8081
+    }
+  },
+  "channels": {
+    "standard": {
+      "passed": true,
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "scenarioSHA256": "c72c76901e1437714e3de019e32df80ab6cc98fc84a810bdde2b5341b5e053f3",
+      "listenerFiltersInInstalledV1CRD": false,
+      "providerCapabilityAdvertised": true,
+      "phases": {
+        "ordinary-sections": {
+          "passed": true,
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "listeners": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "routes": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "authRequestsDuringProbe": [],
+          "traffic": {
+            "chosen": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v1",
+              "xFixtureIdentity": null
+            },
+            "sister": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v2",
+              "xFixtureIdentity": null
+            }
+          },
+          "provider": {
+            "physicalListeners": 1,
+            "ready": true,
+            "activeConfigurationSHA256": "438105d9213df1496329ef7184d608c5f6c2482ab17a99d90ca6a62b704bbef2",
+            "sections": []
+          }
+        }
+      }
+    },
+    "experimental": {
+      "passed": true,
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "scenarioSHA256": "c72c76901e1437714e3de019e32df80ab6cc98fc84a810bdde2b5341b5e053f3",
+      "listenerFiltersInInstalledV1CRD": true,
+      "providerCapabilityAdvertised": true,
+      "phases": {
+        "grant-present": {
+          "passed": true,
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "listeners": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "routes": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "authRequestsDuringProbe": [
+            {
+              "host": "chosen.example.com",
+              "path": "/authorize/application"
+            }
+          ],
+          "traffic": {
+            "chosen": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v1",
+              "xFixtureIdentity": [
+                "fixture-user"
+              ]
+            },
+            "sister": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v2",
+              "xFixtureIdentity": null
+            }
+          },
+          "provider": {
+            "physicalListeners": 1,
+            "ready": true,
+            "activeConfigurationSHA256": "c5e4d26c76cdd93a9f298297e9c0fbce2ed6c69b00fdcb1adb96dd93c6b0e728",
+            "sections": [
+              {
+                "hostname": "chosen.example.com",
+                "requests": [
+                  {
+                    "type": "ExternalAuth",
+                    "http": {
+                      "path_prefix": "/authorize",
+                      "allowed_response_headers": [
+                        "x-fixture-identity"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "hostname": "sister.example.com"
+              }
+            ],
+            "authorizationPool": {
+              "protocol": "HTTP",
+              "status": "ACTIVE"
+            }
+          }
+        },
+        "grant-removed": {
+          "passed": true,
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "False/ListenersNotValid",
+            "AddressesAssigned": "True/AddressesAssigned",
+            "ResolvedRefs": "False/ListenersNotResolved"
+          },
+          "listeners": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "False/Invalid"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "routes": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "authRequestsDuringProbe": [],
+          "traffic": {
+            "chosen": {
+              "httpStatus": 403
+            },
+            "sister": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v2",
+              "xFixtureIdentity": null
+            }
+          },
+          "provider": {
+            "physicalListeners": 1,
+            "ready": true,
+            "activeConfigurationSHA256": "cff4397d27457b7671561463cb35aee53b00a15eae7c410f303a56c87fa4ee88",
+            "sections": [
+              {
+                "hostname": "chosen.example.com",
+                "reject": true
+              },
+              {
+                "hostname": "sister.example.com"
+              }
+            ]
+          }
+        },
+        "grant-restored": {
+          "passed": true,
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "listeners": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "routes": {
+            "chosen": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "sister": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "authRequestsDuringProbe": [
+            {
+              "host": "chosen.example.com",
+              "path": "/authorize/application"
+            }
+          ],
+          "traffic": {
+            "chosen": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v1",
+              "xFixtureIdentity": [
+                "fixture-user"
+              ]
+            },
+            "sister": {
+              "httpStatus": 200,
+              "backendService": "infra-backend-v2",
+              "xFixtureIdentity": null
+            }
+          },
+          "provider": {
+            "physicalListeners": 1,
+            "ready": true,
+            "activeConfigurationSHA256": "dfb017d477791381190f5c45950fe0f45912bb4ffb600dc5eed831bf65085063",
+            "sections": [
+              {
+                "hostname": "chosen.example.com",
+                "requests": [
+                  {
+                    "type": "ExternalAuth",
+                    "http": {
+                      "path_prefix": "/authorize",
+                      "allowed_response_headers": [
+                        "x-fixture-identity"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "hostname": "sister.example.com"
+              }
+            ],
+            "authorizationPool": {
+              "protocol": "HTTP",
+              "status": "ACTIVE"
+            }
+          }
+        }
+      }
+    }
+  }
+}
