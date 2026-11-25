@@ -44,6 +44,8 @@ const (
 	WithdrawTLS Action = "WithdrawTLS"
 	// WithdrawBackendClientCertificate closes owned pools with stale identities.
 	WithdrawBackendClientCertificate Action = "WithdrawBackendClientCertificate"
+	// WithdrawXBackendClientCertificates closes pools with denied XBackend identities.
+	WithdrawXBackendClientCertificates Action = "WithdrawXBackendClientCertificates"
 	// ReconcileTelemetry updates only the listener exporter and its collector backend.
 	ReconcileTelemetry Action = "ReconcileTelemetry"
 )
@@ -70,6 +72,8 @@ type Request struct {
 	HTTPRouteCORSFallback *bool
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
+	// HTTPRouteUsesXBackendClientTLS binds deferred status to the observed TLS mode.
+	HTTPRouteUsesXBackendClientTLS *bool
 	// HTTPRouteRetryBudgetAncestorFull binds its status to the live capacity check.
 	HTTPRouteRetryBudgetAncestorFull *bool
 	// HTTPRouteRejectedSections ties per-parent status to the graph's profile election.
@@ -124,8 +128,22 @@ type RouteSource interface {
 	ObserveRouteGraph(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error)
 }
 
+// XBackendClientWithdrawalSource observes only attached routes and their XBackend identities.
+type XBackendClientWithdrawalSource interface {
+	ObserveXBackendClientWithdrawals(context.Context, cloud.Identity, *gatewayv1.Gateway) ([]cloud.XBackendClientWithdrawal, error)
+}
+
 // RouteSources combines all served route kinds under the same Gateway writer lock.
 type RouteSources []RouteSource
+
+func (sources RouteSources) ObserveXBackendClientWithdrawals(ctx context.Context, identity cloud.Identity, gateway *gatewayv1.Gateway) ([]cloud.XBackendClientWithdrawal, error) {
+	for _, source := range sources {
+		if observer, ok := source.(XBackendClientWithdrawalSource); ok {
+			return observer.ObserveXBackendClientWithdrawals(ctx, identity, gateway)
+		}
+	}
+	return nil, nil
+}
 
 // ObserveRouteGraph collects ownership even for a kind no longer served by the listener.
 // Every source validates its observation before the provider can mutate the graph.
@@ -183,6 +201,9 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		return cloud.GatewayGraphResult{}, fmt.Errorf("acquire Gateway graph: %w", err)
 	}
 	defer release()
+	if request.Action == WithdrawXBackendClientCertificates {
+		return w.withdrawXBackendClientCertificates(ctx, request)
+	}
 	started = time.Now()
 	gateway, err := w.Gateway.ObserveGatewayGraph(ctx, request)
 	w.observeStage(StageGatewayInput, started, err)
@@ -325,12 +346,13 @@ func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gatewa
 	if gateway.Object == nil {
 		gateway.Object = request.Gateway
 	}
-	var filterErr, backendErr error
+	var filterErr, backendErr, xBackendErr error
 	if request.Action == Ensure && errors.Is(graphErr, backendtls.ErrClusterTrustBundleUnavailable) && gateway.ObserveListenerFilterWithdrawal != nil {
 		filterErr = w.withdrawListenerFilters(ctx, request.Identity, gateway.ObserveListenerFilterWithdrawal)
 	}
 	if request.Action == Ensure && gateway.Node.BackendCAOwned &&
 		cloud.NormalizeListenerProtocol(gateway.Node.Spec.ListenerProtocol) == cloud.ListenerProtocolHTTP {
+		_, xBackendErr = w.withdrawXBackendClientCertificates(ctx, request)
 		request.Action = WithdrawBackendClientCertificate
 		request.Gateway = gateway.Object
 		input, err := w.Gateway.ObserveGatewayGraph(ctx, request)
@@ -340,10 +362,50 @@ func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gatewa
 		backendErr = err
 	}
 	result, err := w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
-	if filterErr != nil || backendErr != nil {
-		err = errors.Join(err, filterErr, backendErr)
+	if filterErr != nil || backendErr != nil || xBackendErr != nil {
+		err = errors.Join(err, filterErr, backendErr, xBackendErr)
 	}
 	return result, err
+}
+
+func (w *Writer) withdrawXBackendClientCertificates(ctx context.Context, request Request) (cloud.GatewayGraphResult, error) {
+	source, ok := w.Routes.(XBackendClientWithdrawalSource)
+	if !ok || request.Gateway == nil {
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+	}
+	identity := request.Identity
+	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
+	targets, err := source.ObserveXBackendClientWithdrawals(ctx, identity, request.Gateway)
+	if err != nil {
+		return cloud.GatewayGraphResult{}, err
+	}
+	if len(targets) == 0 {
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+	}
+	request.Action, request.Identity = WithdrawXBackendClientCertificates, identity
+	input, err := w.Gateway.ObserveGatewayGraph(ctx, request)
+	if err != nil {
+		return cloud.GatewayGraphResult{}, err
+	}
+	input.Node.XBackendClientWithdrawals = targets
+	validate := input.Validate
+	if validate == nil {
+		return cloud.GatewayGraphResult{}, errors.New("XBackend client certificate withdrawal requires Gateway authority")
+	}
+	input.Validate = func(ctx context.Context) error {
+		if err := validate(ctx); err != nil {
+			return err
+		}
+		current, err := source.ObserveXBackendClientWithdrawals(ctx, identity, request.Gateway)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(targets, current) {
+			return errors.New("XBackend client certificate withdrawal authority changed")
+		}
+		return nil
+	}
+	return w.withdrawBackendClientCertificate(ctx, identity, input)
 }
 
 func (w *Writer) withdrawListenerFilters(ctx context.Context, identity cloud.Identity, observe func(context.Context) (GatewayInput, error)) error {

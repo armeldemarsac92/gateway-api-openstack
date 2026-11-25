@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
@@ -52,6 +53,16 @@ type routeModelInputs struct {
 	admission              routeGraphAdmission
 
 	xBackendClientCertificates graph.XBackendClientCertificateResolver
+}
+
+func (inputs *routeModelInputs) routeUsesXBackendClientTLS(route *gatewayv1.HTTPRoute) bool {
+	if model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+		return false
+	}
+	refs := model.LocalXBackendReferences(route)
+	return slices.ContainsFunc(inputs.input.XBackends, func(backend model.XBackendObservation) bool {
+		return backend.Spec.TLS != nil && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer && slices.Contains(refs, backend.Key)
+	})
 }
 
 type routeGraphAdmission struct {

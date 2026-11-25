@@ -174,6 +174,15 @@ func TestXBackendClientCertificateUsesExperimentalGrantAndEnrollmentRevision(t *
 	check(firstID, "", "grants certs", "metadata certs/web")
 	backend.Namespace, ref.Namespace = "certs", nil
 	check(firstID, "", "metadata certs/web")
+	if err := os.Remove(resolver.XBackendClientPath); err != nil {
+		t.Fatal(err)
+	}
+	check("", gatewayv1.RouteReasonPending)
+	writePurpose(resolver.XBackendClientPath, XBackendClientPurpose, "")
+	check("", invalid, "metadata certs/web")
+	writeSnapshot(t, resolver.XBackendClientPath, "invalid JSON")
+	check("", invalid, "metadata certs/web")
+	writePurpose(resolver.XBackendClientPath, XBackendClientPurpose, rowJSON("uid-a", "rv/beta", firstID))
 	gateway.Spec.GatewayClassName = "wrong-class"
 	check("", invalid, "metadata certs/web")
 	backend.Spec.TLS.Mode = gatewayx.BackendTLSModeServerOnly

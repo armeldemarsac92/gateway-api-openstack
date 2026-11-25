@@ -131,6 +131,12 @@ func xBackendPoolWithoutTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 		})
 }
 
+func xBackendTLSCleared(observed observedRouteGraph) bool {
+	pool, tls := observed.pool, observed.backendTLS
+	return pool != nil && pool.ProvisioningStatus == "ACTIVE" && len(observed.members) == 0 &&
+		tls.Complete() && tls.ALPNObserved && len(pool.ALPNProtocols) == 0 && !hasBackendTLSSettings(*pool, tls)
+}
+
 func routeHasBackendTLSPolicy(route desiredRoute) bool {
 	return route.spec.BackendTLS != nil || slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
 		return part.spec.BackendTLS != nil
@@ -293,6 +299,11 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 		tlsPlan := plan(part)
 		var step *routeMutation
 		if part.desired != nil && part.desired.xBackend && !part.retiring {
+			if part.desired.xBackendPlaintext && xBackendTLSCleared(part.observed) {
+				// Release may reopen an observed empty plaintext pool before
+				// removing its durable protection marks. Do not close it again.
+				continue
+			}
 			step = tlsPlan.xBackendWithdrawal(part.observed, part.clientCertificate.Reference != "")
 		} else {
 			step = tlsPlan.withdrawal(protect, requiresClosedPool, part.observed)
@@ -366,7 +377,8 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		if !desired.spec.BackendTLSObserved || !slices.Contains(pool.Tags, backendTLSManagedTag) || !capable(false, false) {
 			return blocked("Waiting for an authorized BackendTLSPolicy snapshot")
 		}
-		if !backendTLSReadbackComplete(desired, observed) {
+		if !backendTLSReadbackComplete(desired, observed) ||
+			desired.xBackend && slices.Contains(pool.Tags, xBackendTLSClientTag) && !observed.backendTLS.ALPNObserved {
 			return blocked("Waiting for complete Octavia backend TLS readback")
 		}
 		return backendTLSPlan{phase: backendTLSRelease}

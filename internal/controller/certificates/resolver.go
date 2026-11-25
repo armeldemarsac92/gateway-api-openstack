@@ -126,7 +126,10 @@ func (r *Resolver) resolveBackendClientCertificate(ctx context.Context, class ga
 	if kind != "Secret" {
 		return "", invalid, "The backend client certificate reference must use kind Secret"
 	}
-	row, found := findBinding(path, purpose, r.scope(class), target)
+	row, found, readErr := findBinding(path, purpose, r.scope(class), target)
+	if readErr != nil && purpose == XBackendClientPurpose {
+		return "", backendClientUnavailable, "The operator XBackend client certificate map could not be read"
+	}
 	metadata, err := r.secretMetadata(ctx, target)
 	if apierrors.IsNotFound(err) || err == nil && !metadata.DeletionTimestamp.IsZero() {
 		return "", invalid, "The backend client certificate Secret does not exist or is being deleted"
@@ -212,7 +215,7 @@ func (r *Resolver) authorizedSecret(ctx context.Context, gateway *gatewayv1.Gate
 		return binding{}, gatewayv1.ListenerReasonRefNotPermitted
 	}
 
-	row, found := findBinding(r.Path, "", scope, target)
+	row, found, _ := findBinding(r.Path, "", scope, target)
 	if !found || !row.validAt(time.Now()) {
 		return binding{}, invalid
 	}

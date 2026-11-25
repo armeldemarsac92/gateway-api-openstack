@@ -44,6 +44,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
@@ -423,6 +424,7 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 
 func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 	f := newExternalHostnameFixture(t)
+	f.reconciler.Config.XBackendClientCertificate, f.reconciler.Config.BackendTLSPolicy = true, true
 	f.reconciler.Config.XBackendSessionPersistence = true
 	backend := &gatewayx.XBackend{
 		ObjectMeta: metav1.ObjectMeta{Namespace: f.route.Namespace, Name: "reports", UID: "reports-uid", Generation: 4},
@@ -725,8 +727,39 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 		require.Equal(t, external.Members, enrolled[1].Members)
 		require.Equal(t, first, enrolled[1].XBackendClientCertificateReference)
 		checkStatus(metav1.ConditionTrue, string(gatewayv1.RouteReasonResolvedRefs))
+		deferred := cloud.RouteProgressingResult("Octavia load balancer is PENDING_UPDATE", time.Second)
+		deferred.ObservationDeferred = true
+		active := newTestReconciler(*r, &recordingProvider{routeResult: &deferred})
+		key := client.ObjectKeyFromObject(f.route)
+		var live gatewayv1.HTTPRoute
+		require.NoError(t, f.client.Get(t.Context(), key, &live))
+		require.True(t, meta.IsStatusConditionTrue(live.Status.Parents[0].Conditions, r.Config.Domain()+"/Programmed"))
+		clientIdentity = rotated
+		_, err := active.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, &live))
+		require.False(t, meta.IsStatusConditionTrue(live.Status.Parents[0].Conditions, r.Config.Domain()+"/Programmed"))
 
 		clientIdentity = ""
+		t.Run("withdrawal survives a neighboring Service policy list failure", func(t *testing.T) {
+			controllerutil.AddFinalizer(f.gateway, r.Config.BackendCAFinalizer())
+			require.NoError(t, f.client.Update(t.Context(), f.gateway))
+			value := *r
+			value.APIReader = unavailableServicePolicies{value.APIReader}
+			provider := &xBackendWithdrawalTestProvider{}
+			active := newTestReconciler(value, provider)
+			request := ctrl.Request{NamespacedName: key}
+			provider.beforeFence = func() { clientIdentity = first }
+			_, _ = active.Reconcile(t.Context(), request)
+			require.ErrorContains(t, provider.fenceErr, "withdrawal authority changed")
+			require.Empty(t, provider.withdrawals)
+
+			provider.beforeFence = nil
+			clientIdentity = ""
+			_, _ = active.Reconcile(t.Context(), request)
+			require.NoError(t, provider.fenceErr)
+			require.Equal(t, []cloud.XBackendClientWithdrawal{{Route: controller.RouteIdentity(r.Config, f.gateway, f.route), BackendName: backend.Name}}, provider.withdrawals)
+		})
 		require.ErrorIs(t, firstObservation.Validate(t.Context()), errHTTPRouteChanged)
 		withdrawn := f.observe(t).Nodes[0].Spec.HTTPBackends
 		require.Equal(t, service, withdrawn[0])
@@ -770,6 +803,37 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 }
 
 type xBackendCertificateResolverFunc func(context.Context, gatewayv1.ObjectName, *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string)
+
+type unavailableServicePolicies struct{ client.Reader }
+
+func (r unavailableServicePolicies) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*gatewayv1.BackendTLSPolicyList); ok {
+		return errors.New("Service policy inventory unavailable")
+	}
+	return r.Reader.List(ctx, list, opts...)
+}
+
+type xBackendWithdrawalTestProvider struct {
+	recordingProvider
+	beforeFence func()
+	fenceErr    error
+	withdrawals []cloud.XBackendClientWithdrawal
+}
+
+func (p *xBackendWithdrawalTestProvider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+	if spec.Gateway.XBackendClientWithdrawals == nil {
+		return p.recordingProvider.ReconcileGatewayGraph(ctx, spec)
+	}
+	if p.beforeFence != nil {
+		p.beforeFence()
+	}
+	p.fenceErr = spec.ValidateMutation(ctx)
+	if p.fenceErr != nil {
+		return cloud.GatewayGraphResult{}, p.fenceErr
+	}
+	p.withdrawals = spec.Gateway.XBackendClientWithdrawals
+	return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+}
 
 func (f xBackendCertificateResolverFunc) ResolveXBackendClientCertificate(ctx context.Context, class gatewayv1.ObjectName, backend *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string) {
 	return f(ctx, class, backend)

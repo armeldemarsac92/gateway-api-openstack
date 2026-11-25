@@ -425,7 +425,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
 			}
 		}
-		if pollXBackendClientIdentity || !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
+		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
