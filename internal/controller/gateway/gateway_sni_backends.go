@@ -221,7 +221,7 @@ func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *g
 		return nil
 	}
 
-	if rejected > 0 && !r.Config.TCPConnectionRejection {
+	if authenticated && rejected > 0 && !r.Config.TCPConnectionRejection {
 		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "Proportional TLSRoute rejection requires the TCP connection rejection controller option"}
 		return nil
 	}
@@ -240,9 +240,13 @@ func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *g
 		target.BackendPools = pools
 	default:
 		share := cloud.TCPConnectionRejection{RejectWeight: rejected, TotalWeight: total}
-		if diagnostic := flattenWeightedSNIPools(&target, pools, share); diagnostic != nil {
-			entry.programmingDiagnostic = diagnostic
+		err := flattenWeightedSNIPools(&target, pools, share)
+		switch {
+		case err != nil && !errors.Is(err, routebackend.ErrWeightedMembersUnrepresentable):
+			entry.programmingDiagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}
 			return nil
+		case err != nil || rejected > 0 && !r.Config.TCPConnectionRejection:
+			target.UseBackendPools(pools)
 		}
 	}
 	appendSNIForwardingTargets(entry, target)
@@ -292,12 +296,9 @@ func (r *Reconciler) observeWeightedSNIBackend(ctx context.Context, snapshot *ga
 	return pool, applies, diagnostic
 }
 
-func flattenWeightedSNIPools(target *cloud.TLSSNIRoute, pools []cloud.TLSSNIBackendPool, share cloud.TCPConnectionRejection) *model.Diagnostic {
-	if share.RejectWeight > 0 {
-		if !share.Valid() {
-			return &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "Invalid TLSRoute backend weight share"}
-		}
-		target.TCPConnectionRejection = &share
+func flattenWeightedSNIPools(target *cloud.TLSSNIRoute, pools []cloud.TLSSNIBackendPool, share cloud.TCPConnectionRejection) error {
+	if share.RejectWeight > 0 && !share.Valid() {
+		return errors.New("invalid TLSRoute backend weight share")
 	}
 	groups := make([]routebackend.WeightedServiceMembers, 0, len(pools))
 	services := make([]cloud.TLSBackendService, 0, len(pools))
@@ -305,17 +306,20 @@ func flattenWeightedSNIPools(target *cloud.TLSSNIRoute, pools []cloud.TLSSNIBack
 		if len(pool.Members) > 0 {
 			groups = append(groups, routebackend.WeightedServiceMembers{Weight: int32(pool.Weight), Members: pool.Members})
 			services = append(services, cloud.TLSBackendService{UID: pool.ServiceUID, Port: pool.ServicePort})
-			target.BackendServiceMembers = append(target.BackendServiceMembers, pool)
 		}
 	}
 	members, err := routebackend.WeightedMembers(cloud.ListenerProtocolTCP, groups)
 	if err != nil {
-		return &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}
+		return err
 	}
 	slices.SortFunc(services, func(a, b cloud.TLSBackendService) int {
 		return cmp.Or(cmp.Compare(a.UID, b.UID), cmp.Compare(a.Port, b.Port))
 	})
 	target.BackendServices, target.Members = slices.Compact(services), members
+	target.BackendServiceMembers = pools
+	if share.RejectWeight > 0 {
+		target.TCPConnectionRejection = &share
+	}
 	return nil
 }
 

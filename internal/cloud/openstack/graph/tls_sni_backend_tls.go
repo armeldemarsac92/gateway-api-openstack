@@ -170,8 +170,7 @@ func (fragment *observedSNIFragment) protectedBackendTLS() bool {
 
 func (fragment *observedSNIFragment) closedBackendPool() bool {
 	if fragment.backendPools != nil {
-		// A verified terminating weighted selector rejects rather than
-		// falling through when every destination is down.
+		// A verified weighted selector rejects when every destination is down.
 		return !fragment.targetsUnverified && len(fragment.backendTargets) > 0 && fragment.firstOpenPool() == nil
 	}
 	return fragment.pool.ProvisioningStatus == "ACTIVE" && fragment.backendTLS.AdminObserved && !fragment.pool.AdminStateUp
@@ -212,8 +211,14 @@ func sniDisablePoolStep(fragment *observedSNIFragment) graphMutation {
 // prepareSNIRouteBackendTLS turns unavailable TLS backends into closed
 // selectors before planning creates and attaches any new resources.
 func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) error {
-	if !cloud.IsTCPTLSListenerProtocol(desired.protocol) || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+	if !isSNIProtocol(desired.protocol) || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return nil
+	}
+	if err := p.prepareWeightedSNI(ctx, desired, actual); err != nil {
+		return err
+	}
+	if !cloud.IsTCPTLSListenerProtocol(desired.protocol) {
+		return p.prepareSNIBackendPools(ctx, desired, actual, false, false)
 	}
 	hasStrictPool := slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
 		return target.route.BackendTLS != nil || slices.ContainsFunc(target.route.BackendPools, func(backend cloud.TLSSNIBackendPool) bool {
@@ -227,13 +232,17 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 	if actual.loadBalancer != nil {
 		provider = actual.loadBalancer.Provider
 	}
-	capable := hasStrictPool && p.backendTLSPolicy && p.backendCA != nil && p.octavia.VerifyGatewayCapabilities(ctx, provider, tcpBackendTLSCapabilities()...) == nil
+	var capable, capabilityPending bool
+	if hasStrictPool && p.backendTLSPolicy && p.backendCA != nil {
+		err := p.octavia.VerifyGatewayCapabilities(ctx, provider, tcpBackendTLSCapabilities()...)
+		capable, capabilityPending = err == nil, sniCapabilityDiscoveryPending(err)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	desired.sniHeldClosed = make(map[sniFragmentKey]bool)
 	desired.sniBlockedRoutes = make(map[string]bool)
-	if err := p.prepareSNIBackendPools(ctx, desired, actual, capable); err != nil {
+	if err := p.prepareSNIBackendPools(ctx, desired, actual, capable, capabilityPending); err != nil {
 		return err
 	}
 	var targets []desiredSNIFragment

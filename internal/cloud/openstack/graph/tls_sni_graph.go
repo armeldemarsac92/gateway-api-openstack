@@ -153,8 +153,8 @@ func buildSNITargets(gateway cloud.Identity, routes []cloud.TLSSNIRoute) ([]desi
 			if owner.Identity != route.Identity {
 				return nil, fmt.Errorf("%w: inconsistent identity for the same TLSRoute UID", cloud.ErrOwnershipConflict)
 			}
-			// A mixed listener can expose different hostnames from one
-			// TLSRoute in each mode, with independent pools only on termination.
+			// A mixed listener can expose different hostnames and backend
+			// transports from one TLSRoute in each mode.
 			independentModes := owner.Passthrough != route.Passthrough && (len(owner.BackendPools) != 0 || len(route.BackendPools) != 0)
 			if !owner.Deny && !route.Deny && !independentModes && (owner.ServiceUID != route.ServiceUID || owner.ServicePort != route.ServicePort || owner.BackendSubnetID != route.BackendSubnetID ||
 				!slices.Equal(owner.BackendServices, route.BackendServices) || !sameSNIBackendPools(owner.BackendPools, route.BackendPools) ||
@@ -303,11 +303,10 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 	if err != nil {
 		return actual, err
 	}
-	actual.listener = listener
+	actual.listener = nil
 	pendingUpdate := lb.ProvisioningStatus == "PENDING_UPDATE"
 	if listener != nil {
-		actual.state.ListenerID = listener.ID
-		if listener.Protocol != cloud.ListenerProtocolTCP || listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort ||
+		if listener.ID == "" || listener.Protocol != cloud.ListenerProtocolTCP || listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort ||
 			!matchesSNIProfile(listener.Tags, desired.protocol) ||
 			len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID || !actual.adminObserved[listener.ID] ||
 			desired.protocol == cloud.ListenerProtocolTLSSNI && !isPassthroughSNIListener(*listener, inventory) {
@@ -316,6 +315,8 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 		if err := requireListenerDefaultPoolInventory(lb.ID, inventory); err != nil {
 			return actual, err
 		}
+		actual.listener, actual.state.ListenerID = listener, listener.ID
+		actual.sniListenerAttached = true
 		if listener.DefaultPoolID != "" {
 			// Prove ownership of the frontend before closing it. An unexpected
 			// default may belong to somebody else, so leave its edge untouched.
@@ -465,7 +466,9 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 					fragment.backendPools = make(map[int]*observedSNIFragment)
 				}
 				fragment.observeBackendTargets(row)
-				if desired.protocol == cloud.ListenerProtocolTLSMixed && fragment.passthrough == nil {
+				wanted, known := wantedModes[key]
+				if (desired.protocol == cloud.ListenerProtocolTLSMixed && (fragment.passthrough == nil || known && wanted != fragment.isPassthrough())) ||
+					(desired.protocol != cloud.ListenerProtocolTLSMixed && fragment.isPassthrough()) {
 					fragment.targetsUnverified = true
 				}
 			}
@@ -568,6 +571,14 @@ func (fragment *observedSNIFragment) matchesSNISelector(wanted desiredSNIFragmen
 }
 
 func (fragment *observedSNIFragment) matchesSNIMembers(route cloud.TLSSNIRoute) bool {
+	type memberAddress struct {
+		address string
+		port    int
+	}
+	wanted := make(map[memberAddress]int, len(route.Members))
+	for _, member := range route.Members {
+		wanted[memberAddress{member.Address, member.Port}] = max(1, member.Weight)
+	}
 	seen := make(map[netip.AddrPort]bool)
 	for _, member := range fragment.members {
 		address, err := netip.ParseAddr(member.Address)
@@ -577,9 +588,7 @@ func (fragment *observedSNIFragment) matchesSNIMembers(route cloud.TLSSNIRoute) 
 		key := netip.AddrPortFrom(address, uint16(member.ProtocolPort))
 		if seen[key] || member.ProvisioningStatus != "ACTIVE" || !member.AdminStateUp || member.Backup ||
 			route.BackendSubnetID != "" && member.SubnetID != route.BackendSubnetID ||
-			!slices.ContainsFunc(route.Members, func(m cloud.Member) bool {
-				return m.Address == member.Address && m.Port == member.ProtocolPort && max(1, m.Weight) == member.Weight
-			}) {
+			member.Weight < 1 || wanted[memberAddress{member.Address, member.ProtocolPort}] != member.Weight {
 			return false
 		}
 		seen[key] = true
@@ -716,6 +725,15 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state),
 		Routes: sniRouteResults(desired.sni, cloud.RouteResult{Outcome: pending}),
 	}
+	for _, target := range desired.sni {
+		if target.usesBackendPools() && target.weightedBlocked {
+			for i := range result.Routes {
+				if result.Routes[i].Identity.RouteUID == target.route.Identity.RouteUID {
+					result.Routes[i].Result.Outcome = p.progressingOutcome("Exact TLSRoute backend shares require verified Octavia weighted TLS SNI pools in this region")
+				}
+			}
+		}
+	}
 	plan := func(step graphMutation) ([]graphMutation, cloud.GatewayGraphResult, error) {
 		result.Outcome = p.progressingOutcome(step.message)
 		result.Gateway.Outcome = result.Outcome
@@ -764,7 +782,7 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 				return desired.sniPaused[other] && amphora.SNISuffixCovers(actual.sni[other].selectorHostname(), hostname)
 			})
 			unavailableWeightedGuard := fragment.backendPools != nil &&
-				(!desired.sniBackendPoolsCapable || fragment.targetsUnverified)
+				(desired.sniBackendPoolCapabilityLost(fragment.isPassthrough()) || fragment.targetsUnverified)
 			if _, stillClaimed := byHostname[hostname]; !stillClaimed && hostname != "" &&
 				(fragment.hasActiveSelector(hostname) || fragment.closedBackendPool() || unavailableWeightedGuard) &&
 				(pausedFallback || hasSNIFallback(hostname, desired.sni, actual.sni)) {
@@ -791,6 +809,7 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 	for _, key := range keys {
 		fragment := actual.sni[key]
 		target, keep := wanted[key]
+		retainedDuringDiscovery := fragment.keepsSNISelectorDuringDiscovery(key, byHostname[fragment.forwardingHostname()], desired)
 		if fragment.weighted() && fragment.detached() && fragment.pool.ProvisioningStatus == "ERROR" {
 			// A failed batch can leave child rows pending even though its
 			// parent load balancer is mutable. Only the pool can remove them.
@@ -803,7 +822,7 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 			waitForOctavia = true
 			continue
 		}
-		if !desired.sniPaused[key] && !desired.sniHeldClosed[key] && !fragment.hasUnverifiedMembers() && !fragment.unprovenDetachedBackendPools() &&
+		if !desired.sniPaused[key] && !desired.sniHeldClosed[key] && !retainedDuringDiscovery && !fragment.hasUnverifiedMembers() && !fragment.unprovenDetachedBackendPools() &&
 			(!keep || !target.weightedBlocked && !fragment.matches(target)) {
 			retire = append(retire, key)
 		}
@@ -856,7 +875,7 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 			}
 		}
 		if retiredGuards[key] && !desired.sniPaused[key] &&
-			(fragment.backendPools == nil || desired.sniBackendPoolsCapable && !fragment.targetsUnverified) && fragment.policy != nil &&
+			(fragment.backendPools == nil || desired.sniBackendPoolCapability(fragment.isPassthrough()) && !fragment.targetsUnverified) && fragment.policy != nil &&
 			fragment.rule != nil && !fragment.policy.AdminStateUp {
 			// Restore a closed selector before its broader neighbor can
 			// resume after the regional suffix capability returns.
@@ -866,7 +885,7 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		}
 	}
 	if actual.listener != nil && actual.listener.AdminStateUp {
-		step, coveredUID, needed := protectSNIClaims(desired.sni, actual.sni, keys, desired.protocol)
+		step, coveredUID, needed := protectSNIClaims(desired, actual.sni, keys)
 		if needed {
 			for i, route := range result.Routes {
 				if encodedSNITag("route-uid", route.Identity.RouteUID) == coveredUID {
@@ -992,19 +1011,19 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 
 // protectSNIClaims prevents fallback while a denied or protected selector is
 // being staged. It needs no allocation or CA publication to withdraw traffic.
-func protectSNIClaims(desired []desiredSNIFragment, actual map[sniFragmentKey]*observedSNIFragment, keys []sniFragmentKey, protocol string) (graphMutation, string, bool) {
-	rawTLS := cloud.IsTCPTLSListenerProtocol(protocol)
-	for _, target := range desired {
+func protectSNIClaims(desired desiredGatewayGraph, actual map[sniFragmentKey]*observedSNIFragment, keys []sniFragmentKey) (graphMutation, string, bool) {
+	rawTLS := cloud.IsTCPTLSListenerProtocol(desired.protocol)
+	for _, target := range desired.sni {
 		if !target.route.Deny && !target.weighted() && !target.weightedBlocked && target.route.BackendTLS == nil && !target.usesBackendPools() &&
-			(protocol != cloud.ListenerProtocolTLSMixed || !hasCrossModeSNIFallback(target, actual)) {
+			(desired.protocol != cloud.ListenerProtocolTLSMixed || !hasCrossModeSNIFallback(target, actual)) {
 			continue
 		}
 		hostname := target.route.Hostname
 		var guard *observedSNIFragment
 		for _, key := range keys {
 			fragment := actual[key]
-			rejects := rawTLS && fragment.closedBackendPool() || fragment.emptyActivePool()
-			if fragment.hasActiveSelector(hostname) && (fragment.matches(target) || rejects) &&
+			rejects := (rawTLS || fragment.backendPools != nil) && fragment.closedBackendPool() || fragment.emptyActivePool()
+			if fragment.hasActiveSelector(hostname) && (fragment.matches(target) || rejects || fragment.keepsSNISelectorDuringDiscovery(key, target, desired)) &&
 				(guard == nil || fragment.policy.Position < guard.policy.Position) {
 				guard = fragment
 			}
@@ -1165,6 +1184,9 @@ func (p *Provider) executeSNIMutation(ctx context.Context, desired desiredGatewa
 			Protocol: pools.ProtocolTCP, LBMethod: pools.LBMethodRoundRobin, LoadbalancerID: actual.state.LoadBalancerID,
 			Name: resourceName(step.target.route.Identity, roleSNIPool), AdminStateUp: boolPointer(true), Tags: tagsFor(roleSNIPool),
 		}
+		if step.poolSlot != nil {
+			opts.LBMethod = sniBackendPoolAlgorithm(len(step.target.route.Members))
+		}
 		if step.target.weighted() {
 			opts.Tags = append(opts.Tags, sniWeightedPoolTag)
 		}
@@ -1254,8 +1276,11 @@ func (p *Provider) isolateUnavailableSNISuffix(ctx context.Context, desired *des
 	if actual.loadBalancer != nil {
 		provider = actual.loadBalancer.Provider
 	}
-	if p.tlsSNISuffix && p.octavia.VerifyGatewayCapabilities(ctx, provider, octavia.GatewayCapabilityTLSSNISuffix) == nil {
-		return
+	if p.tlsSNISuffix {
+		err := p.octavia.VerifyGatewayCapabilities(ctx, provider, octavia.GatewayCapabilityTLSSNISuffix)
+		if err == nil || sniCapabilityDiscoveryPending(err) {
+			return
+		}
 	}
 	isolate := func(hostname string) bool {
 		return slices.ContainsFunc(affected, func(unsupported string) bool {
@@ -1304,6 +1329,21 @@ func (p *Provider) verifySNICapability(ctx context.Context, desired desiredGatew
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("verify Octavia TLS SNI capabilities in region %q: %w", p.region, err))
 	}
 	return nil
+}
+
+func sniCapabilityDiscoveryPending(err error) bool {
+	var missing *octavia.MissingGatewayCapability
+	return err != nil && !isNotFound(err) && !errors.As(err, &missing)
+}
+
+func (p *Provider) handleSNICapabilityError(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, result cloud.GatewayGraphResult, cause error) (cloud.GatewayGraphResult, error) {
+	if !sniCapabilityDiscoveryPending(cause) {
+		return p.withdrawUndiscoverableSNI(ctx, desired, actual, cause)
+	}
+	outcome := p.progressingOutcome("Waiting for Octavia TLS SNI capability discovery")
+	result.Outcome, result.Gateway.Outcome = outcome, outcome
+	deferReadySNIReadback(&result, outcome)
+	return result, ctx.Err()
 }
 
 func graphUsesSNISuffix(desired desiredGatewayGraph, actual observedGatewayGraph) bool {

@@ -844,6 +844,13 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (graphMutation, error) {
 	if isSNIProtocol(desired.protocol) {
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && !step.sniWithdrawal {
+			if desired.sniBackendPoolDiscoveryPending && (step.kind == graphEnableListener || step.kind == graphEnableLoadBalancer) {
+				for _, fragment := range actual.sni {
+					if fragment.backendPools != nil && fragment.policy != nil && fragment.policy.AdminStateUp {
+						return step, fmt.Errorf("waiting for weighted TLS SNI capability discovery before reopening the frontend")
+					}
+				}
+			}
 			return step, p.verifySNICapability(ctx, desired, actual)
 		}
 		return step, nil

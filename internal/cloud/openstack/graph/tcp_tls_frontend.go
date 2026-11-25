@@ -121,7 +121,7 @@ func (p *Provider) observeRawTLSFrontend(ctx context.Context, desired desiredGat
 	default:
 		dependencyErr = p.verifySNICapability(ctx, desired, *actual)
 		actual.rawTLSCapabilityVerified = dependencyErr == nil
-		if dependencyErr != nil {
+		if dependencyErr != nil && !sniCapabilityDiscoveryPending(dependencyErr) {
 			closeMessage = "Closing the TCP TLS listener until Octavia advertises its capability"
 		} else if listener != nil && (!actual.adminObserved[listener.ID] || listener.ProvisioningStatus == "ERROR") {
 			closeMessage = "Waiting for verified TCP TLS listener administrative state"

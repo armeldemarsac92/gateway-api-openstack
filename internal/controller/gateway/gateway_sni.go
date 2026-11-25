@@ -457,6 +457,8 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 				programmedMessage = "The backend Service has no ready IPv4 endpoints"
 			case outcome.Outcome.State == cloud.OutcomeReady || retain:
 				programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms forwarding for the selected SNI hostnames and their backend"
+			case outcome.Outcome.State == cloud.OutcomeProgressing && outcome.Outcome.Message != "":
+				programmedMessage = outcome.Outcome.Message
 			}
 			controller.SetCondition(&status.Conditions, controller.Condition("Accepted", accepted, string(entry.acceptedReason), entry.acceptedMessage, base.Generation))
 			controller.SetCondition(&status.Conditions, controller.Condition("ResolvedRefs", resolved, string(resolvedReason), resolvedMessage, base.Generation))

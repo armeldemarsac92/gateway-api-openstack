@@ -63,10 +63,10 @@ func sameSNIBackendPools(a, b []cloud.TLSSNIBackendPool) bool {
 }
 
 func normalizeSNIBackendPools(route *cloud.TLSSNIRoute) error {
-	if route.Passthrough || route.ServiceUID != "" || route.ServicePort != 0 || len(route.Members) != 0 ||
+	if route.ServiceUID != "" || route.ServicePort != 0 || len(route.Members) != 0 ||
 		route.BackendTLS != nil || len(route.BackendServices) != 0 || route.TCPConnectionRejection != nil ||
 		len(route.BackendPools) > openstackidentity.MaxSNIBackendPools {
-		return invalidSNI("weighted TLS SNI pools require an exclusive terminating backend representation")
+		return invalidSNI("weighted TLS SNI pools require an exclusive backend representation")
 	}
 	route.BackendPools = slices.Clone(route.BackendPools)
 	for i, backend := range route.BackendPools {
@@ -79,7 +79,7 @@ func normalizeSNIBackendPools(route *cloud.TLSSNIRoute) error {
 		if backend.ServiceUID == "" || backend.ServicePort < 1 || backend.ServicePort > 65535 || len(backend.Members) == 0 {
 			return invalidSNI("weighted TLS SNI pools require identified Services with ready members")
 		}
-		if tls := backend.BackendTLS; tls != nil && (tls.Denied || len(tls.SubjectAltNames) != 0 || !validBackendTLS(tls)) {
+		if tls := backend.BackendTLS; tls != nil && (route.Passthrough || tls.Denied || len(tls.SubjectAltNames) != 0 || !validBackendTLS(tls)) {
 			return invalidSNI("weighted TLS SNI backend TLS requires an authorized CA and a DNS hostname")
 		}
 		members, err := normalizeSNIMembers(*route, backend.Members)
@@ -146,8 +146,7 @@ func (fragment *observedSNIFragment) observeBackendTargets(row octavia.L7PolicyO
 	fragment.targetsUnverified = row.Policy.Action != string(octavia.ActionWeightedTargets) ||
 		len(row.WeightedTCPPolicyTargets) == 0 || row.Target == nil || row.Target.FixedResponse != nil ||
 		string(row.PoolReference) != "null" || row.HTTPSListenerHostnamePresent || row.RedirectOptionsPresent || hasHTTPOnlySNIOptions(row) ||
-		row.TargetRequestFiltersPresent || row.TargetMirrorsPresent || row.RequestMirrorsErr != nil || len(row.RequestMirrors) != 0 ||
-		row.TCPTLSPassthrough != nil && *row.TCPTLSPassthrough
+		row.TargetRequestFiltersPresent || row.TargetMirrorsPresent || row.RequestMirrorsErr != nil || len(row.RequestMirrors) != 0
 	for slot, target := range row.WeightedTCPPolicyTargets {
 		leaf := fragment.backendPools[slot]
 		if leaf == nil || target.PoolID != leaf.pool.ID {
@@ -247,9 +246,18 @@ func (fragment *observedSNIFragment) weightedBackendTargetShape(target desiredSN
 	return true
 }
 
-func (leaf *observedSNIFragment) backendPoolSettingsValid(target desiredSNIFragment) bool {
+func sniBackendPoolAlgorithm(memberCount int) pools.LBMethod {
+	if memberCount > cloud.MaxTCPRoundRobinMembers {
+		// Connection shares are selected by the policy. A large Service
+		// can use least connections with uniform weights within its pool.
+		return pools.LBMethodLeastConnections
+	}
+	return pools.LBMethodRoundRobin
+}
+
+func (leaf *observedSNIFragment) backendPoolSettingsValid(target desiredSNIFragment, algorithm pools.LBMethod) bool {
 	if leaf.pool.ProvisioningStatus != "ACTIVE" || !leaf.backendTLS.AdminObserved || !leaf.backendTLS.EnabledObserved ||
-		leaf.pool.LBMethod != string(pools.LBMethodRoundRobin) || leaf.pool.Persistence.Type != "" ||
+		leaf.pool.LBMethod != string(algorithm) || leaf.pool.Persistence.Type != "" ||
 		leaf.tcpRejection.Invalid || leaf.tcpRejection.Value != nil ||
 		leaf.backendTLS.RequireH2 {
 		return false
@@ -273,7 +281,7 @@ func (fragment *observedSNIFragment) matchesBackendPools(target desiredSNIFragme
 			return false
 		}
 		want := target.backendPool(slot)
-		if !leaf.backendPoolSettingsValid(want) || len(leaf.members) > len(want.route.Members) ||
+		if !leaf.backendPoolSettingsValid(want, sniBackendPoolAlgorithm(len(want.route.Members))) || len(leaf.members) > len(want.route.Members) ||
 			!leaf.matchesSNIMembers(want.route) {
 			return false
 		}
@@ -281,8 +289,8 @@ func (fragment *observedSNIFragment) matchesBackendPools(target desiredSNIFragme
 	return true
 }
 
-func (leaf *observedSNIFragment) matchesNativeBackendTransport(target desiredSNIFragment) bool {
-	if !leaf.backendPoolSettingsValid(target) || target.backendTLS.denies() {
+func (leaf *observedSNIFragment) matchesNativeBackendTransport(target desiredSNIFragment, algorithm pools.LBMethod) bool {
+	if !leaf.backendPoolSettingsValid(target, algorithm) || target.backendTLS.denies() {
 		return false
 	}
 	if tls := target.route.BackendTLS; tls != nil {
@@ -297,7 +305,7 @@ func (leaf *observedSNIFragment) matchesNativeBackendTransport(target desiredSNI
 
 func (leaf *observedSNIFragment) backendPoolServing(target desiredSNIFragment) bool {
 	return leaf.pool.AdminStateUp && !leaf.membersUnverified && len(leaf.members) == len(target.route.Members) &&
-		leaf.matchesNativeBackendTransport(target) &&
+		leaf.matchesNativeBackendTransport(target, sniBackendPoolAlgorithm(len(target.route.Members))) &&
 		(target.route.BackendTLS == nil || target.backendTLS.phase == backendTLSVerified)
 }
 
@@ -328,29 +336,14 @@ func (fragment *observedSNIFragment) backendPoolsReady(target desiredSNIFragment
 		}) && !fragment.hasUnverifiedMembers()
 }
 
-func (p *Provider) prepareSNIBackendPools(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph, tlsCapable bool) error {
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure {
-		return nil
-	}
-	usesPools := slices.ContainsFunc(desired.sni, desiredSNIFragment.usesBackendPools)
-	for _, fragment := range actual.sni {
-		usesPools = usesPools || fragment.backendPools != nil
-	}
-	if !usesPools {
-		return nil
-	}
-	provider := desired.spec.Gateway.Spec.Provider
-	if actual.loadBalancer != nil {
-		provider = actual.loadBalancer.Provider
-	}
-	desired.sniBackendPoolsCapable = p.octavia.VerifyGatewayCapabilities(ctx, provider, octavia.GatewayCapabilityTLSSNIWeightedPools) == nil
+func (p *Provider) prepareSNIBackendPools(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph, tlsCapable, tlsCapabilityPending bool) error {
 	var guards []desiredSNIFragment
 	for i := range desired.sni {
 		target := &desired.sni[i]
 		if !target.usesBackendPools() {
 			continue
 		}
-		target.weightedBlocked = !desired.sniBackendPoolsCapable
+		target.weightedBlocked = !desired.sniBackendPoolCapability(target.route.Passthrough)
 		target.backendPoolPlans = make([]backendTLSPlan, len(target.route.BackendPools))
 		fragment := actual.sni[target.key]
 		for slot, backend := range target.route.BackendPools {
@@ -372,23 +365,42 @@ func (p *Provider) prepareSNIBackendPools(ctx context.Context, desired *desiredG
 					observed.pool, observed.backendTLS = leaf.pool, leaf.backendTLS
 				}
 			}
+			retainVerifiedTLS := tlsCapabilityPending && desired.sniBackendPoolDiscoveryPending
+			if retainVerifiedTLS {
+				// This readback can only keep an existing pool authorized
+				// during discovery. No weighted admission is possible.
+				for key, current := range actual.sni {
+					if key != target.key && !current.canReplaceBackendPools(key, *target) || !current.hasActiveSelector(target.route.Hostname) {
+						continue
+					}
+					for _, leaf := range current.backendPools {
+						if leaf.backendPoolSettingsValid(leafTarget, sniBackendPoolAlgorithm(len(leaf.members))) && leaf.pool.AdminStateUp {
+							observed.pool, observed.backendTLS = leaf.pool, leaf.backendTLS
+							break
+						}
+					}
+				}
+				retainVerifiedTLS = observed.pool != nil
+			}
 			clientIdentity := desired.spec.Gateway.BackendClientCertificate
 			clientIdentity.Denied = clientIdentity.Denied || clientIdentity.Reference != ""
 			route := desiredRoute{spec: cloud.RouteSpec{Identity: target.route.Identity, BackendTLS: backend.BackendTLS}}
-			target.backendPoolPlans[slot] = p.observeBackendTLS(ctx, route, observed, func(bool, bool) bool { return tlsCapable },
+			target.backendPoolPlans[slot] = p.observeBackendTLS(ctx, route, observed, func(bool, bool) bool { return tlsCapable || retainVerifiedTLS },
 				desired.spec.Gateway.BackendCAOwned, clientIdentity)
 		}
 		verified := fragment != nil && fragment.hasActiveSelector(target.route.Hostname) && fragment.matches(*target) && fragment.backendPoolsConverged(*target)
 		predecessor := false
 		for key, observed := range actual.sni {
-			if observed.canStageBehindSNIBackendPools(key, *target, *desired) {
+			if observed.canStageBehindSNIBackendPools(key, *target, *desired) ||
+				!target.weightedBlocked && observed.canKeepFlatSNI(key, *target) ||
+				observed.keepsSNISelectorDuringDiscovery(key, *target, *desired) {
 				predecessor = true
 				break
 			}
 		}
 		if (!verified || target.weightedBlocked) && !predecessor && hasSNIFallback(target.route.Hostname, desired.sni, actual.sni) {
 			guard, err := buildSNITargets(desired.spec.Identity, []cloud.TLSSNIRoute{{
-				Identity: target.route.Identity, Hostname: target.route.Hostname, Deny: true,
+				Identity: target.route.Identity, Hostname: target.route.Hostname, Deny: true, Passthrough: target.route.Passthrough,
 			}})
 			if err != nil {
 				return err
@@ -408,17 +420,20 @@ func withdrawSNIBackendPools(desired desiredGatewayGraph, actual observedGateway
 			continue
 		}
 		target, keep := wanted[key]
-		if replacement, preserve := sniBackendPoolSuccessor(desired, key, fragment); !keep && preserve {
+		if replacement, found := fragment.replacementBackendPools(key, desired); !keep && found {
 			for _, slot := range slices.Sorted(maps.Keys(fragment.backendPools)) {
 				leaf := fragment.backendPools[slot]
 				if !leaf.closedBackendPool() && !replacement.permitsBackendPool(leaf) {
 					return sniDisablePoolStep(leaf), true
 				}
 			}
-			continue
+			if fragment.canStageBehindSNIBackendPools(key, replacement, desired) ||
+				desired.sniBackendPoolDiscoveryPending && !desired.sniPaused[key] && !desired.sniPaused[replacement.key] {
+				continue
+			}
 		}
 		if fragment.policy != nil && fragment.policy.AdminStateUp &&
-			(fragment.targetsUnverified || desired.spec.Gateway.Disposition == cloud.GraphEnsure && !desired.sniBackendPoolsCapable) {
+			(fragment.targetsUnverified || desired.spec.Gateway.Disposition == cloud.GraphEnsure && desired.sniBackendPoolCapabilityLost(fragment.isPassthrough())) {
 			// An unreadable action can point at pools outside this fragment.
 			// Remove the owned policy only after any covering suffix is safe.
 			var claims []string
@@ -466,12 +481,12 @@ func withdrawSNIBackendPools(desired desiredGatewayGraph, actual observedGateway
 			if leaf.closedBackendPool() {
 				continue
 			}
-			if !matches || target.weightedBlocked {
+			if !matches || target.weightedBlocked && !desired.sniBackendPoolDiscoveryPending {
 				return sniDisablePoolStep(leaf), true
 			}
 			want := target.backendPool(slot)
 			if want.backendTLS.denies() || want.route.ServiceUID == "" || leaf.membersUnverified ||
-				want.route.BackendTLS != nil && (want.backendTLS.phase != backendTLSVerified || !leaf.matchesNativeBackendTransport(want)) ||
+				want.route.BackendTLS != nil && (want.backendTLS.phase != backendTLSVerified || !leaf.matchesNativeBackendTransport(want, sniBackendPoolAlgorithm(len(want.route.Members)))) ||
 				fragment.policy != nil && fragment.policy.AdminStateUp && len(leaf.members) != len(want.route.Members) {
 				return sniDisablePoolStep(leaf), true
 			}
@@ -481,16 +496,92 @@ func withdrawSNIBackendPools(desired desiredGatewayGraph, actual observedGateway
 }
 
 func (fragment *observedSNIFragment) canStageBehindSNIBackendPools(key sniFragmentKey, target desiredSNIFragment, desired desiredGatewayGraph) bool {
-	return desired.sniBackendPoolsCapable && fragment.backendPools != nil && key != target.key &&
-		key.sniRouteKey == target.key.sniRouteKey && !target.route.Deny && !target.route.Passthrough &&
-		!target.weightedBlocked && !desired.sniPaused[key] && !desired.sniPaused[target.key] &&
-		!fragment.targetsUnverified &&
-		len(fragment.backendTargets) != 0 && fragment.hasActiveSelector(target.route.Hostname)
+	return fragment.canReplaceBackendPools(key, target) &&
+		(!target.usesBackendPools() || desired.sniBackendPoolCapability(target.route.Passthrough)) &&
+		!target.weightedBlocked && !desired.sniPaused[key] && !desired.sniPaused[target.key]
+}
+
+func (fragment *observedSNIFragment) keepsSNISelectorDuringDiscovery(key sniFragmentKey, target desiredSNIFragment, desired desiredGatewayGraph) bool {
+	return desired.sniBackendPoolDiscoveryPending && !desired.sniPaused[key] && !desired.sniPaused[target.key] &&
+		(fragment.canReplaceBackendPools(key, target) || fragment.canKeepFlatSNI(key, target))
+}
+
+func (fragment *observedSNIFragment) canReplaceBackendPools(key sniFragmentKey, target desiredSNIFragment) bool {
+	return fragment.backendPools != nil && !fragment.targetsUnverified && len(fragment.backendTargets) != 0 &&
+		key != target.key && key.sniRouteKey == target.key.sniRouteKey && !target.route.Deny &&
+		fragment.isPassthrough() == target.route.Passthrough && fragment.hasActiveSelector(target.route.Hostname)
+}
+
+func (fragment *observedSNIFragment) replacementBackendPools(key sniFragmentKey, desired desiredGatewayGraph) (desiredSNIFragment, bool) {
+	for _, target := range desired.sni {
+		if fragment.canReplaceBackendPools(key, target) {
+			return target, true
+		}
+	}
+	return desiredSNIFragment{}, false
+}
+
+func (fragment *observedSNIFragment) isPassthrough() bool {
+	return fragment.passthrough != nil && *fragment.passthrough
+}
+
+func (desired desiredGatewayGraph) sniBackendPoolCapability(passthrough bool) bool {
+	if desired.protocol == cloud.ListenerProtocolTLSSNI || passthrough {
+		return desired.sniPassthroughBackendPoolsCapable
+	}
+	return desired.sniBackendPoolsCapable
+}
+
+func (desired desiredGatewayGraph) sniBackendPoolCapabilityLost(passthrough bool) bool {
+	return !desired.sniBackendPoolDiscoveryPending && !desired.sniBackendPoolCapability(passthrough)
+}
+
+// canKeepFlatSNI proves that the old graph serves only currently authorized
+// destinations. Its weights may differ while the replacement is staging.
+func (fragment *observedSNIFragment) canKeepFlatSNI(key sniFragmentKey, target desiredSNIFragment) bool {
+	if !target.usesBackendPools() || fragment.backendPools != nil || !fragment.weighted() ||
+		key.sniRouteKey != target.key.sniRouteKey || fragment.isPassthrough() != target.route.Passthrough ||
+		!fragment.hasActiveSelector(target.route.Hostname) || !fragment.pool.AdminStateUp ||
+		fragment.pool.ProvisioningStatus != "ACTIVE" || !fragment.backendTLS.AdminObserved ||
+		!fragment.backendTLS.EnabledObserved || fragment.protectedBackendTLS() ||
+		fragment.pool.LBMethod != string(pools.LBMethodRoundRobin) || fragment.pool.Persistence.Type != "" ||
+		fragment.tcpRejection.Invalid || fragment.membersUnverified || len(fragment.members) == 0 {
+		return false
+	}
+	allowed := make(map[netip.AddrPort]bool)
+	for slot, pool := range target.route.BackendPools {
+		// A missing reference can no longer prove which of the old,
+		// flattened destinations belonged to the withdrawn Service.
+		if pool.ServiceUID == "" || pool.BackendTLS != nil || target.backendPool(slot).backendTLS.denies() {
+			return false
+		}
+		for _, member := range pool.Members {
+			address, err := netip.ParseAddr(member.Address)
+			if err != nil {
+				return false
+			}
+			allowed[netip.AddrPortFrom(address, uint16(member.Port))] = true
+		}
+	}
+	proof := cloud.TLSSNIRoute{BackendSubnetID: target.route.BackendSubnetID}
+	for _, member := range fragment.members {
+		address, err := netip.ParseAddr(member.Address)
+		if err != nil || member.Weight < 1 || member.Weight > 256 ||
+			!allowed[netip.AddrPortFrom(address, uint16(member.ProtocolPort))] {
+			return false
+		}
+		proof.Members = append(proof.Members, cloud.Member{Address: member.Address, Port: member.ProtocolPort, Weight: member.Weight})
+	}
+	return fragment.matchesSNIMembers(proof)
 }
 
 func sniBackendPoolSuccessor(desired desiredGatewayGraph, key sniFragmentKey, fragment *observedSNIFragment) (desiredSNIFragment, bool) {
+	target, found := fragment.replacementBackendPools(key, desired)
+	if found && fragment.canStageBehindSNIBackendPools(key, target, desired) {
+		return target, true
+	}
 	for _, target := range desired.sni {
-		if fragment.canStageBehindSNIBackendPools(key, target, desired) {
+		if !target.weightedBlocked && !desired.sniPaused[key] && !desired.sniPaused[target.key] && fragment.canKeepFlatSNI(key, target) {
 			return target, true
 		}
 	}
@@ -502,7 +593,8 @@ func (target desiredSNIFragment) permitsBackendPool(leaf *observedSNIFragment) b
 		return false
 	}
 	allowed := func(want desiredSNIFragment) bool {
-		return want.route.ServiceUID != "" && leaf.matchesNativeBackendTransport(want) && leaf.matchesSNIMembers(want.route)
+		algorithm := sniBackendPoolAlgorithm(len(leaf.members))
+		return want.route.ServiceUID != "" && leaf.matchesNativeBackendTransport(want, algorithm) && leaf.matchesSNIMembers(want.route)
 	}
 	if target.usesBackendPools() {
 		for slot := range target.route.BackendPools {
@@ -633,10 +725,16 @@ func nextSNIBackendPoolsMutation(target desiredSNIFragment, fragment *observedSN
 			mutation.kind = sniConfigureBackendTLSPool
 			return step(mutation)
 		}
+		type memberAddress struct {
+			address string
+			port    int
+		}
+		observedMembers := make(map[memberAddress]bool, len(leaf.members))
+		for _, observed := range leaf.members {
+			observedMembers[memberAddress{observed.Address, observed.ProtocolPort}] = true
+		}
 		for _, member := range backend.Members {
-			if !slices.ContainsFunc(leaf.members, func(observed pools.Member) bool {
-				return observed.Address == member.Address && observed.ProtocolPort == member.Port
-			}) {
+			if !observedMembers[memberAddress{member.Address, member.Port}] {
 				mutation.kind, mutation.member = sniCreateMember, member
 				return step(mutation)
 			}

@@ -29,8 +29,9 @@ import (
 
 const maxOctaviaMemberWeight = 256
 
-// HAProxy's dynamic round robin scheduler limits active servers per pool.
-const maxTCPRoundRobinMembers = 4095
+// ErrWeightedMembersUnrepresentable reports an exact ratio or endpoint count
+// that cannot fit in one Octavia pool.
+var ErrWeightedMembersUnrepresentable = errors.New("weights cannot be represented in a single Octavia pool")
 
 // ErrBackendWithoutReadyEndpoints reports an empty positive-weight backend.
 var ErrBackendWithoutReadyEndpoints = errors.New("positive-weight backend has no ready endpoints")
@@ -121,7 +122,7 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 		total := &destination.share
 		total.Quo(total, &gcd)
 		if !total.IsInt64() || total.Int64() > maxOctaviaMemberWeight {
-			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d", protocol, maxOctaviaMemberWeight)
+			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d: %w", protocol, maxOctaviaMemberWeight, ErrWeightedMembersUnrepresentable)
 		}
 		member := destination.member
 		member.Draining = total.Sign() == 0
@@ -131,8 +132,8 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 		}
 		members = append(members, member)
 	}
-	if protocol == cloud.ListenerProtocolTCP && active > maxTCPRoundRobinMembers {
-		return nil, fmt.Errorf("weighted TCP forwarding requires at most %d active endpoints in one HAProxy pool", maxTCPRoundRobinMembers)
+	if protocol == cloud.ListenerProtocolTCP && active > cloud.MaxTCPRoundRobinMembers {
+		return nil, fmt.Errorf("weighted TCP forwarding requires at most %d active endpoints in one HAProxy pool: %w", cloud.MaxTCPRoundRobinMembers, ErrWeightedMembersUnrepresentable)
 	}
 	slices.SortFunc(members, func(left, right cloud.Member) int {
 		return cmp.Or(cmp.Compare(left.Address, right.Address), cmp.Compare(left.Port, right.Port))

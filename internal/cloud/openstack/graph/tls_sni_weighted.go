@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
@@ -101,6 +102,9 @@ func (p *Provider) prepareWeightedSNI(ctx context.Context, desired *desiredGatew
 	if (actual.loadBalancer == nil || actual.loadBalancer.Provider == "amphora") && hasSNIRejectionTarget(*desired) {
 		available, _ = p.TCPConnectionRejectionAvailable(ctx)
 	}
+	if err := p.selectSNIBackendPools(ctx, desired, actual, available); err != nil {
+		return err
+	}
 	var guards []desiredSNIFragment
 	for i := range desired.sni {
 		target := &desired.sni[i]
@@ -130,6 +134,65 @@ func (p *Provider) prepareWeightedSNI(ctx context.Context, desired *desiredGatew
 	return ctx.Err()
 }
 
+func (p *Provider) selectSNIBackendPools(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph, flatRejectionAvailable bool) error {
+	usesPools := slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
+		return target.usesBackendPools() || !flatRejectionAvailable && target.hasSNIBackendPoolFallback()
+	})
+	if !usesPools {
+		for _, fragment := range actual.sni {
+			usesPools = usesPools || fragment.backendPools != nil
+		}
+	}
+	if !usesPools {
+		return nil
+	}
+	provider := desired.spec.Gateway.Spec.Provider
+	if actual.loadBalancer != nil {
+		provider = actual.loadBalancer.Provider
+	}
+	capabilities, err := p.octavia.GatewayCapabilities(ctx, provider)
+	desired.sniBackendPoolDiscoveryPending = sniCapabilityDiscoveryPending(err)
+	desired.sniBackendPoolsCapable = slices.Contains(capabilities, octavia.GatewayCapabilityTLSSNIWeightedPools)
+	desired.sniPassthroughBackendPoolsCapable = desired.sniBackendPoolsCapable &&
+		slices.Contains(capabilities, octavia.GatewayCapabilityTLSSNIPassthrough) &&
+		slices.Contains(capabilities, octavia.GatewayCapabilityTLSSNIPassthroughWeightedPools)
+	for i, target := range desired.sni {
+		if !target.hasSNIBackendPoolFallback() {
+			continue
+		}
+		// Keep the native action across a partial failure when it was
+		// already serving. Otherwise prefer the established single pool.
+		prior := hasPriorSNIBackendPools(target, actual.sni)
+		available := desired.sniBackendPoolCapability(target.route.Passthrough) && (!flatRejectionAvailable || prior)
+		retainWhileDiscovering := desired.sniBackendPoolDiscoveryPending && !flatRejectionAvailable && prior
+		if !available && !retainWhileDiscovering {
+			continue
+		}
+		route := target.route
+		route.UseBackendPools(route.BackendServiceMembers)
+		replacement, err := buildSNITargets(desired.spec.Identity, []cloud.TLSSNIRoute{route})
+		if err != nil {
+			return err
+		}
+		desired.sni[i] = replacement[0]
+	}
+	return ctx.Err()
+}
+
+func (target desiredSNIFragment) hasSNIBackendPoolFallback() bool {
+	return target.route.TCPConnectionRejection != nil && len(target.route.BackendServiceMembers) > 1
+}
+
+func hasPriorSNIBackendPools(target desiredSNIFragment, actual map[sniFragmentKey]*observedSNIFragment) bool {
+	for key, fragment := range actual {
+		if key.sniRouteKey == target.key.sniRouteKey && fragment.backendPools != nil && fragment.isPassthrough() == target.route.Passthrough &&
+			fragment.selectorHostname() == target.route.Hostname {
+			return true
+		}
+	}
+	return false
+}
+
 // Passthrough Amphora omits policies attached to admin-down pools. Suspend
 // covering policies before disabling a stale selector, then stage its verified
 // replacement. This also works when member batch capabilities are unavailable.
@@ -142,7 +205,13 @@ func withdrawWeightedSNI(desired desiredGatewayGraph, actual observedGatewayGrap
 		}
 		target, keep := wanted[key]
 		hostname := fragment.forwardingHostname()
-		if !fragment.weighted() && !fragment.membersUnverified && (!byHostname[hostname].weighted() || !fragment.hasForwardingMembers()) {
+		replacement := byHostname[hostname]
+		if !keep && (desired.sniBackendPoolDiscoveryPending || desired.sniBackendPoolCapability(replacement.route.Passthrough)) &&
+			!desired.sniPaused[key] && !desired.sniPaused[replacement.key] && fragment.canKeepFlatSNI(key, replacement) {
+			continue
+		}
+		weightedReplacement := replacement.weighted() || replacement.usesBackendPools()
+		if !fragment.weighted() && !fragment.membersUnverified && (!weightedReplacement || !fragment.hasForwardingMembers()) {
 			continue
 		}
 		if keep && fragment.matches(target) && len(fragment.members) == len(target.route.Members) {
