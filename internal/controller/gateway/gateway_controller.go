@@ -50,6 +50,8 @@ type Reconciler struct {
 	client.Client
 	// Writer rebuilds and reconciles the complete Gateway graph.
 	Writer graph.Reconciler
+	// GraphRefresh enqueues delayed observations derived from the complete graph.
+	GraphRefresh *graph.GatewayRefreshQueue
 	// Coordinator serializes graph mutation by Gateway UID.
 	Coordinator *graph.Coordinator
 	// APIReader performs safety-sensitive live reads.

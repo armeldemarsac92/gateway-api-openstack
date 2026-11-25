@@ -116,6 +116,9 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	}
 	gatewayController := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.Gateway{}, builder.WithPredicates(controller.GatewayReconcilePredicate(r.Config)))
+	if r.GraphRefresh != nil {
+		gatewayController.WatchesRawSource(r.GraphRefresh)
+	}
 	for _, route := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}, &gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}} {
 		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))

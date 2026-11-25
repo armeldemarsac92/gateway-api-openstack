@@ -147,7 +147,7 @@ func (c Config) validateXBackendExternalHostname() error {
 	if len(classes) == 0 && len(cidrs) == 0 && len(c.XBackendServiceDNSDomains) == 0 {
 		return nil
 	}
-	if !c.XBackendEnabled() || len(classes) == 0 || len(cidrs) == 0 {
+	if !c.XBackendEnabled() || len(classes) != 0 && len(cidrs) == 0 {
 		return fmt.Errorf("routed XBackend ExternalHostname requires the Experimental channel, GatewayClasses and allowed IPv4 CIDRs")
 	}
 	for _, class := range classes {

@@ -160,7 +160,8 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		return graph.RouteInputs{}, errHTTPRouteChanged
 	}
 	if backends != nil {
-		if err := r.resolveExternalHostnameMembers(ctx, input.Nodes, backends.input.XBackends); err != nil {
+		input.RefreshAt, err = r.resolveExternalHostnameMembers(ctx, backends, ensures)
+		if err != nil {
 			return graph.RouteInputs{}, err
 		}
 	}

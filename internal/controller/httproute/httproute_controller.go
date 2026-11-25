@@ -76,8 +76,8 @@ type Reconciler struct {
 	APIReader client.Reader
 	// ListenerSetObserver reads live delegated attachment and certificate decisions.
 	ListenerSetObserver func(context.Context, client.Reader, *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error)
-	// externalHostnameLookup overrides the controller's system resolver in tests.
-	externalHostnameLookup  ipLookup
+	// ExternalHostnames shares DNS observations across this Gateway's reconciles.
+	ExternalHostnames       *ExternalHostnameCache
 	retryBudgetPolicyServed bool
 	// BackendRetryBudgetAvailable checks regional Amphora support for Service budgets.
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
@@ -396,11 +396,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	default:
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
-	resyncInterval := r.Config.OpenStackResyncInterval
-	if graphResult.externalHostname {
-		resyncInterval = min(resyncInterval, externalHostnameRefresh)
-	}
-	resyncAfter := controller.OpenStackResyncAfter(resyncInterval, httpRoute.UID)
+	resyncAfter := controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)
 	if graphResult.UnsupportedMatch != "" {
 		status := programmedRouteStatus()
 		status.accepted, status.acceptedReason, status.acceptedMessage = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), graphResult.UnsupportedMatch

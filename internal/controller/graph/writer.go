@@ -105,6 +105,8 @@ func (*TLSAuthorizationChanged) Error() string {
 type RouteInputs struct {
 	Nodes    []cloud.RouteGraphNode
 	Validate func(context.Context) error
+	// RefreshAt schedules another observation of the complete Gateway graph.
+	RefreshAt time.Time
 }
 
 // GatewaySource observes and validates the Gateway portion of a graph.
@@ -131,6 +133,9 @@ func (sources RouteSources) ObserveRouteGraph(ctx context.Context, request Reque
 			return RouteInputs{}, err
 		}
 		combined.Nodes = append(combined.Nodes, input.Nodes...)
+		if !input.RefreshAt.IsZero() && (combined.RefreshAt.IsZero() || input.RefreshAt.Before(combined.RefreshAt)) {
+			combined.RefreshAt = input.RefreshAt
+		}
 		if input.Validate != nil {
 			fences = append(fences, input.Validate)
 		}
@@ -149,11 +154,13 @@ func (sources RouteSources) ObserveRouteGraph(ctx context.Context, request Reque
 // Writer serializes fresh graph construction and provider operations.
 // All fields are immutable process dependencies.
 type Writer struct {
-	Coordinator *Coordinator
-	Gateway     GatewaySource
-	Routes      RouteSource
-	Provider    cloud.GraphProvider
-	Observer    StageObserver
+	Coordinator                 *Coordinator
+	Gateway                     GatewaySource
+	Routes                      RouteSource
+	Provider                    cloud.GraphProvider
+	Observer                    StageObserver
+	GatewayRefresh              *GatewayRefreshQueue
+	InvalidateExternalHostnames func(cloud.Identity)
 }
 
 // ReconcileGraph rebuilds the graph under its UID lock on every call.
@@ -174,7 +181,13 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	started = time.Now()
 	gateway, err := w.Gateway.ObserveGatewayGraph(ctx, request)
 	w.observeStage(StageGatewayInput, started, err)
+	if request.Action == DeleteRoute || request.Action == DeleteGateway {
+		if w.InvalidateExternalHostnames != nil {
+			w.InvalidateExternalHostnames(request.Identity)
+		}
+	}
 	if err != nil {
+		w.forgetGatewayExternalHostnames(request)
 		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	if request.Action == WithdrawTLS {
@@ -187,9 +200,12 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	var routes RouteInputs
 	if !gateway.Node.AddressWithdrawalOnly() {
 		routes, err = w.Routes.ObserveRouteGraph(ctx, request, gateway.Object)
+	} else {
+		w.forgetGatewayExternalHostnames(request)
 	}
 	w.observeStage(StageRouteInput, started, err)
 	if err != nil {
+		w.forgetGatewayExternalHostnames(request)
 		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	identity := request.Identity
@@ -200,14 +216,24 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		return cloud.GatewayGraphResult{}, err
 	}
 	started = time.Now()
-	err = validateInputs(ctx, gateway, routes)
+	validate := func(ctx context.Context) error {
+		err := validateInputs(ctx, gateway, routes)
+		if err != nil {
+			w.forgetGatewayExternalHostnames(request)
+		}
+		return err
+	}
+	err = validate(ctx)
 	w.observeStage(StageValidation, started, err)
 	if err != nil {
 		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)
 	}
+	if request.Action == Ensure {
+		w.GatewayRefresh.addAt(identity, routes.RefreshAt)
+	}
 	started = time.Now()
 	if gateway.Validate != nil || routes.Validate != nil || gateway.ObserveTLS != nil {
-		spec.ValidateMutation = func(ctx context.Context) error { return validateInputs(ctx, gateway, routes) }
+		spec.ValidateMutation = validate
 	}
 	result, err := w.Provider.ReconcileGatewayGraph(ctx, spec)
 	if err == nil {
@@ -223,6 +249,15 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		return w.finishFailedEnsure(ctx, request, gateway, result, err)
 	}
 	return w.finishTLS(ctx, request.Identity, gateway, result, err)
+}
+
+func (w *Writer) forgetGatewayExternalHostnames(request Request) {
+	if request.Action != Ensure || w.InvalidateExternalHostnames == nil {
+		return
+	}
+	id := request.Identity
+	id.RouteNamespace, id.RouteName, id.RouteUID = "", "", ""
+	w.InvalidateExternalHostnames(id)
 }
 
 // A route can still be detaching when its section is reauthorized. An

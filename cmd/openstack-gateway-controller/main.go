@@ -401,6 +401,12 @@ func run(ctx context.Context) error {
 		Observer: writerMetrics, Coordinator: graphCoordinator, Gateway: gatewayReconciler,
 		Routes: graph.RouteSources{routeReconciler, tcpReconciler, udpReconciler}, Provider: openStackProvider,
 	}
+	if len(controllerConfig.XBackendExternalHostnameClasses) != 0 {
+		routeReconciler.ExternalHostnames = &httproute.ExternalHostnameCache{}
+		gatewayReconciler.GraphRefresh = &graph.GatewayRefreshQueue{}
+		writer.GatewayRefresh = gatewayReconciler.GraphRefresh
+		writer.InvalidateExternalHostnames = routeReconciler.ExternalHostnames.Invalidate
+	}
 	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	if err := gatewayReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up Gateway controller: %w", err)
