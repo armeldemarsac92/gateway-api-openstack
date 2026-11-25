@@ -1,0 +1,228 @@
+{
+  "passed": true,
+  "subject": "Gateway API v1.7.0 XBackendTrafficPolicy.retryConstraint",
+  "scope": "Local HTTP lifecycle on kind with the OCI-extracted manager, published provider wheels, native Amphora rendering and real HAProxy. Cloud infrastructure and Amphora transport use local fixtures.",
+  "registeredUpstreamCase": false,
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kindNodeImageDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "controller": {
+    "source": "c3f4f691197ca3187de2de0b04ea6e234d12dca4",
+    "parents": [
+      "7287dd6140b9009f76120d52121a1412d041cb1d",
+      "f2ed22780065889b5048618e41597844b0c14358"
+    ],
+    "signatureVerified": true,
+    "manifestDigest": "sha256:cb82d7e6b91a0e443f55ad9858e0789bf84b21a5fccc2d2d890ed80af8d0f801",
+    "ociArchiveSHA256": "9e9a33d12a1427b534669bc212a5aa4bd1cbcb7f4aeed88335c1d0d142699603",
+    "managerSHA256": "109c296a17922ee90ee2a19ab1b79363daaf0f0bdb16ea9844ebb6a9b36a8c68",
+    "platform": "linux/amd64",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "provider": {
+    "octavia": {
+      "revision": "f1e0870b2f501b4a5b82e0cef037747c638f6c8b",
+      "sha256": "b23d144d5009da9fe58214fe6e1a662caf96f5300bed0274d0c26042a336a56e",
+      "wheel": "octavia-19.0.1.dev51-py3-none-any.whl",
+      "download": "https://github.com/armeldemarsac92/octavia/releases/download/hibiscus-backend-retry-budget-f1e0870b2f50/octavia-19.0.1.dev51-py3-none-any.whl",
+      "pullRequest": "https://github.com/armeldemarsac92/octavia/pull/28"
+    },
+    "octaviaLib": {
+      "revision": "ba8cc812fc69babdc97731973901b050badf22ed",
+      "sha256": "fa6767c72eac2d371336299b8f3aeed26d150109e509a4e276ef060d20a5cd10",
+      "wheel": "octavia_lib-3.12.1.dev18-py3-none-any.whl",
+      "download": "https://github.com/armeldemarsac92/octavia-lib/releases/download/hibiscus-backend-retry-budget-ba8cc812fc69/octavia_lib-3.12.1.dev18-py3-none-any.whl",
+      "pullRequest": "https://github.com/armeldemarsac92/octavia-lib/pull/18"
+    }
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1",
+    "sha256": "f28c381d60c2f597f2fcb787ea52bc07c5176c9eda029c6ea7d7942a80ab58bb"
+  },
+  "channels": {
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "policyCRD": {
+        "installed": true,
+        "discovered": true,
+        "versions": [
+          {
+            "name": "v1alpha1",
+            "served": true,
+            "storage": true
+          }
+        ]
+      },
+      "traffic": {
+        "baseline": [
+          {
+            "side": "a",
+            "path": "/a/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "b",
+            "path": "/b/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "a",
+            "path": "/a/failure",
+            "status": 500,
+            "backendAttempts": 2
+          },
+          {
+            "side": "b",
+            "path": "/b/failure",
+            "status": 500,
+            "backendAttempts": 2
+          }
+        ],
+        "budget": [
+          {
+            "side": "a",
+            "path": "/a/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "b",
+            "path": "/b/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "a",
+            "path": "/a/failure",
+            "status": 500,
+            "backendAttempts": 2
+          },
+          {
+            "side": "a",
+            "path": "/a/failure",
+            "status": 503,
+            "backendAttempts": 1
+          },
+          {
+            "side": "b",
+            "path": "/b/failure",
+            "status": 500,
+            "backendAttempts": 2
+          },
+          {
+            "side": "a",
+            "path": "/a/failure",
+            "status": 503,
+            "backendAttempts": 1
+          },
+          {
+            "side": "a",
+            "path": "/a/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          }
+        ],
+        "removed": [
+          {
+            "side": "a",
+            "path": "/a/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "b",
+            "path": "/b/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "a",
+            "path": "/a/failure",
+            "status": 500,
+            "backendAttempts": 2
+          },
+          {
+            "side": "b",
+            "path": "/b/failure",
+            "status": 500,
+            "backendAttempts": 2
+          }
+        ]
+      },
+      "policy": {
+        "target": "Service A",
+        "constraint": {
+          "budget": {
+            "interval": "10s",
+            "percent": 0
+          },
+          "minRetryRate": {
+            "count": 1,
+            "interval": "1m"
+          }
+        },
+        "ancestorKind": "Gateway",
+        "ancestorRefAndControllerMatched": true,
+        "accepted": true,
+        "reason": "Accepted",
+        "observedGeneration": 1,
+        "removed": true
+      },
+      "poolBudgetFieldPresent": {
+        "baseline": {
+          "a": false,
+          "b": false
+        },
+        "active": {
+          "a": true,
+          "b": false
+        },
+        "removed": {
+          "a": false,
+          "b": false
+        }
+      },
+      "activeBudgetMatchedServiceUIDAndSettings": true,
+      "nativeWorkerUpdates": [
+        "set budget on A",
+        "clear budget on A"
+      ]
+    },
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "policyCRD": {
+        "installed": false,
+        "discovered": false
+      },
+      "traffic": {
+        "baseline": [
+          {
+            "side": "a",
+            "path": "/a/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "b",
+            "path": "/b/healthy",
+            "status": 200,
+            "backendAttempts": 1
+          },
+          {
+            "side": "a",
+            "path": "/a/failure",
+            "status": 500,
+            "backendAttempts": 2
+          },
+          {
+            "side": "b",
+            "path": "/b/failure",
+            "status": 500,
+            "backendAttempts": 2
+          }
+        ]
+      }
+    }
+  }
+}
