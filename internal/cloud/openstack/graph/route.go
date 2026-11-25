@@ -112,6 +112,8 @@ type desiredRoute struct {
 	routedExternal              bool
 	xBackend                    bool
 	xBackendPlaintext           bool
+	sessionCookieName           string
+	sessionCookieCapability     xBackendCookieCapability
 	redirect                    bool
 	redirectMatches             []cloud.HTTPPathMatch
 	redirectIssue               error
@@ -393,6 +395,11 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			(spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {
 			return invalid(errors.New("authenticated XBackends require an unmanaged HTTP endpoint pool"))
 		}
+		if backend.SessionCookieName != "" && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
+			len(spec.BackendSecurityGroupIDs) != 0 || backend.RoutedExternal || backend.BackendH2C ||
+			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
+			return invalid(errors.New("HTTP session persistence requires a valid cookie name and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
+		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
@@ -410,6 +417,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.fixedResponse = fixedResponse
 		part.xBackend = xBackend
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
+		part.sessionCookieName = backend.SessionCookieName
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {
 				return invalid(err)

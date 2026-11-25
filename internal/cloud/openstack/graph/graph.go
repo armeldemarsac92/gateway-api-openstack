@@ -333,7 +333,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return p.reconcileRequestMirrorWithdrawal(ctx, desired, actual, step)
 		}
 	}
-	if step := p.prepareBackendTLS(ctx, &desired, actual); step != nil {
+	backendWithdrawal := p.prepareBackendTLS(ctx, &desired, actual)
+	if backendWithdrawal == nil {
+		backendWithdrawal = p.prepareXBackendCookies(ctx, &desired, actual)
+	}
+	if step := backendWithdrawal; step != nil {
 		if validate := spec.ValidateMutation; validate != nil {
 			if err := validate(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err
@@ -1763,6 +1767,7 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 		deferSibling := deferScopedHTTPRouteSibling(desired.spec.Routes[index], result.Gateway.ScopedListenerDeferredPorts)
 		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{
 			Outcome: actual.outcome, ObservationDeferred: deferred[index] || deferSibling || !actual.scoped && len(route.spec.AdditionalHTTPPorts) == 0,
+			BackendSessionPersistenceIssue: route.cookieSupportIssue(),
 		}})
 	}
 	return result

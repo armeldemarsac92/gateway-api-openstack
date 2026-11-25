@@ -138,6 +138,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
 	var zeroWeightPoolEnsures []graphMutation
+	var cookiePoolRecoveries []graphMutation
 	routeResults := make([]cloud.RouteGraphResult, 0, len(desired.routes))
 	canRestoreTraffic := !groupedHTTP || len(handovers.protected) == 0
 	holdPolicyOrder := make(map[int]bool)
@@ -198,6 +199,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			observed = actual.routes[index]
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
+		routeResult.BackendSessionPersistenceIssue = route.cookieSupportIssue()
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
 		optionalPool := route.zeroWeightOnly || route.mirrorOnly
@@ -253,6 +255,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			} else if errors.Is(err, errHTTPRequestPolicyUnverified) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errRequestMirrorsUnverified) {
+				ensureHold = err.Error()
+			} else if errors.Is(err, errXBackendCookieUnavailable) || errors.Is(err, errXBackendCookieUnverified) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errBackendRetryBudgetAncestor) || errors.Is(err, errBackendRetryBudgetCapability) || errors.Is(err, errBackendRetryBudgetReadback) {
 				ensureHold = err.Error()
@@ -459,6 +463,12 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				if observed.backendProvisioningIssue(true, true) == "" {
 					ensures = append(ensures, mutation)
 				}
+			case step.kind == routeMutationSetXBackendCookie && step.retry:
+				// Recovery of an ERROR pool may fail repeatedly. Finish
+				// other routes' withdrawals and ready mutations first.
+				if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
+					cookiePoolRecoveries = append(cookiePoolRecoveries, mutation)
+				}
 			case ensureHold != "":
 				continue
 			case route.redirect && step.kind == routeMutationEnablePolicy && (holdRedirectEnable[redirectDomain] || holdPolicyOrder[port]):
@@ -574,6 +584,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			plan = append(plan, *step)
 		}
 	}
+	plan = append(plan, cookiePoolRecoveries...)
 	if len(plan) != 0 {
 		result.Outcome = p.progressingOutcome(plan[0].message)
 	} else if result.Gateway.Outcome.State == cloud.OutcomeProgressing && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
