@@ -1,0 +1,242 @@
+{
+  "sourceRevision": "80010b8ad4502b335351582273cff8200d8f5de7",
+  "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:853eb777fba01d7334edb552d3a4ae87ca0df195b2b60225dbdb3edda2b57c0b",
+  "managerSHA256": "664668a3f1c59a4cb4be18f74eb33dd325b408b8424107a2cde4b4ae4e5df062",
+  "runs": {
+    "standard": {
+      "rawReceiptSHA256": "f20dd5fb4d4e2d64f32ef11ca204e6cb596f39b9a313b3182af9a209bc494241",
+      "kubernetesVersion": "v1.36.2",
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "fixture": "envtest Kubernetes API and etcd",
+      "cloudBoundary": "Installed Octavia API and DB, Amphora driver render and native HAProxy. Fixture Keystone, Neutron, Octavia RPC completion and Amphora agent transport.",
+      "backendBoundary": "Ready Pod objects select two host-local real HTTP/2 prior knowledge origins. The ordinary Service uses a fixture EndpointSlice and an HTTP/1.1 origin.",
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "controllerFlags": [],
+      "regionalCapabilities": [],
+      "phases": {
+        "ordinary": {
+          "kubernetes": {
+            "gateway": "True/Programmed",
+            "routes": {
+              "ordinary": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "tlsEnabled": false,
+                "activeMembers": 1,
+                "persistence": null
+              }
+            },
+            "activeHAProxyConfigSHA256": "c031aa864400c191c5b7083416e320131e17fa89e831912657d90cc4f1111552",
+            "HAProxyReloads": 2
+          },
+          "traffic": {
+            "ordinary": {
+              "responses": 3,
+              "backend": "ordinary HTTP/1.1",
+              "issuedCookie": false
+            }
+          }
+        }
+      }
+    },
+    "experimental": {
+      "rawReceiptSHA256": "c43f21c037ae0084f72a0359233a786847502a75a75ad539bb8769d884a44a8d",
+      "kubernetesVersion": "v1.36.2",
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "fixture": "envtest Kubernetes API and etcd",
+      "cloudBoundary": "Installed Octavia API and DB, Amphora driver render and native HAProxy. Fixture Keystone, Neutron, Octavia RPC completion and Amphora agent transport.",
+      "backendBoundary": "Ready Pod objects select two host-local real HTTP/2 prior knowledge origins. The ordinary Service uses a fixture EndpointSlice and an HTTP/1.1 origin.",
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-xbackend-session-persistence"
+      ],
+      "regionalCapabilities": [
+        "backend_h2c_v1",
+        "http_cookie_name_v1"
+      ],
+      "phases": {
+        "configured": {
+          "kubernetes": {
+            "gateway": "True/Programmed",
+            "routes": {
+              "ordinary": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              },
+              "reports": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "xbackend": {
+              "generation": 1,
+              "accepted": "True/Accepted"
+            }
+          },
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "tlsEnabled": false,
+                "activeMembers": 1,
+                "persistence": null
+              },
+              "reports": {
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "tlsEnabled": false,
+                "activeMembers": 2,
+                "persistence": "xbackend-ab8b798879cc7c4154d46a889ff66bd9e32be05c8bcef5d9983eb664fb7b1ba4",
+                "namedCookieDirective": true
+              }
+            },
+            "activeHAProxyConfigSHA256": "c128aed42fb3ed677b0702ee789f4c1f07d992601268d0bedb25690159382df6",
+            "HAProxyReloads": 3
+          },
+          "traffic": {
+            "ordinary": {
+              "responses": 3,
+              "backend": "ordinary HTTP/1.1",
+              "issuedCookie": false
+            },
+            "freshRequests": {
+              "a HTTP/2.0": 4,
+              "b HTTP/2.0": 4
+            },
+            "cookie": {
+              "name": "xbackend-ab8b798879cc7c4154d46a889ff66bd9e32be05c8bcef5d9983eb664fb7b1ba4",
+              "path": "/",
+              "lifetime": "Session",
+              "hostOnly": true
+            },
+            "replay": {
+              "issuedByBackend": "a HTTP/2.0",
+              "backendResponses": {
+                "a HTTP/2.0": 6
+              }
+            }
+          }
+        },
+        "withdrawn": {
+          "kubernetes": {
+            "gateway": "True/Programmed",
+            "routes": {
+              "ordinary": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              },
+              "reports": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "xbackend": {
+              "generation": 2,
+              "accepted": "True/Accepted"
+            }
+          },
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "tlsEnabled": false,
+                "activeMembers": 1,
+                "persistence": null
+              },
+              "reports": {
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "tlsEnabled": false,
+                "activeMembers": 2,
+                "persistence": null,
+                "namedCookieDirective": false
+              }
+            },
+            "activeHAProxyConfigSHA256": "1b7d1bb792d2f7607aad2a8ff4f388f3ec3d552a9cf278b8f750e0c7fdb60c84",
+            "HAProxyReloads": 7
+          },
+          "traffic": {
+            "ordinary": {
+              "responses": 3,
+              "backend": "ordinary HTTP/1.1",
+              "issuedCookie": false
+            },
+            "freshRequests": {
+              "a HTTP/2.0": 4,
+              "b HTTP/2.0": 4
+            },
+            "withdrawnCookieReplay": {
+              "a HTTP/2.0": 4,
+              "b HTTP/2.0": 4
+            }
+          }
+        }
+      }
+    }
+  }
+}
