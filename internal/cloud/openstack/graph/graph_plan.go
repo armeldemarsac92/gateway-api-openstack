@@ -897,12 +897,12 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		}
 	case graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
 	case graphListenerFiltersMutation:
-		auth := step.listenerFilters.grpcAuth
+		auth := step.listenerFilters.protectedAuth
 		if auth == nil {
 			return step, nil
 		}
 		fixed = false
-		required = append(required, grpcAuthorizerCapabilities(auth.BackendTLS)...)
+		required = append(required, routeAuthorizerTransportCapabilities(*auth)...)
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
 		reopensAuthenticatedH2Cookie = part.authenticatedH2Cookie() && !part.backendTLS.denies() &&
@@ -1204,7 +1204,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		return nil
 	case graphListenerFiltersMutation:
 		err = p.executeListenerFilterMutation(ctx, desired, actual, step)
-		if auth := step.listenerFilters.grpcAuth; auth == nil || auth.BackendTLS == nil || step.listenerFilters.claimCA {
+		if auth := step.listenerFilters.protectedAuth; auth == nil || auth.BackendTLS == nil || step.listenerFilters.claimCA {
 			return err
 		}
 		step.redactTLSError = true

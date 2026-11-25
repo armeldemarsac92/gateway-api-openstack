@@ -27,19 +27,29 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // ResolveHTTPExternalAuth authorizes the source before reading the Service and
-// its transport dependencies. Both listener and route filters use it.
+// its transport dependencies. Listener filters retain their cleartext HTTP transport.
 func ResolveHTTPExternalAuth(ctx context.Context, reader client.Reader, kind gatewayv1.Kind, namespace string, filter model.HTTPExternalAuth, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *model.Diagnostic, error) {
 	auth := filter.Config
-	service, port, diagnostic, err := ObserveHTTPExternalAuthService(ctx, reader, kind, namespace, filter)
+	service, port, diagnostic, err := ObserveExternalAuthService(ctx, reader, kind, namespace, filter)
 	if diagnostic != nil || err != nil {
 		return auth, diagnostic, err
+	}
+	if _, issue := model.ResolveServicePort(service, filter.BackendRef.Port, false); issue != nil {
+		return auth, externalAuthReferenceIssue(gatewayv1.RouteConditionReason(issue.Reason), issue.Message), nil
+	}
+	requiresTLS, err := graph.NewBackendTLSObserver(reader, nil).HasPolicy(ctx, service, port)
+	if err != nil {
+		return auth, nil, err
+	}
+	if requiresTLS {
+		return auth, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
+			Message: "ExternalAuth backend TLS is unsupported", Scope: model.ScopeRule}, nil
 	}
 	return ResolveExternalAuthMembers(ctx, reader, service, port, auth, topology)
 }
@@ -60,9 +70,9 @@ func ResolveExternalAuthMembers(ctx context.Context, reader client.Reader, servi
 	return auth, nil, nil
 }
 
-// ObserveHTTPExternalAuthService resolves the Service and port without
+// ObserveExternalAuthService resolves the Service and port without
 // requiring the Gateway's member topology or ready EndpointSlices.
-func ObserveHTTPExternalAuthService(ctx context.Context, reader client.Reader, kind gatewayv1.Kind, namespace string, filter model.HTTPExternalAuth) (*corev1.Service, *corev1.ServicePort, *model.Diagnostic, error) {
+func ObserveExternalAuthService(ctx context.Context, reader client.Reader, kind gatewayv1.Kind, namespace string, filter model.HTTPExternalAuth) (*corev1.Service, *corev1.ServicePort, *model.Diagnostic, error) {
 	key, _ := model.BackendServiceReference(namespace, filter.BackendRef)
 	if key.Namespace != namespace {
 		grants, err := graph.ListBackendReferenceGrants(ctx, reader, key.Namespace)
@@ -83,29 +93,9 @@ func ObserveHTTPExternalAuthService(ctx context.Context, reader client.Reader, k
 	if !service.DeletionTimestamp.IsZero() || service.UID == "" {
 		return nil, nil, externalAuthReferenceIssue("Invalid", fmt.Sprintf("ExternalAuth backend Service %s has no live identity", key)), nil
 	}
-	if filter.Config.Protocol == cloud.ExternalAuthProtocolGRPC {
-		port, diagnostic := model.ResolveTCPServicePort(&service, filter.BackendRef.Port)
-		if diagnostic != nil {
-			return nil, nil, externalAuthReferenceIssue(gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message), nil
-		}
-		return &service, port, nil, nil
-	}
-	port, diagnostic := model.ResolveServicePort(&service, filter.BackendRef.Port, false)
+	port, diagnostic := model.ResolveTCPServicePort(&service, filter.BackendRef.Port)
 	if diagnostic != nil {
 		return nil, nil, externalAuthReferenceIssue(gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message), nil
-	}
-	var policies gatewayv1.BackendTLSPolicyList
-	if err := reader.List(ctx, &policies, client.InNamespace(service.Namespace)); err != nil {
-		return nil, nil, nil, err
-	}
-	if policies.Continue != "" {
-		return nil, nil, nil, fmt.Errorf("incomplete BackendTLSPolicy inventory for ExternalAuth backend Service %s", key)
-	}
-	if slices.ContainsFunc(policies.Items, func(policy gatewayv1.BackendTLSPolicy) bool {
-		return policy.DeletionTimestamp.IsZero() && backendtls.AppliesToServicePort(&policy, &service, port)
-	}) {
-		return nil, nil, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
-			Message: "ExternalAuth backend TLS is unsupported", Scope: model.ScopeRule}, nil
 	}
 	return &service, port, nil, nil
 }

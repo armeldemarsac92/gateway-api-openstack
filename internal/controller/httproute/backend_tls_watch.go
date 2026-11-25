@@ -146,7 +146,7 @@ func routeBackendTLSServices(route *gatewayv1.HTTPRoute) map[types.NamespacedNam
 func (r *Reconciler) backendTLSPolicyServices(route *gatewayv1.HTTPRoute) map[types.NamespacedName]struct{} {
 	keys := routeBackendTLSServices(route)
 	for _, rule := range route.Spec.Rules {
-		if auth := r.grpcAuthorizerForRule(route, rule); auth != nil {
+		if auth := r.routeAuthorizerForRule(route, rule); auth != nil {
 			key, _ := model.BackendServiceReference(route.Namespace, auth.BackendRef)
 			keys[key] = struct{}{}
 		}
@@ -154,11 +154,11 @@ func (r *Reconciler) backendTLSPolicyServices(route *gatewayv1.HTTPRoute) map[ty
 	return keys
 }
 
-func (r *Reconciler) grpcAuthorizerForRule(route *gatewayv1.HTTPRoute, rule gatewayv1.HTTPRouteRule) *model.HTTPExternalAuth {
-	if !r.Config.RouteExternalAuthGRPCEnabled() || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || !model.HasHTTPRouteExternalAuth(rule) {
+func (r *Reconciler) routeAuthorizerForRule(route *gatewayv1.HTTPRoute, rule gatewayv1.HTTPRouteRule) *model.HTTPExternalAuth {
+	if model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || !model.HasHTTPRouteExternalAuth(rule) {
 		return nil
 	}
-	auth, _ := model.NormalizeHTTPRouteExternalAuth(rule, false, true, r.Config.WeightedHTTPTargets)
+	auth, _ := model.NormalizeHTTPRouteExternalAuth(rule, r.Config.RouteExternalAuthEnabled(), r.Config.RouteExternalAuthGRPCEnabled(), r.Config.WeightedHTTPTargets)
 	return auth
 }
 

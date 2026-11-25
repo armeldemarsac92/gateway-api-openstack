@@ -248,12 +248,16 @@ func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
 // RouteExternalAuthAvailable reports whether the regional policy API can
 // authorize a request on its selected HTTP route before forwarding it.
 func (p *Provider) RouteExternalAuthAvailable(ctx context.Context, auth cloud.ListenerExternalAuth, weighted bool) (bool, error) {
-	tls := auth.BackendTLS
-	if !p.routeAuthorizerEnabled(auth) || !p.fixedHTTPResponses ||
-		tls != nil && (!p.backendTLSPolicy || !p.poolALPN || tls.Trust == cloud.BackendTLSTrustReference && p.backendCA == nil) {
+	if !p.routeAuthorizerTransportEnabled(auth) || !p.fixedHTTPResponses {
 		return false, nil
 	}
 	return amphoraDiscoveryResult(p.octavia.VerifyGatewayCapabilitiesForBody(ctx, "amphora", auth.ForwardBodyMaxSize, routeAuthorizerCapabilities(auth, weighted)...))
+}
+
+func (p *Provider) routeAuthorizerTransportEnabled(auth cloud.ListenerExternalAuth) bool {
+	tls := auth.BackendTLS
+	return p.routeAuthorizerEnabled(auth) && (tls == nil || p.backendTLSPolicy &&
+		(!tls.RequireH2 || p.poolALPN) && (tls.Trust != cloud.BackendTLSTrustReference || p.backendCA != nil))
 }
 
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {

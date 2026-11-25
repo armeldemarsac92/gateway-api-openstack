@@ -118,6 +118,8 @@ The local Amphora qualification covers rule-level request header modification an
 
 The opt-in Amphora extension has local evidence for HTTP 404, HTTP 500, weighted backends and a full ReferenceGrant change. [Opt-in HTTP actions](provider/opt-in-http-actions.md) · [Operator setup](../../operator-octavia-http-actions.md)
 
+An Experimental HTTPRoute rule used verified TLS and HTTP/1.1 to reach its HTTP authorizer. The protected rule returned HTTP 500 with zero peer calls after the grant or CA was removed. The public sibling returned HTTP 200 after each change. Regional qualification remains open. [Local trial](provider/gateway-http-route-http-authorizer-tls/README.md) · [Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-route-http-authorizer-tls-be4a61a490b0)
+
 The workload rotation rehearsal used two real controller Pods and a synthetic TLS service catalog. Replacing the projected Secret and restarting the Deployment gave both new Pods working credentials and a new CA. A separate check received HTTP 401 with the retired credential. [Runtime and cleanup](magnum-projected-rotation.md)
 
 ## First live run

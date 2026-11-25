@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-Experimental Gateway listeners can forward a bounded request body to an HTTP authorization Service from HTTP and terminated HTTPS listeners. [Build record](image.json) · [Body limits, grant changes and shared port](provider/gateway-listener-external-auth-forward-body/README.md)
+An Experimental HTTPRoute rule can use verified TLS to its HTTP authorizer. [Build record](image.json) · [Local trial](provider/gateway-http-route-http-authorizer-tls/README.md)
+
+Experimental Gateway listeners can forward a bounded request body to an HTTP authorization Service from HTTP and terminated HTTPS listeners. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-13627489822adf0aa9b182739a9ab7ff124d594a/image.json) · [Body limits, grant changes and shared port](provider/gateway-listener-external-auth-forward-body/README.md)
 
 An Experimental HTTPRoute can send a bounded body to an HTTP or gRPC authorization Service and switch selected gRPC rules to HTTP 500 when a grant is withdrawn. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-13a6870cb63abafa131527b7b1b67048d962cd57/image.json) · [Grant and client identity](provider/http-route-grpc-external-auth/README.md) · [Request body traffic](provider/http-route-external-auth-forward-body/README.md)
 

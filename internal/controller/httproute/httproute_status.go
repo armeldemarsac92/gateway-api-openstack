@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
@@ -38,7 +39,6 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 type routeReconcileStatus struct {
@@ -489,14 +489,19 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 		}
 	}
+	tlsObserver := graph.NewBackendTLSObserver(r.routePatchReader(), r.Config.ClusterTrustBundles)
 	if r.Config.RouteExternalAuthEnabled() || r.Config.RouteExternalAuthGRPCEnabled() {
+		var ancestor *backendtls.GatewayAncestor
+		if r.Config.BackendTLSPolicy {
+			ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
+		}
 		for _, rule := range rules {
 			if !model.HasHTTPRouteExternalAuth(rule) {
 				continue
 			}
 			auth, diagnostic := model.NormalizeHTTPRouteExternalAuth(rule, r.Config.RouteExternalAuthEnabled(), r.Config.RouteExternalAuthGRPCEnabled(), r.Config.WeightedHTTPTargets)
 			if diagnostic == nil {
-				_, _, diagnostic, err = routebackend.ObserveHTTPExternalAuthService(ctx, r.routePatchReader(), model.HTTPRouteKind, route.Namespace, *auth)
+				_, _, _, diagnostic, err = resolveRouteExternalAuthTransport(ctx, r.routePatchReader(), tlsObserver, ancestor, route.Namespace, *auth)
 				if err != nil {
 					return err
 				}
@@ -513,7 +518,6 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	}
 	persistenceCapability := r.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.xBackendH2CDiagnostic(ctx) })
-	tlsObserver := graph.NewBackendTLSObserver(r.routePatchReader(), r.Config.ClusterTrustBundles)
 	for _, backend := range backends {
 		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() {
 			if backend.Port != nil {
