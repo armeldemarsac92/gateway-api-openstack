@@ -1,0 +1,2001 @@
+{
+  "contract": "GRPCRoute rule and weighted backend RequestMirror with cross-namespace permission changes",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "73f2d0c594925ac6826bafb6a2e9c86e1d7c05fa",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:7f8046c3ecc957ab30fadd30ea5f89904ece9df27cec019812c2b904df1afdf0",
+    "configDigest": "sha256:831f6f88e0b745269bdb3fdf620e674ae969ad6129173f606c214f01bb06b3c0",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "45304630daf0d01755c2fe5dd9ccc0007b5afd0f02163b1e14160094e420646a",
+    "managerSHA256": "8dd147ae87a36040a00b58293ce7a2db129a9e99da8030e97a2bb366f2a05122",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "octaviaRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-grpc-request-mirror-31a05857f3b3",
+  "nativeStreaming": {
+    "scope": "Native loopback with generated Amphora configuration, h2c primary and shadow, grpcio 1.83.0. No deployed Amphora, Gateway or Kubernetes traffic.",
+    "buildsWithSameSHA256": 2,
+    "platform": "Fedora 44 x86_64, GCC 16.2.1, OpenSSL 3.5.8",
+    "active": {
+      "scenario": "active",
+      "primary_status": "OK",
+      "primary_messages": 38,
+      "primary_seconds": 34.24,
+      "proxy_start_seconds": 1.19,
+      "counters": {
+        "active": 0,
+        "started": 1,
+        "capacity_drops": 0,
+        "queue_drops": 0,
+        "preparation_drops": 0,
+        "incomplete_uploads": 0,
+        "expired": 0
+      },
+      "shadow_completed": true,
+      "shadow_completed_seconds": 34.24,
+      "shadow_messages": 38,
+      "configuration": "Octavia combined-listeners renderer"
+    },
+    "blocked": {
+      "scenario": "blocked",
+      "primary_status": "OK",
+      "primary_messages": 180,
+      "primary_seconds": 9.38,
+      "proxy_start_seconds": 1.11,
+      "counters": {
+        "active": 0,
+        "started": 1,
+        "capacity_drops": 0,
+        "queue_drops": 1,
+        "preparation_drops": 0,
+        "incomplete_uploads": 0,
+        "expired": 0
+      },
+      "shadow_cancelled_seconds": 5.37,
+      "configuration": "Octavia combined-listeners renderer"
+    },
+    "httpWire": {
+      "passed": 12,
+      "logSHA256": "13418d0e92a72a8c1fa3d15ff6a256711afae6f413619a4cde7041d1e26683b2"
+    },
+    "amphoraUnits": {
+      "passed": 14,
+      "logSHA256": "93536691fae4340ceebdb12c2fa5564cfd1165e288e095b3f1ccf36b38a755f9"
+    }
+  },
+  "channels": {
+    "standard": {
+      "kubernetesVersion": "v1.36.4",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "gatewayCRDs": {
+        "bundleVersion": "v1.7.0",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "installedSchemaSHA256": {
+          "grpcroutes.gateway.networking.k8s.io": {
+            "v1": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+          },
+          "referencegrants.gateway.networking.k8s.io": {
+            "v1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def",
+            "v1beta1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def"
+          }
+        }
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-grpc-content-type",
+        "--octavia-weighted-http-targets",
+        "--octavia-http-request-mirror",
+        "--octavia-microversion=2.30"
+      ],
+      "cloudBoundary": "Disposable kind Kubernetes and etcd, installed Octavia WSGI/SQL, Amphora driver renderer, native HAProxy and grpcio. Keystone, Neutron, Octavia RPC completion and Amphora agent transport are simulated.",
+      "backendBoundary": "Three live grpcio h2c origins behind Service and EndpointSlice resources. HAProxy uses the native private mirror socket transport with a fixture-local path and UID directives omitted for rootless execution. Each phase starts a new client after current Kubernetes and ACTIVE Octavia/native HAProxy convergence.",
+      "wireAcceptance": {
+        "callsPerPhase": {
+          "Rule": 6,
+          "Target": 144,
+          "Plain": 6
+        },
+        "expectedSecondaryShare": 0.25,
+        "secondaryShareBounds": [
+          0.12,
+          0.38
+        ],
+        "clientRPCDeadlineSeconds": 3,
+        "postRPCObservationSeconds": 3,
+        "mirrorHandlerStatus": "PERMISSION_DENIED"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_content_type_v1",
+        "grpc_request_mirror_v1",
+        "http_request_mirror_v1",
+        "weighted_http_targets_v1"
+      ],
+      "octaviaProviderOptIns": {
+        "enabled_backend_h2c_providers": [
+          "amphora"
+        ],
+        "enabled_grpc_content_type_providers": [
+          "amphora"
+        ],
+        "enabled_http_request_mirror_providers": [
+          "amphora"
+        ],
+        "enabled_grpc_request_mirror_providers": [
+          "amphora"
+        ]
+      },
+      "octavia": {
+        "revision": "31a05857f3b3a29fe43bbf77c2a1ca89c074912d",
+        "version": "19.0.1.dev91",
+        "sha256": "50a75d8f315691fc5e2ec9c99ebf369fc15f78d63a868ae207eae1e8b48c481a",
+        "filesVerified": 669
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "grpcio": "1.83.0",
+      "RESTResponses": {
+        "GET versions 200": 5,
+        "GET providers 200": 145,
+        "GET loadbalancers 200": 193,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 98,
+        "GET pools 200": 104,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 97,
+        "POST pools 201": 5,
+        "GET members 200": 326,
+        "GET healthmonitors 200": 316,
+        "POST members 201": 4,
+        "POST healthmonitors 201": 4,
+        "POST l7policies 201": 3,
+        "GET rules 200": 255,
+        "POST rules 201": 6,
+        "PUT l7policies 200": 15,
+        "DELETE healthmonitors 204": 2,
+        "DELETE members 204": 2,
+        "DELETE pools 204": 2
+      },
+      "rawReceiptSHA256": "70f48b643364d4eaacd6aa6bad862a514a60a999b6c46fbf639bdc9c2e87ff3c",
+      "phases": {
+        "configured": {
+          "route": {
+            "uid": "d0985728-4c39-4fc4-8c67-aabd80cc5de2",
+            "generation": 1,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "",
+                          "kind": "Service",
+                          "name": "mirror",
+                          "namespace": "grpc-mirror-sink",
+                          "port": 8080
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "filters": [
+                        {
+                          "requestMirror": {
+                            "backendRef": {
+                              "group": "",
+                              "kind": "Service",
+                              "name": "mirror",
+                              "namespace": "grpc-mirror-sink",
+                              "port": 8080
+                            }
+                          },
+                          "type": "RequestMirror"
+                        }
+                      ],
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "uid": "171ec32e-4407-49aa-a808-c3a6a55e2fbb",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request-mirror"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "mirror"
+                }
+              ]
+            }
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 6
+            },
+            "Target": {
+              "blue": 119,
+              "green": 25,
+              "mirror": 25
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [
+                  {
+                    "origin": "mirror",
+                    "numerator": 1,
+                    "denominator": 1,
+                    "phase": "after_rewrite"
+                  }
+                ],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [
+                      {
+                        "origin": "mirror",
+                        "numerator": 1,
+                        "denominator": 1,
+                        "phase": "after_rewrite"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "0b91fba7a470be6202e985cc86305d63912e985194cf3d468ad9dabd7057ba4f",
+            "HAProxyReloads": 6
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          }
+        },
+        "grant-revoked": {
+          "route": {
+            "uid": "d0985728-4c39-4fc4-8c67-aabd80cc5de2",
+            "generation": 1,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "",
+                          "kind": "Service",
+                          "name": "mirror",
+                          "namespace": "grpc-mirror-sink",
+                          "port": 8080
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "filters": [
+                        {
+                          "requestMirror": {
+                            "backendRef": {
+                              "group": "",
+                              "kind": "Service",
+                              "name": "mirror",
+                              "namespace": "grpc-mirror-sink",
+                              "port": 8080
+                            }
+                          },
+                          "type": "RequestMirror"
+                        }
+                      ],
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "deletedUID": "171ec32e-4407-49aa-a808-c3a6a55e2fbb"
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            },
+            "Target": {
+              "blue": 106,
+              "green": 38,
+              "mirror": 0
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "5f42d98a061b9dc382db95d0e3850175ec443888af0d3e96ae517e0c9f92710b",
+            "HAProxyReloads": 8
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          }
+        },
+        "grant-restored": {
+          "route": {
+            "uid": "d0985728-4c39-4fc4-8c67-aabd80cc5de2",
+            "generation": 1,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "",
+                          "kind": "Service",
+                          "name": "mirror",
+                          "namespace": "grpc-mirror-sink",
+                          "port": 8080
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "filters": [
+                        {
+                          "requestMirror": {
+                            "backendRef": {
+                              "group": "",
+                              "kind": "Service",
+                              "name": "mirror",
+                              "namespace": "grpc-mirror-sink",
+                              "port": 8080
+                            }
+                          },
+                          "type": "RequestMirror"
+                        }
+                      ],
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "uid": "3a120605-4ba4-4547-8c15-a74ecaae4f54",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request-mirror"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "mirror"
+                }
+              ]
+            }
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 6
+            },
+            "Target": {
+              "blue": 113,
+              "green": 31,
+              "mirror": 31
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [
+                  {
+                    "origin": "mirror",
+                    "numerator": 1,
+                    "denominator": 1,
+                    "phase": "after_rewrite"
+                  }
+                ],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [
+                      {
+                        "origin": "mirror",
+                        "numerator": 1,
+                        "denominator": 1,
+                        "phase": "after_rewrite"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "dc51c5fe2786cfa09a78ddda27f1d34508e4f5e9903f762642ddd4d4d19cc100",
+            "HAProxyReloads": 10
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          }
+        },
+        "filters-removed": {
+          "route": {
+            "uid": "d0985728-4c39-4fc4-8c67-aabd80cc5de2",
+            "generation": 2,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "uid": "3a120605-4ba4-4547-8c15-a74ecaae4f54",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request-mirror"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "mirror"
+                }
+              ]
+            }
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            },
+            "Target": {
+              "blue": 103,
+              "green": 41,
+              "mirror": 0
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "5f42d98a061b9dc382db95d0e3850175ec443888af0d3e96ae517e0c9f92710b",
+            "HAProxyReloads": 12
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          }
+        }
+      }
+    },
+    "experimental": {
+      "kubernetesVersion": "v1.36.4",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "gatewayCRDs": {
+        "bundleVersion": "v1.7.0",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "installedSchemaSHA256": {
+          "grpcroutes.gateway.networking.k8s.io": {
+            "v1": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+          },
+          "referencegrants.gateway.networking.k8s.io": {
+            "v1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def",
+            "v1beta1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def"
+          }
+        }
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-grpc-content-type",
+        "--octavia-weighted-http-targets",
+        "--octavia-http-request-mirror",
+        "--octavia-microversion=2.30"
+      ],
+      "cloudBoundary": "Disposable kind Kubernetes and etcd, installed Octavia WSGI/SQL, Amphora driver renderer, native HAProxy and grpcio. Keystone, Neutron, Octavia RPC completion and Amphora agent transport are simulated.",
+      "backendBoundary": "Three live grpcio h2c origins behind Service and EndpointSlice resources. HAProxy uses the native private mirror socket transport with a fixture-local path and UID directives omitted for rootless execution. Each phase starts a new client after current Kubernetes and ACTIVE Octavia/native HAProxy convergence.",
+      "wireAcceptance": {
+        "callsPerPhase": {
+          "Rule": 6,
+          "Target": 144,
+          "Plain": 6
+        },
+        "expectedSecondaryShare": 0.25,
+        "secondaryShareBounds": [
+          0.12,
+          0.38
+        ],
+        "clientRPCDeadlineSeconds": 3,
+        "postRPCObservationSeconds": 3,
+        "mirrorHandlerStatus": "PERMISSION_DENIED"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_content_type_v1",
+        "grpc_request_mirror_v1",
+        "http_request_mirror_v1",
+        "weighted_http_targets_v1"
+      ],
+      "octaviaProviderOptIns": {
+        "enabled_backend_h2c_providers": [
+          "amphora"
+        ],
+        "enabled_grpc_content_type_providers": [
+          "amphora"
+        ],
+        "enabled_http_request_mirror_providers": [
+          "amphora"
+        ],
+        "enabled_grpc_request_mirror_providers": [
+          "amphora"
+        ]
+      },
+      "octavia": {
+        "revision": "31a05857f3b3a29fe43bbf77c2a1ca89c074912d",
+        "version": "19.0.1.dev91",
+        "sha256": "50a75d8f315691fc5e2ec9c99ebf369fc15f78d63a868ae207eae1e8b48c481a",
+        "filesVerified": 669
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "grpcio": "1.83.0",
+      "RESTResponses": {
+        "GET versions 200": 5,
+        "GET providers 200": 159,
+        "GET loadbalancers 200": 209,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 106,
+        "GET pools 200": 112,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 105,
+        "POST pools 201": 5,
+        "GET members 200": 356,
+        "GET healthmonitors 200": 346,
+        "POST members 201": 4,
+        "POST healthmonitors 201": 4,
+        "POST l7policies 201": 3,
+        "GET rules 200": 279,
+        "POST rules 201": 6,
+        "PUT l7policies 200": 15,
+        "DELETE healthmonitors 204": 2,
+        "DELETE members 204": 2,
+        "DELETE pools 204": 2
+      },
+      "rawReceiptSHA256": "247912e0b03ef9446b01837855e0274596e8353d96658d44c145f04035a08ba3",
+      "phases": {
+        "configured": {
+          "route": {
+            "uid": "e5f32f42-a8dd-471d-8e91-e5abeb898326",
+            "generation": 1,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "",
+                          "kind": "Service",
+                          "name": "mirror",
+                          "namespace": "grpc-mirror-sink",
+                          "port": 8080
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "filters": [
+                        {
+                          "requestMirror": {
+                            "backendRef": {
+                              "group": "",
+                              "kind": "Service",
+                              "name": "mirror",
+                              "namespace": "grpc-mirror-sink",
+                              "port": 8080
+                            }
+                          },
+                          "type": "RequestMirror"
+                        }
+                      ],
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "uid": "bab548cb-339e-48f7-953c-7f68feaadb98",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request-mirror"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "mirror"
+                }
+              ]
+            }
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 6
+            },
+            "Target": {
+              "blue": 106,
+              "green": 38,
+              "mirror": 38
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [
+                  {
+                    "origin": "mirror",
+                    "numerator": 1,
+                    "denominator": 1,
+                    "phase": "after_rewrite"
+                  }
+                ],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [
+                      {
+                        "origin": "mirror",
+                        "numerator": 1,
+                        "denominator": 1,
+                        "phase": "after_rewrite"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "7917f297be415e6e03b870412a27b47e3e71acc47f27ab2e6eb580a0fb0996ca",
+            "HAProxyReloads": 6
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          }
+        },
+        "grant-revoked": {
+          "route": {
+            "uid": "e5f32f42-a8dd-471d-8e91-e5abeb898326",
+            "generation": 1,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "",
+                          "kind": "Service",
+                          "name": "mirror",
+                          "namespace": "grpc-mirror-sink",
+                          "port": 8080
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "filters": [
+                        {
+                          "requestMirror": {
+                            "backendRef": {
+                              "group": "",
+                              "kind": "Service",
+                              "name": "mirror",
+                              "namespace": "grpc-mirror-sink",
+                              "port": 8080
+                            }
+                          },
+                          "type": "RequestMirror"
+                        }
+                      ],
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "deletedUID": "bab548cb-339e-48f7-953c-7f68feaadb98"
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            },
+            "Target": {
+              "blue": 107,
+              "green": 37,
+              "mirror": 0
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "564f623153841b730d373d2d3b48a55cf6979e05b2b2802346f45277c9809262",
+            "HAProxyReloads": 8
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          }
+        },
+        "grant-restored": {
+          "route": {
+            "uid": "e5f32f42-a8dd-471d-8e91-e5abeb898326",
+            "generation": 1,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "",
+                          "kind": "Service",
+                          "name": "mirror",
+                          "namespace": "grpc-mirror-sink",
+                          "port": 8080
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "filters": [
+                        {
+                          "requestMirror": {
+                            "backendRef": {
+                              "group": "",
+                              "kind": "Service",
+                              "name": "mirror",
+                              "namespace": "grpc-mirror-sink",
+                              "port": 8080
+                            }
+                          },
+                          "type": "RequestMirror"
+                        }
+                      ],
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "uid": "4cdaa072-da6d-4eab-bbdc-7ac8b89e5a30",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request-mirror"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "mirror"
+                }
+              ]
+            }
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 6
+            },
+            "Target": {
+              "blue": 106,
+              "green": 38,
+              "mirror": 38
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [
+                  {
+                    "origin": "mirror",
+                    "numerator": 1,
+                    "denominator": 1,
+                    "phase": "after_rewrite"
+                  }
+                ],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [
+                      {
+                        "origin": "mirror",
+                        "numerator": 1,
+                        "denominator": 1,
+                        "phase": "after_rewrite"
+                      }
+                    ],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "3c9542146f7d465cfa0fa0dfb26773bc18e54a7c50d179231801e54fe9838fb5",
+            "HAProxyReloads": 10
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          }
+        },
+        "filters-removed": {
+          "route": {
+            "uid": "e5f32f42-a8dd-471d-8e91-e5abeb898326",
+            "generation": 2,
+            "spec": {
+              "parentRefs": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "grpc-mirror",
+                  "sectionName": "grpc"
+                }
+              ],
+              "rules": [
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Rule",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 3
+                    },
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "green",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Target",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "backendRefs": [
+                    {
+                      "group": "",
+                      "kind": "Service",
+                      "name": "blue",
+                      "port": 8080,
+                      "weight": 1
+                    }
+                  ],
+                  "matches": [
+                    {
+                      "method": {
+                        "method": "Plain",
+                        "service": "example.Mirror",
+                        "type": "Exact"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "referenceGrant": {
+            "uid": "4cdaa072-da6d-4eab-bbdc-7ac8b89e5a30",
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "grpc-request-mirror"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "mirror"
+                }
+              ]
+            }
+          },
+          "observedPrimaryOK": {
+            "Rule": 6,
+            "Target": 144,
+            "Plain": 6
+          },
+          "distribution": {
+            "Rule": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            },
+            "Target": {
+              "blue": 113,
+              "green": 31,
+              "mirror": 0
+            },
+            "Plain": {
+              "blue": 6,
+              "green": 0,
+              "mirror": 0
+            }
+          },
+          "provider": {
+            "methods": {
+              "Rule": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              },
+              "Target": {
+                "action": "WEIGHTED_TARGETS",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "targets": [
+                  {
+                    "origin": "blue",
+                    "weight": 3,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  },
+                  {
+                    "origin": "green",
+                    "weight": 1,
+                    "mirrors": [],
+                    "fixedResponse": null
+                  }
+                ]
+              },
+              "Plain": {
+                "action": "REDIRECT_TO_POOL",
+                "media": [
+                  {
+                    "type": "GRPC_CONTENT_TYPE",
+                    "compare_type": "EQUAL_TO",
+                    "value": "application/grpc"
+                  }
+                ],
+                "ruleMirrors": [],
+                "origin": "blue"
+              }
+            },
+            "activeHAProxyConfigSHA256": "564f623153841b730d373d2d3b48a55cf6979e05b2b2802346f45277c9809262",
+            "HAProxyReloads": 12
+          },
+          "gatewayConditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "AddressesAssigned": "True/AddressesAssigned"
+          }
+        }
+      }
+    }
+  }
+}
