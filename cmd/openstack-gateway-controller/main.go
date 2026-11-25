@@ -177,7 +177,7 @@ func run(ctx context.Context) error {
 		return nil
 	})
 	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
-	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia L7 HTTP request mirroring capability")
+	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia HTTPRoute and GRPCRoute request mirroring capabilities")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
 	flag.BoolVar(&listenerFilters, "octavia-listener-request-filters", false, "serve Experimental Gateway listener request filters via the Octavia listener_request_filters_v1 capability")
 	flag.BoolVar(&httpCORS, "octavia-request-cors", false, "serve rule-level HTTPRoute CORS via the Octavia request_cors_v1 capability")

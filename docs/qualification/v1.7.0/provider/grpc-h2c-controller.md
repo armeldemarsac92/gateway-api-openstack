@@ -120,6 +120,12 @@ Enable the controller's `--octavia-request-header-modifier` option together with
 
 On both v1.7.0 bundles, the executable from image revision `2944c353dcb0afa7b8756373bf87a51001c33ad2` passed the seven original `GRPCRouteRequestHeaderModifier` subtests. Two additional RPCs read the headers reported by the echo backends. One method overwrote an existing value and preserved an unrelated header. Another appended a second value, removed the selected key and reached its own backend. On each channel the route parent eventually reported `Accepted=True`, `ResolvedRefs=True` and the controller's `Programmed=True`. The local run used envtest, Octavia REST, the Amphora renderer, native HAProxy and gRPC echo processes. Keystone, Neutron and worker completion used local fixtures. [Per-channel results](grpc-metadata-and-hostname-results.json) · [Image and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-2944c353dcb0afa7b8756373bf87a51001c33ad2)
 
+## Mirror gRPC requests
+
+An operator can enable gRPC mirroring for an Amphora region. A GRPCRoute can send a copy of a matching RPC to another Service. A mirror on a weighted backend receives a copy only when that backend is selected. A denied status from the mirror leaves the primary response intact. [Operator settings](../../../getting-started.md) · [Octavia packages and native streaming results](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-grpc-request-mirror-31a05857f3b3)
+
+The local Standard and Experimental runs each sent six rule-matched calls, 144 calls to a weighted method and six unfiltered calls per phase. Removing the mirror Service’s ReferenceGrant stopped its copies while both primary backends kept serving. Restoring the grant resumed the copies. Removing the filters stopped them again. Every client received its primary reply with gRPC status OK. [Calls, copies and route conditions by channel](grpc-request-mirror-evidence/receipt.json)
+
 ## Modify request metadata on a selected gRPC backend
 
 A request header modifier on a GRPCRoute rule applies to matching calls. A modifier on a backend reference applies after the rule's operations and only to the selected occurrence. An enrolled Amphora sends comma-separated binary values as individual HTTP/2 metadata fields. [Operator settings](../../../getting-started.md) · [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-grpc-request-binary-metadata-2972069e0a3c)

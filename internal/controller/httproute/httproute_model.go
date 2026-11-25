@@ -80,7 +80,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support an optional exact service and method, exact header matches, rule-level request and response header modifiers, and backendRef request header modifiers")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support exact service, method and header matches, rule-level request and response header modifiers, backendRef request header modifiers, and RequestMirror at either level")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -191,7 +191,7 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewayv1.Kind) error {
 	grpc := kind == model.GRPCRouteKind
-	_, diagnostic := model.NormalizeRequestMirrors(rule.Filters, r.Config.HTTPRequestMirror && !grpc, len(rule.BackendRefs) > 0)
+	_, diagnostic := model.NormalizeRequestMirrors(rule.Filters, r.Config.HTTPRequestMirror, len(rule.BackendRefs) > 0)
 	if diagnostic != nil {
 		return routeActionError(diagnostic)
 	}
@@ -224,7 +224,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 	if weightedTargets {
 		request, _, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, kind, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite && !grpc, r.Config.HTTPCORS && !grpc)
 		for _, backend := range rule.BackendRefs {
-			if _, diagnostic := model.NormalizeRequestMirrors(backend.Filters, r.Config.HTTPRequestMirror && !grpc, true); diagnostic != nil {
+			if _, diagnostic := model.NormalizeRequestMirrors(backend.Filters, r.Config.HTTPRequestMirror, true); diagnostic != nil {
 				return routeActionError(diagnostic)
 			}
 			backend.Filters = model.WithoutRequestMirrorFilters(backend.Filters)
@@ -576,6 +576,10 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 				if backend.Diagnostic != nil {
 					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *backend.Diagnostic)
 				}
+				for _, mirror := range backend.RequestMirrors {
+					issue := inputs.requestMirrorDiagnostic(mirror.Backend, spec.GRPC, false)
+					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, issue)
+				}
 				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{})
 				continue
 			}
@@ -705,17 +709,11 @@ func (r *Reconciler) lowerRequestMirrors(ctx context.Context, reader client.Read
 	var diagnostic model.Diagnostic
 	for _, mirror := range mirrors {
 		backend := mirror.Backend
-		if backend.Diagnostic != nil {
-			diagnostic = preferredBackendDiagnostic(diagnostic, *backend.Diagnostic)
+		if issue := inputs.requestMirrorDiagnostic(backend, spec.GRPC, groups != nil); issue.Reason != "" {
+			diagnostic = preferredBackendDiagnostic(diagnostic, issue)
 			continue
 		}
 		if groups == nil {
-			continue
-		}
-		if tls := inputs.backendTLSValidation(backend, false); tls != nil && tls.Denied {
-			diagnostic = preferredBackendDiagnostic(diagnostic, model.Diagnostic{
-				Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "RequestMirror backend TLS validation is unavailable",
-			})
 			continue
 		}
 		index, issue, err := r.lowerHTTPBackend(ctx, reader, spec, inputs, backend, nodeAddressType, httpBackendMirror, groups)
@@ -729,6 +727,18 @@ func (r *Reconciler) lowerRequestMirrors(ctx context.Context, reader client.Read
 		}
 	}
 	return targets, diagnostic, nil
+}
+
+func (inputs *routeModelInputs) requestMirrorDiagnostic(backend model.BackendGroup, requireH2, canForward bool) model.Diagnostic {
+	if backend.Diagnostic != nil {
+		return *backend.Diagnostic
+	}
+	if canForward {
+		if tls := inputs.backendTLSValidation(backend, requireH2); tls != nil && tls.Denied {
+			return model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "RequestMirror backend TLS validation is unavailable"}
+		}
+	}
+	return model.Diagnostic{}
 }
 
 func hasHTTPBackendKey(backend model.BackendGroup) bool {

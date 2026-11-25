@@ -65,29 +65,20 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 		for _, backend := range rule.BackendRefs {
 			ref := gatewayv1.HTTPBackendRef{BackendRef: *backend.BackendRef.DeepCopy()}
 			for _, filter := range backend.Filters {
-				if filter.Type != gatewayv1.GRPCRouteFilterRequestHeaderModifier {
+				loweredFilter, ok := projectGRPCFilter(filter, true)
+				if !ok {
 					return projected
 				}
-				ref.Filters = append(ref.Filters, gatewayv1.HTTPRouteFilter{
-					Type:                  gatewayv1.HTTPRouteFilterRequestHeaderModifier,
-					RequestHeaderModifier: filter.RequestHeaderModifier.DeepCopy(),
-				})
+				ref.Filters = append(ref.Filters, loweredFilter)
 			}
 			lowered.BackendRefs = append(lowered.BackendRefs, ref)
 		}
 		for _, filter := range rule.Filters {
-			var header gatewayv1.HTTPRouteFilter
-			switch filter.Type {
-			case gatewayv1.GRPCRouteFilterRequestHeaderModifier:
-				header.Type = gatewayv1.HTTPRouteFilterRequestHeaderModifier
-				header.RequestHeaderModifier = filter.RequestHeaderModifier.DeepCopy()
-			case gatewayv1.GRPCRouteFilterResponseHeaderModifier:
-				header.Type = gatewayv1.HTTPRouteFilterResponseHeaderModifier
-				header.ResponseHeaderModifier = filter.ResponseHeaderModifier.DeepCopy()
-			default:
+			loweredFilter, ok := projectGRPCFilter(filter, false)
+			if !ok {
 				return projected
 			}
-			lowered.Filters = append(lowered.Filters, header)
+			lowered.Filters = append(lowered.Filters, loweredFilter)
 		}
 		for _, match := range rule.Matches {
 			projectedMatch, ok := projectGRPCMatch(match)
@@ -100,6 +91,22 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 	}
 	projected.Spec.Rules = rules
 	return projected
+}
+
+func projectGRPCFilter(filter gatewayv1.GRPCRouteFilter, backend bool) (gatewayv1.HTTPRouteFilter, bool) {
+	switch filter.Type {
+	case gatewayv1.GRPCRouteFilterRequestHeaderModifier:
+		return gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+			RequestHeaderModifier: filter.RequestHeaderModifier.DeepCopy()}, true
+	case gatewayv1.GRPCRouteFilterResponseHeaderModifier:
+		return gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterResponseHeaderModifier,
+			ResponseHeaderModifier: filter.ResponseHeaderModifier.DeepCopy()}, !backend
+	case gatewayv1.GRPCRouteFilterRequestMirror:
+		return gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestMirror,
+			RequestMirror: filter.RequestMirror.DeepCopy()}, true
+	default:
+		return gatewayv1.HTTPRouteFilter{}, false
+	}
 }
 
 func projectGRPCMatch(match gatewayv1.GRPCRouteMatch) (gatewayv1.HTTPRouteMatch, bool) {

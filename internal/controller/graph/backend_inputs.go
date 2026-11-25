@@ -58,6 +58,22 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 	slices.SortFunc(input.Routes, func(a, b gatewayv1.HTTPRoute) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
 	})
+	if err := collectBackendServiceInputs(ctx, reader, &input, true); err != nil {
+		return model.Input{}, err
+	}
+	slices.SortFunc(input.EndpointSlices, func(a, b discoveryv1.EndpointSlice) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+	return input, nil
+}
+
+// CollectBackendServiceInputs observes Services and their ReferenceGrants for
+// reference resolution, which does not depend on EndpointSlice availability.
+func CollectBackendServiceInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
+	return collectBackendServiceInputs(ctx, reader, input, false)
+}
+
+func collectBackendServiceInputs(ctx context.Context, reader client.Reader, input *model.Input, includeEndpointSlices bool) error {
 	references := backendServiceReferences(input.Routes)
 	grantNamespaces := map[string]struct{}{}
 	for target, sources := range references {
@@ -70,7 +86,7 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 	for _, namespace := range slices.Sorted(maps.Keys(grantNamespaces)) {
 		grants, err := ListBackendReferenceGrants(ctx, reader, namespace)
 		if err != nil {
-			return model.Input{}, err
+			return err
 		}
 		input.ReferenceGrants = append(input.ReferenceGrants, grants...)
 	}
@@ -97,26 +113,24 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return model.Input{}, fmt.Errorf("get backend Service %s: %w", key, err)
+			return fmt.Errorf("get backend Service %s: %w", key, err)
 		}
 		// Keep deleting Services so callers can distinguish pending deletion from absence.
 		input.Services = append(input.Services, *service.DeepCopy())
-		if !service.DeletionTimestamp.IsZero() || service.Spec.Type == corev1.ServiceTypeLoadBalancer || service.Spec.Type == corev1.ServiceTypeExternalName {
+		if !includeEndpointSlices || !service.DeletionTimestamp.IsZero() ||
+			service.Spec.Type == corev1.ServiceTypeLoadBalancer || service.Spec.Type == corev1.ServiceTypeExternalName {
 			continue
 		}
 		var endpointSlices discoveryv1.EndpointSliceList
 		if err := reader.List(ctx, &endpointSlices, client.InNamespace(key.Namespace), client.MatchingLabels{discoveryv1.LabelServiceName: key.Name}); err != nil {
-			return model.Input{}, fmt.Errorf("list EndpointSlices for Service %s: %w", key, err)
+			return fmt.Errorf("list EndpointSlices for Service %s: %w", key, err)
 		}
 		if endpointSlices.Continue != "" {
-			return model.Input{}, fmt.Errorf("incomplete EndpointSlice list for Service %s", key)
+			return fmt.Errorf("incomplete EndpointSlice list for Service %s", key)
 		}
 		input.EndpointSlices = append(input.EndpointSlices, endpointSlices.DeepCopy().Items...)
 	}
-	slices.SortFunc(input.EndpointSlices, func(a, b discoveryv1.EndpointSlice) int {
-		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-	})
-	return input, nil
+	return nil
 }
 
 // CollectXBackendInputs reads local XBackend references and the matching Pods
