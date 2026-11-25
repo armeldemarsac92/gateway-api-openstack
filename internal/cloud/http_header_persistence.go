@@ -38,10 +38,8 @@ func (p HTTPSessionHeaderPersistence) Valid() bool {
 // text token. Binary metadata keys expect a base64 payload.
 func (p HTTPSessionHeaderPersistence) ValidForGRPC() bool {
 	name := strings.ToLower(p.Name)
-	return p.Valid() && name != "user-agent" && !strings.HasSuffix(name, "-bin") && grpcSessionHeaderToken.MatchString(name)
+	return p.Valid() && name != "user-agent" && !strings.HasSuffix(name, "-bin") && ValidGRPCMetadataName(name)
 }
-
-var grpcSessionHeaderToken = regexp.MustCompile(`^[a-z0-9_.-]+$`)
 
 var sessionHeaderToken = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$")
 

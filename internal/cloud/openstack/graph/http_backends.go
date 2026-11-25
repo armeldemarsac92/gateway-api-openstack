@@ -334,6 +334,7 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 					})
 				}
 				step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
+					policy:                  desiredPolicy{grpcContentTypeRule: wanted.grpcContentTypeRule},
 					requestHeaderOperations: operations, responseHeaderOperations: responsePatch,
 					requestURLRewriteUpdate: rewritePatch, requestCORSUpdate: corsPatch,
 					retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true}

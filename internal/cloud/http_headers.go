@@ -37,6 +37,9 @@ const (
 	HTTPHeaderRemove HTTPHeaderAction = "REMOVE"
 )
 
+// MaxHTTPHeaderOperations is the maximum size of an Amphora modifier list.
+const MaxHTTPHeaderOperations = 48
+
 // HTTPHeaderOperation applies an action with an optional literal value.
 type HTTPHeaderOperation struct {
 	Operation HTTPHeaderAction
@@ -45,6 +48,14 @@ type HTTPHeaderOperation struct {
 }
 
 var httpHeaderName = regexp.MustCompile(`^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]{1,256}$`)
+
+var grpcMetadataName = regexp.MustCompile(`^[a-z0-9_.-]+$`)
+
+// ValidGRPCMetadataName checks the lowercase alphabet accepted by gRPC.
+// Each use decides which reserved keys it can modify.
+func ValidGRPCMetadataName(name string) bool {
+	return grpcMetadataName.MatchString(name)
+}
 
 // HTTPHeaderMatch compares a case-insensitive field name and a literal value.
 type HTTPHeaderMatch struct {
@@ -101,8 +112,8 @@ func normalizeHTTPHeaderOperations(operations []HTTPHeaderOperation, response bo
 	if len(operations) == 0 {
 		return nil, nil
 	}
-	if len(operations) > 48 {
-		return nil, fmt.Errorf("%s header modifier has more than 48 operations", direction)
+	if len(operations) > MaxHTTPHeaderOperations {
+		return nil, fmt.Errorf("%s header modifier has more than %d operations", direction, MaxHTTPHeaderOperations)
 	}
 	seen := make(map[string]bool, len(operations))
 	normalized := make([]HTTPHeaderOperation, 0, len(operations))

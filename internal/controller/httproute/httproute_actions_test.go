@@ -35,6 +35,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func TestFixedRedirectProgramsWithoutBackendReads(t *testing.T) {
@@ -162,17 +163,17 @@ func TestRequestRedirectRejectsInvalidPrefixMatch(t *testing.T) {
 	action.Path = &gatewayv1.HTTPPathModifier{Type: gatewayv1.PrefixMatchHTTPPathModifier, ReplacePrefixMatch: ptr.To("/new")}
 	rule.Matches = []gatewayv1.HTTPRouteMatch{{}, {Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact)}}}
 	reconciler := &Reconciler{Config: controller.Config{HTTPRequestRedirect: true}}
-	status := statusForRouteBuildError(reconciler.validateRouteRule(rule, false))
+	status := statusForRouteBuildError(reconciler.validateRouteRule(rule, model.HTTPRouteKind))
 	if status.accepted != metav1.ConditionFalse || status.acceptedReason != "Invalid" {
 		t.Fatalf("incompatible match type has status %+v", status)
 	}
 	rule.Matches[1].Path.Type = ptr.To(gatewayv1.PathMatchType("FutureType"))
-	status = statusForRouteBuildError(reconciler.validateRouteRule(rule, false))
+	status = statusForRouteBuildError(reconciler.validateRouteRule(rule, model.HTTPRouteKind))
 	if status.acceptedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
 		t.Fatalf("unknown match type has status %+v", status)
 	}
 	action.Path.Type = gatewayv1.HTTPPathModifierType("FutureModifier")
-	status = statusForRouteBuildError(reconciler.validateRouteRule(rule, false))
+	status = statusForRouteBuildError(reconciler.validateRouteRule(rule, model.HTTPRouteKind))
 	if status.acceptedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
 		t.Fatalf("unknown path modifier has status %+v", status)
 	}
@@ -759,26 +760,26 @@ func TestHTTPBackendURLRewriteUsesEnclosingMatchAndDropsConflictingRule(t *testi
 	conflict := *prefix.DeepCopy()
 	conflict.Name = ptr.To(gatewayv1.SectionName("conflict"))
 	conflict.Filters = full.BackendRefs[0].Filters
-	if err := f.reconciler.validateRouteRule(conflict, false); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
+	if err := f.reconciler.validateRouteRule(conflict, model.HTTPRouteKind); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
 		t.Fatalf("overlapping rule and backend path rewrites did not produce IncompatibleFilters: %v", err)
 	}
 	hostname := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterURLRewrite,
 		URLRewrite: &gatewayv1.HTTPURLRewriteFilter{Hostname: ptr.To(gatewayv1.PreciseHostname("backend.example.test"))}}
 	composed := *prefix.DeepCopy()
 	composed.Filters = []gatewayv1.HTTPRouteFilter{hostname}
-	if err := f.reconciler.validateRouteRule(composed, false); err != nil {
+	if err := f.reconciler.validateRouteRule(composed, model.HTTPRouteKind); err != nil {
 		t.Fatalf("rule hostname and backend path rewrite should compose: %v", err)
 	}
 	composed.BackendRefs[0].Filters = append(composed.BackendRefs[0].Filters, gatewayv1.HTTPRouteFilter{
 		Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier, RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Remove: []string{"Host"}},
 	})
-	if err := f.reconciler.validateRouteRule(composed, false); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
+	if err := f.reconciler.validateRouteRule(composed, model.HTTPRouteKind); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
 		t.Fatalf("rule hostname rewrite with a backend Host operation did not produce IncompatibleFilters: %v", err)
 	}
 	exact := *prefix.DeepCopy()
 	exact.Matches[0].Path.Type = ptr.To(gatewayv1.PathMatchExact)
 	var rejected *routeBuildError
-	if err := f.reconciler.validateRouteRule(exact, false); !errors.As(err, &rejected) || rejected.kind != routeErrorInvalid {
+	if err := f.reconciler.validateRouteRule(exact, model.HTTPRouteKind); !errors.As(err, &rejected) || rejected.kind != routeErrorInvalid {
 		t.Fatalf("accepted a ReplacePrefixMatch on Exact: %v", err)
 	}
 	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{full, conflict, prefix}

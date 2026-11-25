@@ -80,7 +80,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support an optional exact service and method, exact header matches, and a rule-level RequestHeaderModifier")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support an optional exact service and method, exact header matches, and rule-level request and response header modifiers")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -103,7 +103,8 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 // contains valid rules. Keep the published object available for status and
 // create a projection with only admitted rules for backend reads and writes.
 func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string, error) {
-	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
+	kind := model.HTTPProfileRouteKind(route)
+	grpc := kind == model.GRPCRouteKind
 	partial := !grpc && hasProjectableHTTPFilters(route)
 	var first error
 	var dropped []string
@@ -112,7 +113,7 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 		if _, diagnostic := model.NormalizeHTTPRequestPolicy(rule, !grpc && r.Config.HTTPRequestPolicy); diagnostic != nil {
 			return nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
 		}
-		err := r.validateRouteRule(rule, grpc)
+		err := r.validateRouteRule(rule, kind)
 		if err == nil {
 			valid = append(valid, rule)
 			continue
@@ -184,11 +185,12 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 	if len(rule.Matches) > 1 || len(rule.Matches) == 1 && (len(rule.Matches[0].Headers) != 0 || rule.Matches[0].Method != nil) {
 		return true
 	}
-	request, response, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite, r.Config.HTTPCORS)
+	request, response, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, model.HTTPProfileRouteKind(route), r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite, r.Config.HTTPCORS)
 	return len(request) != 0 || len(response) != 0 || rewrite != nil || cors != nil
 }
 
-func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
+func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewayv1.Kind) error {
+	grpc := kind == model.GRPCRouteKind
 	_, diagnostic := model.NormalizeRequestMirrors(rule.Filters, r.Config.HTTPRequestMirror && !grpc, len(rule.BackendRefs) > 0)
 	if diagnostic != nil {
 		return routeActionError(diagnostic)
@@ -204,7 +206,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return newRouteBuildError(routeErrorUnsupported, "session persistence is not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
-		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc, r.Config.HTTPRequestRedirect && !grpc, r.Config.HTTPRequestURLRewrite && !grpc, r.Config.HTTPCORS && !grpc); err != nil {
+		if err := r.compileRouteAction(rule, kind); err != nil {
 			return err
 		}
 	}
@@ -220,7 +222,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return nil
 	}
 	if weightedTargets {
-		request, _, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite, r.Config.HTTPCORS && !grpc)
+		request, _, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, kind, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite && !grpc, r.Config.HTTPCORS && !grpc)
 		for _, backend := range rule.BackendRefs {
 			if _, diagnostic := model.NormalizeRequestMirrors(backend.Filters, r.Config.HTTPRequestMirror && !grpc, true); diagnostic != nil {
 				return routeActionError(diagnostic)

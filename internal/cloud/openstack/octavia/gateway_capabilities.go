@@ -50,6 +50,7 @@ const (
 	GatewayCapabilityHTTPCookiePermanent       = "http_cookie_permanent_v1"
 	GatewayCapabilityBackendH2C                = "backend_h2c_v1"
 	GatewayCapabilityGRPCContentType           = "grpc_content_type_v1"
+	GatewayCapabilityGRPCBinaryMetadata        = "grpc_binary_response_metadata_v1"
 	GatewayCapabilityBackendTLSHostname        = "backend_tls_hostname_v1"
 	GatewayCapabilityBackendTLSSystemCA        = "backend_tls_system_ca_v1"
 	GatewayCapabilityBackendTLSSubjectAltNames = "backend_tls_subject_alt_names_v1"
