@@ -4,16 +4,14 @@
   "scope": "Gateway API v1.7.0 GatewayListenerFilters, HTTP Gateway listeners with HTTP ExternalAuth before HTTPRoute forwarding",
   "fixtureBoundary": "Real manager, disposable kind API and app Pods, Octavia REST, listener and L7 worker flows, Amphora renderer, live HAProxy, and an isolated HTTP auth service exposed as a Service/EndpointSlice. Cloud provisioning and agent transport are fixture stand-ins.",
   "controller": {
-    "revision": "ed0ee4dd9591531588582dd3c6f08ea0345d2719",
-    "tree": "f79032439fe073685db1f8bb653a7b28bcdb1c7c",
+    "revision": "7287dd6140b9009f76120d52121a1412d041cb1d",
+    "tree": "a7ffa2914b7fdb8db988703998d72205cd5dedcf",
     "personalSignatureVerified": true,
-    "previousWireManagerSHA256": "c13c1557a1f8371acd53554dedbd12342b882d44f212a90f38331efca15a6550",
-    "previousWireManagerBuild": "Host Go build with CGO_ENABLED=1 and Git build metadata",
-    "wireManagerSHA256": "114052637ec03f043314f544bd6b8dab1ba7ed2321e5ff26880f3fe2c5c9ca0c",
-    "ociEntrypointSHA256": "114052637ec03f043314f544bd6b8dab1ba7ed2321e5ff26880f3fe2c5c9ca0c",
+    "wireManagerSHA256": "347148ef43436a6a5f1df712b73f43970915665b03000186e7c038d925272038",
+    "ociEntrypointSHA256": "347148ef43436a6a5f1df712b73f43970915665b03000186e7c038d925272038",
     "wireManagerMatchesOCIEntrypoint": true,
     "ociEntrypointBuild": "Repository Dockerfile with CGO_ENABLED=0, stripped symbols, Git VCS stamping disabled and main.version set to the signed source revision",
-    "ociManifestDigest": "sha256:f2cbb0c25aac0a60a35c4104be6488957b38080042fbd5b5fc115fc4f13bff8a",
+    "ociManifestDigest": "sha256:da9c5f80daf2258e42f448a2a38485eb295de9d6fd527e07b82624645cb0d2bb",
     "normalAndNoCacheOCIBuildsMatch": true
   },
   "provider": {
@@ -99,7 +97,7 @@
           "provider": {
             "physicalListeners": 1,
             "ready": true,
-            "activeConfigurationSHA256": "438105d9213df1496329ef7184d608c5f6c2482ab17a99d90ca6a62b704bbef2",
+            "activeConfigurationSHA256": "173c98d734082e7939ae327acfdbb2a608ef0ea406dd5cc90763539c692e71d2",
             "sections": []
           }
         }
@@ -169,7 +167,7 @@
           "provider": {
             "physicalListeners": 1,
             "ready": true,
-            "activeConfigurationSHA256": "c5e4d26c76cdd93a9f298297e9c0fbce2ed6c69b00fdcb1adb96dd93c6b0e728",
+            "activeConfigurationSHA256": "0ef5dad6ef61597d26fd9a576e5ed423da141ea5de0be83875dd97b34a0fca46",
             "sections": [
               {
                 "hostname": "chosen.example.com",
@@ -221,7 +219,7 @@
             "chosen": {
               "Accepted": "True/Accepted",
               "ResolvedRefs": "True/ResolvedRefs",
-              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
             },
             "sister": {
               "Accepted": "True/Accepted",
@@ -243,7 +241,7 @@
           "provider": {
             "physicalListeners": 1,
             "ready": true,
-            "activeConfigurationSHA256": "cff4397d27457b7671561463cb35aee53b00a15eae7c410f303a56c87fa4ee88",
+            "activeConfigurationSHA256": "4f516ab8efa0e544e227f354ff0a2316d7a7328a2abec1f0551567d95a92488b",
             "sections": [
               {
                 "hostname": "chosen.example.com",
@@ -311,7 +309,7 @@
           "provider": {
             "physicalListeners": 1,
             "ready": true,
-            "activeConfigurationSHA256": "dfb017d477791381190f5c45950fe0f45912bb4ffb600dc5eed831bf65085063",
+            "activeConfigurationSHA256": "ce3973650962120201d625c65e457bfc56f77e454e39a0535920bc8d3fe41fe5",
             "sections": [
               {
                 "hostname": "chosen.example.com",
