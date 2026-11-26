@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -33,6 +32,7 @@ func TestWeightedMembers(t *testing.T) {
 	c := cloud.Member{Address: "10.0.0.3", Port: 53}
 	drainingC := cloud.Member{Address: c.Address, Port: c.Port, Draining: true}
 	drainingD := cloud.Member{Address: "10.0.0.4", Port: 53, Draining: true}
+	e := cloud.Member{Address: "10.0.0.5", Port: 53}
 
 	for _, test := range []struct {
 		name   string
@@ -77,6 +77,34 @@ func TestWeightedMembers(t *testing.T) {
 			},
 		},
 		{
+			name: "UDP rounding after merging shared destinations",
+			groups: []WeightedServiceMembers{
+				{Weight: 1028, Members: []cloud.Member{a, b, drainingC, drainingD}},
+				{Weight: 510, Members: []cloud.Member{a}},
+				{Weight: 1, Members: []cloud.Member{c}},
+				{Weight: 0, Members: []cloud.Member{e}},
+			},
+			want: []cloud.Member{
+				{Address: a.Address, Port: a.Port, Weight: 256},
+				{Address: b.Address, Port: b.Port, Weight: 129},
+				{Address: c.Address, Port: c.Port, Weight: 1},
+				drainingD,
+			},
+		},
+		{
+			name: "UDP rounding uses the largest acceptable maximum",
+			groups: []WeightedServiceMembers{
+				{Weight: 1001, Members: []cloud.Member{a}},
+				{Weight: 30, Members: []cloud.Member{b, c, e}},
+			},
+			want: []cloud.Member{
+				{Address: a.Address, Port: a.Port, Weight: 232},
+				{Address: b.Address, Port: b.Port, Weight: 2},
+				{Address: c.Address, Port: c.Port, Weight: 2},
+				{Address: e.Address, Port: e.Port, Weight: 2},
+			},
+		},
+		{
 			name:   "disabled backends have no members",
 			groups: []WeightedServiceMembers{{Weight: 0, Members: []cloud.Member{a, drainingD}}},
 		},
@@ -90,7 +118,7 @@ func TestWeightedMembers(t *testing.T) {
 	}
 }
 
-func TestWeightedMembersFailClosed(t *testing.T) {
+func TestWeightedMembersRejectsBackendWithoutReadyEndpoints(t *testing.T) {
 	ready := cloud.Member{Address: "10.0.0.1", Port: 53}
 	draining := cloud.Member{Address: "10.0.0.2", Port: 53, Draining: true}
 	groups := []WeightedServiceMembers{
@@ -99,10 +127,6 @@ func TestWeightedMembersFailClosed(t *testing.T) {
 	}
 	if members, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); !errors.Is(err, ErrBackendWithoutReadyEndpoints) || len(members) != 0 {
 		t.Fatalf("backend without ready endpoints returned %+v, %v", members, err)
-	}
-	groups[1].Members[0].Draining = false
-	if members, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); err == nil || !strings.Contains(err.Error(), "256") || len(members) != 0 {
-		t.Fatalf("unrepresentable ratio returned %+v, %v", members, err)
 	}
 }
 

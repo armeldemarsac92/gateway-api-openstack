@@ -395,7 +395,47 @@ func TestUDPRouteProgramsWeightedEndpointPool(t *testing.T) {
 	checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
 }
 
-func TestWeightedUDPRouteWithUnsupportedRatioWithdrawsPool(t *testing.T) {
+func TestUDPRouteProgramsApproximateWeights(t *testing.T) {
+	for _, mode := range []cloud.MemberMode{cloud.MemberModeEndpoint, cloud.MemberModeNodePort} {
+		t.Run(string(mode), func(t *testing.T) {
+			gateway, class, route := udpRouteFixture()
+			firstRef, first, firstEndpoints := udpBackendFixture(route.Namespace, "primary", 257, "10.1.2.1")
+			secondRef, second, secondEndpoints := udpBackendFixture(route.Namespace, "secondary", 1, "10.1.2.2")
+			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{firstRef, secondRef}
+			objects := []client.Object{gateway, class, route, first, firstEndpoints, second, secondEndpoints}
+			want := []cloud.Member{
+				{Address: "10.1.2.1", Port: 9090, Weight: 256},
+				{Address: "10.1.2.2", Port: 9090, Weight: 1},
+			}
+			if mode == cloud.MemberModeNodePort {
+				worker := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "worker"},
+					Status: corev1.NodeStatus{
+						Addresses:  []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.44"}},
+						Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+					},
+				}
+				objects = append(objects, worker)
+				for i, service := range []*corev1.Service{first, second} {
+					service.Spec.Type = corev1.ServiceTypeNodePort
+					service.Spec.Ports[0].NodePort = 32000 + int32(i)
+					want[i].Address, want[i].Port = worker.Status.Addresses[0].Address, int(service.Spec.Ports[0].NodePort)
+				}
+			}
+			r := testReconciler(t, objects...)
+			r.Protocol = gatewayv1.UDPProtocolType
+			identity := bindFixture(t, r, gateway, route, mode)
+			current := reconcileUDPRouteWithGraph(t, r, route, identity, func(nodes []cloud.RouteGraphNode) {
+				if got := nodes[0].Spec.Members; !slices.Equal(got, want) {
+					t.Fatalf("257:1 shares produced %+v, want %+v", got, want)
+				}
+			})
+			checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+		})
+	}
+}
+
+func TestWeightedUDPRouteOutsideWeightToleranceWithdrawsPool(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		denied    bool
@@ -407,14 +447,17 @@ func TestWeightedUDPRouteWithUnsupportedRatioWithdrawsPool(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			gateway, class, route := udpRouteFixture()
-			firstRef, first, firstEndpoints := udpBackendFixture(route.Namespace, "primary", 70, "10.1.2.1")
-			secondRef, second, secondEndpoints := udpBackendFixture(route.Namespace, "secondary", 30, "10.1.2.2")
+			firstRef, first, firstEndpoints := udpBackendFixture(route.Namespace, "primary", 70, "10.1.2.1", "10.1.2.2")
+			secondRef, second, secondEndpoints := udpBackendFixture(route.Namespace, "secondary", 30, "10.1.2.3", "10.1.2.4", "10.1.2.5", "10.1.2.6")
 			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{firstRef, secondRef}
 			r := testReconciler(t, gateway, class, route, first, firstEndpoints, second, secondEndpoints)
 			r.Protocol = gatewayv1.UDPProtocolType
 			identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
 			route = reconcileUDPRouteWithGraph(t, r, route, identity, nil)
-			route.Spec.Rules[0].BackendRefs[0].Weight = ptr.To(int32(257))
+			// Each member is within 1/256 of its ideal share. Together the
+			// secondary members would get 4/516 of the weight instead of
+			// 1/1001, exceeding the tolerance for their group.
+			route.Spec.Rules[0].BackendRefs[0].Weight = ptr.To(int32(1000))
 			route.Spec.Rules[0].BackendRefs[1].Weight = ptr.To(int32(1))
 			if test.denied {
 				route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, gatewayv1.BackendRef{
@@ -430,7 +473,7 @@ func TestWeightedUDPRouteWithUnsupportedRatioWithdrawsPool(t *testing.T) {
 			checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", test.resolved, test.refReason)
 			checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "UnsupportedValue")
 			if current.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
-				t.Fatal("a ratio outside Octavia's member-weight range did not checkpoint pool withdrawal")
+				t.Fatal("a ratio outside the UDP weight tolerance did not checkpoint pool withdrawal")
 			}
 		})
 	}
