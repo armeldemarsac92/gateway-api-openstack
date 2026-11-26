@@ -101,7 +101,11 @@ func (r *Reconciler) observeRouteBackendPermissions(ctx context.Context, route *
 				return nil, &routeBuildError{kind: routeErrorRefNotPermitted, message: "XBackend must be in the same namespace as its HTTPRoute"}, nil
 			}
 			key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
-			if !supported || key.Namespace == route.Namespace {
+			imported := false
+			if !supported && r.Config.MulticlusterServiceImports {
+				key, imported = model.ServiceImportReference(route.Namespace, ref.BackendObjectReference)
+			}
+			if (!supported && !imported) || key.Namespace == route.Namespace {
 				continue
 			}
 			if r.APIReader == nil {
@@ -116,8 +120,15 @@ func (r *Reconciler) observeRouteBackendPermissions(ctx context.Context, route *
 				}
 				observed[key.Namespace] = grants
 			}
-			if denied := backendReferenceRejection(model.HTTPProfileRouteKind(route), route.Namespace, key, grants); denied != nil && rejection == nil {
-				rejection = denied
+			kind := model.HTTPProfileRouteKind(route)
+			if rejection == nil {
+				if imported {
+					if !model.ServiceImportReferenceAllowed(kind, route.Namespace, key, grants) {
+						rejection = &routeBuildError{kind: routeErrorRefNotPermitted, message: fmt.Sprintf("backend ServiceImport %s is not permitted by a ReferenceGrant", key)}
+					}
+				} else {
+					rejection = backendReferenceRejection(kind, route.Namespace, key, grants)
+				}
 			}
 		}
 	}

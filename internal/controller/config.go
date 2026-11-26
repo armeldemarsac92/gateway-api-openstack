@@ -84,6 +84,8 @@ type Config struct {
 	ResponseHeaderModifier bool
 	// BackendH2C enables h2c for HTTP backends that explicitly request it.
 	BackendH2C bool
+	// MulticlusterServiceImports enables Gateway routes to IPv4 ClusterSetIP ServiceImports.
+	MulticlusterServiceImports bool
 	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
 	BackendTLSPolicy bool
 	// ClusterTrustBundles enables optional native trust sources for both TLS consumers.
@@ -230,6 +232,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.MulticlusterServiceImports && !c.FixedHTTPResponses {
+		return fmt.Errorf("--multicluster-service-imports requires --octavia-fixed-http-responses for invalid HTTP backends")
+	}
 	if c.RouteExternalAuthGRPC && !c.RouteExternalAuthGRPCEnabled() {
 		return fmt.Errorf("--octavia-http-route-external-auth-grpc requires --gateway-api-channel=experimental and --octavia-fixed-http-responses")
 	}

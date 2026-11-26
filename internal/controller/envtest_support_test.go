@@ -53,6 +53,7 @@ type recordingProvider struct {
 	graphSpecs       []cloud.GatewayGraphSpec
 	gatewayStates    map[string]cloud.GatewayState
 	gatewayResults   map[string]cloud.GatewayResult
+	routeResults     map[string]cloud.RouteResult
 	gatewayDeleteOut *cloud.Outcome
 	deletedGateways  []cloud.Identity
 }
@@ -131,7 +132,10 @@ func (p *recordingProvider) DeleteGateway(_ context.Context, identity cloud.Iden
 	return cloud.ReadyOutcome(), nil
 }
 
-func (*recordingProvider) EnsureRoute(_ context.Context, spec cloud.RouteSpec) (cloud.RouteResult, error) {
+func (p *recordingProvider) EnsureRoute(_ context.Context, spec cloud.RouteSpec) (cloud.RouteResult, error) {
+	if result, overridden := p.routeResults[spec.Identity.RouteUID]; overridden {
+		return result, nil
+	}
 	return cloud.RouteReadyResult(cloud.RouteState{PoolID: "pool-" + spec.Identity.RouteUID}), nil
 }
 

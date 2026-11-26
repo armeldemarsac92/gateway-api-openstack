@@ -53,7 +53,10 @@ const (
 	// IndexHTTPRouteByStatusGateway indexes HTTPRoutes by status parent Gateway key.
 	IndexHTTPRouteByStatusGateway = "status.parentGateway"
 	// IndexHTTPRouteByBackendService indexes HTTPRoutes by backend Service key.
-	IndexHTTPRouteByBackendService = "spec.backendService"
+	IndexHTTPRouteByBackendService         = "spec.backendService"
+	IndexHTTPRouteByServiceImport          = "spec.backendServiceImport"
+	IndexHTTPRouteByServiceImportNamespace = "spec.backendServiceImportNamespace"
+	ServiceImportIndexAll                  = "*"
 	// IndexHTTPRouteByXBackend indexes same-namespace XBackend reference targets.
 	IndexHTTPRouteByXBackend = "spec.xBackend"
 	// IndexXBackendByPodLabel indexes each matchLabels pair in an EndpointSelector.
@@ -233,6 +236,16 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 		}
 		return keys
 	}})
+	if config.MulticlusterServiceImports {
+		indexes = append(indexes,
+			controllerFieldIndex{object: &gatewayv1.HTTPRoute{}, field: IndexHTTPRouteByServiceImport, extract: func(object client.Object) []string {
+				return serviceImportBackendKeys(object.(*gatewayv1.HTTPRoute), false)
+			}},
+			controllerFieldIndex{object: &gatewayv1.HTTPRoute{}, field: IndexHTTPRouteByServiceImportNamespace, extract: func(object client.Object) []string {
+				return serviceImportBackendKeys(object.(*gatewayv1.HTTPRoute), true)
+			}},
+		)
+	}
 	// The field names are scoped to the Kubernetes kind by the cache.
 	for _, index := range indexes {
 		if _, ok := index.object.(*gatewayv1.HTTPRoute); !ok {
@@ -453,6 +466,27 @@ func backendServiceKeys(route *gatewayv1.HTTPRoute) []string {
 		for _, backend := range append(model.HTTPServiceBackendReferences(rule, true), model.HTTPRouteExternalAuthReferences(rule)...) {
 			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" {
+				keys[ObjectKeyString(key)] = struct{}{}
+			}
+		}
+	}
+	return sortedIndexKeys(keys)
+}
+
+func serviceImportBackendKeys(route *gatewayv1.HTTPRoute, namespacesOnly bool) []string {
+	keys := make(map[string]struct{})
+	for _, rule := range route.Spec.Rules {
+		for _, backend := range rule.BackendRefs {
+			key, imported := model.ServiceImportReference(route.Namespace, backend.BackendObjectReference)
+			if !imported || key.Namespace == "" || key.Name == "" {
+				continue
+			}
+			if namespacesOnly {
+				if key.Namespace != route.Namespace {
+					keys[key.Namespace] = struct{}{}
+				}
+			} else {
+				keys[ServiceImportIndexAll] = struct{}{}
 				keys[ObjectKeyString(key)] = struct{}{}
 			}
 		}

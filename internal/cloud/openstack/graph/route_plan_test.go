@@ -389,6 +389,66 @@ func TestBuildRouteEnsurePlanRecreatesDeletedMember(t *testing.T) {
 	}
 }
 
+func TestServiceImportKeepsItsOwnRoutedPool(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
+	spec.MemberMode = cloud.MemberModeEndpoint
+	spec.Hostname, spec.PathType, spec.PathValue, spec.Members = "", "", "", nil
+	match := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/catalog"}
+	// Both kinds expose the same address and port. Ownership and subnet binding
+	// still belong to their individual pool.
+	destination := []cloud.Member{{Address: "192.0.2.20", Port: 8080}}
+	spec.HTTPBackends = []cloud.HTTPBackend{
+		{Namespace: "apps", Name: "catalog", Port: 8080, Members: destination},
+		{Kind: cloud.HTTPBackendKindServiceImport, Namespace: "apps", Name: "catalog", Port: 8080, Members: destination, RoutedExternal: true},
+	}
+	serviceIndex, importIndex := 0, 1
+	spec.WeightedHTTPRules = []cloud.HTTPWeightedRule{{Matches: []cloud.HTTPPathMatch{match},
+		Targets: []cloud.HTTPWeightedTarget{{BackendIndex: &serviceIndex, Weight: 2}, {BackendIndex: &importIndex, Weight: 3}},
+	}}
+	p := &Provider{projectID: "project-a", fixedHTTPResponses: true, weightedHTTPTargets: true}
+	desired, err := p.buildDesiredRoute(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serviceKey := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(spec.HTTPBackends[0]))
+	importKey := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(spec.HTTPBackends[1]))
+	if serviceKey == importKey {
+		t.Fatal("homonymous Service and ServiceImport share one pool key")
+	}
+	service := slices.IndexFunc(desired.httpParts, func(part desiredRoute) bool { return part.backendKey == serviceKey })
+	imported := slices.IndexFunc(desired.httpParts, func(part desiredRoute) bool { return part.backendKey == importKey })
+	if service < 0 || imported < 0 {
+		t.Fatal("expected a separate pool for each destination")
+	}
+	if desired.httpParts[service].spec.MemberSubnetID != spec.MemberSubnetID || desired.httpParts[imported].spec.MemberSubnetID != "" ||
+		!desired.httpParts[imported].routedExternal || !slices.Equal(desired.httpParts[imported].members, desired.httpParts[service].members) {
+		t.Fatal("only the ServiceImport should omit the Neutron member subnet")
+	}
+
+	spec.HTTPBackends = spec.HTTPBackends[:1]
+	spec.WeightedHTTPRules[0].Targets[1].BackendIndex = nil
+	for _, grpc := range []bool{false, true} {
+		spec.GRPC = grpc
+		desired, err = p.buildDesiredRoute(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		weighted := slices.IndexFunc(desired.httpParts, func(part desiredRoute) bool { return len(part.weightedTargets) != 0 })
+		if weighted < 0 {
+			t.Fatal("expected a weighted rule after withdrawal")
+		}
+		targets := desired.httpParts[weighted].weightedTargets
+		invalidKey := ""
+		if grpc {
+			invalidKey = grpcFailurePoolKey
+		}
+		if len(targets) != 2 || targets[0].backendKey != serviceKey || targets[0].weight != 2 ||
+			targets[1].backendKey != invalidKey || targets[1].weight != 3 {
+			t.Errorf("wrong failure target or weights with gRPC=%t: %#v", grpc, targets)
+		}
+	}
+}
+
 func TestXBackendExternalHostnameOmitsSubnetOnlyForItsPool(t *testing.T) {
 	spec := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
 	spec.MemberMode = cloud.MemberModeEndpoint

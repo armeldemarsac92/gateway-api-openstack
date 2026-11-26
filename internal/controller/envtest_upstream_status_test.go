@@ -86,6 +86,9 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	}
 	writer := gateway.Writer.(*graph.Writer)
 	route := writer.Routes.(*httproute.Reconciler)
+	if cfg.MulticlusterServiceImports {
+		route.BackendH2CAvailable = func(context.Context) (bool, error) { return true, nil }
+	}
 	if cfg.BackendTLSPolicy {
 		route.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
 		route.XBackendTLSAvailable = func(context.Context, bool, bool) (bool, error) { return true, nil }

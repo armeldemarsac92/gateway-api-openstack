@@ -40,27 +40,32 @@ func (r *Reconciler) enqueueHTTPRoutesForReferenceGrant(ctx context.Context, obj
 	// Index the declared references, including denied and unresolved references,
 	// so adding the first grant or revoking an existing grant wakes its consumers.
 	var consumers []gatewayv1.HTTPRoute
-	observed := make(map[types.NamespacedName]struct{})
+	type grantQuery struct{ sourceNamespace, field, value string }
+	observed := make(map[grantQuery]struct{})
 	for _, from := range grant.Spec.From {
 		if from.Group != gatewayv1.GroupName || from.Kind != r.kind() || string(from.Namespace) == grant.Namespace {
 			continue
 		}
 		for _, to := range grant.Spec.To {
-			if to.Group != "" || to.Kind != "Service" {
+			query := grantQuery{sourceNamespace: string(from.Namespace), value: grant.Namespace}
+			var keyField string
+			switch {
+			case to.Group == "" && to.Kind == "Service":
+				query.field, keyField = controller.IndexHTTPRouteByBackendNamespace, controller.IndexHTTPRouteByBackendService
+			case r.Config.MulticlusterServiceImports && to.Group == model.ServiceImportGroup && to.Kind == model.ServiceImportKind:
+				query.field, keyField = controller.IndexHTTPRouteByServiceImportNamespace, controller.IndexHTTPRouteByServiceImport
+			default:
 				continue
 			}
-			query := types.NamespacedName{Namespace: string(from.Namespace)}
-			field, value := controller.IndexHTTPRouteByBackendNamespace, grant.Namespace
 			if to.Name != nil {
-				query.Name = string(*to.Name)
-				field = controller.IndexHTTPRouteByBackendService
-				value = controller.ObjectKeyString(types.NamespacedName{Namespace: grant.Namespace, Name: query.Name})
+				query.field = keyField
+				query.value = controller.ObjectKeyString(types.NamespacedName{Namespace: grant.Namespace, Name: string(*to.Name)})
 			}
 			if _, found := observed[query]; found {
 				continue
 			}
 			observed[query] = struct{}{}
-			routes, err := r.listRoutes(ctx, client.InNamespace(query.Namespace), client.MatchingFields{field: value})
+			routes, err := r.listRoutes(ctx, client.InNamespace(query.sourceNamespace), client.MatchingFields{query.field: query.value})
 			if err != nil {
 				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for ReferenceGrant", "referenceGrant", client.ObjectKeyFromObject(grant))
 				continue

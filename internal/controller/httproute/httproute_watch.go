@@ -299,10 +299,21 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if err := r.discoverBackendRetryPolicy(manager.GetRESTMapper()); err != nil {
 		return err
 	}
-	if err := r.setupRouteController(manager, &gatewayv1.HTTPRoute{}, "httproute"); err != nil {
+	var imports *serviceImportWatch
+	if r.Config.MulticlusterServiceImports {
+		var err error
+		imports, err = newServiceImportWatch(manager)
+		if err != nil {
+			return err
+		}
+		if err := manager.Add(imports); err != nil {
+			return err
+		}
+	}
+	if err := r.setupRouteController(manager, &gatewayv1.HTTPRoute{}, "httproute", imports); err != nil {
 		return err
 	}
-	if err := r.forRouteKind(model.GRPCRouteKind).setupRouteController(manager, &gatewayv1.GRPCRoute{}, "grpcroute"); err != nil {
+	if err := r.forRouteKind(model.GRPCRouteKind).setupRouteController(manager, &gatewayv1.GRPCRoute{}, "grpcroute", imports); err != nil {
 		return err
 	}
 	if r.Config.XBackendEnabled() {
@@ -321,9 +332,15 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	return nil
 }
 
-func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Object, name string) error {
+func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Object, name string, imports *serviceImportWatch) error {
 	setup := ctrl.NewControllerManagedBy(manager).
 		For(object, builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config)))
+	if imports != nil {
+		setup.WatchesRawSource(imports.subscribe(r.enqueueRoutesForServiceImport))
+		if r.kind() == model.HTTPRouteKind {
+			imports.watchCRD(setup)
+		}
+	}
 	// Watch both kinds while observing a shared routing graph, including peers
 	// whose earlier policy might have blocked this route from attaching.
 	for _, peer := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}} {
