@@ -237,10 +237,12 @@ func (r *Reconciler) tcpConnectionRejectionEnabled() bool {
 	return r.protocol() == gatewayv1.TCPProtocolType && r.Config.TCPConnectionRejection
 }
 
-// A pool with UDP packet discard can serve exactly one IPv4 Endpoint listener.
+// A pool with UDP packet discard can serve exactly one IPv4 UDP listener.
 func (r *Reconciler) udpPacketDropEnabled(gateway *gatewayv1.Gateway, topology classconfig.Resolved, ports []int) bool {
-	if r.protocol() != gatewayv1.UDPProtocolType || !r.Config.UDPPacketDrop ||
-		topology.Topology.MemberMode != cloud.MemberModeEndpoint || len(ports) != 1 || len(gateway.Status.Addresses) != 1 {
+	mode := topology.Topology.MemberMode
+	enabled := mode == cloud.MemberModeEndpoint && r.Config.UDPPacketDrop ||
+		mode == cloud.MemberModeNodePort && r.Config.UDPNodePortPacketDrop
+	if r.protocol() != gatewayv1.UDPProtocolType || !enabled || len(ports) != 1 || len(gateway.Status.Addresses) != 1 {
 		return false
 	}
 	address := gateway.Status.Addresses[0]
@@ -306,7 +308,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 	collectTCP := r.tcpWeightedCandidate(route) || r.tcpConnectionRejectionEnabled()
 	// Collect known UDP denials before election so a failed election read
 	// cannot leave a revoked target serving. Full eligibility follows election.
-	collectUDP := r.protocol() == gatewayv1.UDPProtocolType && r.Config.UDPPacketDrop
+	collectUDP := r.protocol() == gatewayv1.UDPProtocolType && (r.Config.UDPPacketDrop || r.Config.UDPNodePortPacketDrop)
 	refs, authRejections, err := r.authorizedBackends(ctx, route, true, collectTCP || collectUDP)
 	if err != nil {
 		return routePlan{}, err
@@ -545,7 +547,10 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 	weighted := len(route.backendRefs) > 1
 	weightedPools := r.needsTCPWeightedPools(route, backends)
 	udpDrop := r.udpPacketDropEnabled(gateway, topology, listenerPorts)
-	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
+	memberOptions := routebackend.TransportMemberOptions{
+		MatchVIPFamily:     weighted || r.protocol() == gatewayv1.UDPProtocolType,
+		RequireUnicastIPv4: udpDrop,
+	}
 	groups := make([]routebackend.WeightedServiceMembers, 0, len(backends))
 	serving := make([]transportBackend, 0, len(backends))
 	var noEndpoints *model.Diagnostic
@@ -560,14 +565,15 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		if hostname := backend.externalHostname(); hostname != "" {
 			members = routedTCPMembers(answers[hostname], int(backend.xBackend.Spec.Port.Number))
 		} else {
-			members, diagnostic, err = r.transportMembers(ctx, backend, topology, gateway.Status.Addresses, matchVIPFamily)
+			members, diagnostic, err = r.transportMembers(ctx, backend, topology, gateway.Status.Addresses, memberOptions)
 			if err != nil && backend.backendTLS != nil && ctx.Err() == nil {
 				diagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting to read the authenticated XBackend endpoints", NoReadyEndpoints: true}
 				err = nil
 			}
 		}
-		if err == nil && (weightedPools || r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
-			diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
+		if err == nil && (weightedPools || r.tcpConnectionRejectionEnabled() || udpDrop) &&
+			(diagnostic != nil && (diagnostic.NoReadyEndpoints || udpDrop && diagnostic.NoEligibleWorkers) ||
+				diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
 			rejectWeight += int(backend.ref.weight)
 			if noEndpoints == nil {
 				noEndpoints = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("Waiting for eligible endpoints in a positive-weight %s backend", r.protocol())}
@@ -623,7 +629,7 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		spec.TCPXBackendClientCertificateReference = serving[0].clientCertificate
 	}
 	if drop != nil {
-		// Octavia's guarded UDP pool uses EndpointSlice readiness only.
+		// The guarded UDP pool uses Kubernetes backend readiness.
 		spec.HealthMonitor = cloud.HealthMonitorConfig{}
 	}
 	if controller.GatewayListenerScope(r.Config, gateway) == r.protocol() {

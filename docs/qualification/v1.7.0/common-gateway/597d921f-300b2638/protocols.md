@@ -42,6 +42,8 @@ Each selection below passed the upstream `GatewayStaticAddresses` checks for the
 The fixture additionally checks for the usable address allocation and an allocation attempt rejected with `VIPInUseException` for the unusable address.
 An absent event produces `ASSERTION-NOT-OBSERVED`. The receipt preserves the upstream log digest, assertion line references and allocator entry indices.
 
+After the upstream test removes the unsupported address type, the Gateway still requests two fixed IPv4 addresses with default routability. The controller accepts the Gateway and sets `Programmed=False/AddressNotUsable` before calling Octavia. Removing the unusable address leaves one request, and the fixture records its allocation in all eight selections. The separate controller test for a single occupied address sends the requested IP to Octavia and checks a simulated HTTP 409. A collision with a deployed allocator still requires a regional run. [Upstream sequence](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-static-addresses.go#L83) · [Controller admission at the tested revision](https://github.com/armeldemarsac92/gateway-api-openstack/blob/597d921fd083bb71f9ad3fc024f5f6bf0891e0ba/internal/controller/gateway/gateway_validation.go#L326) · [Single-address collision test](../../../../../internal/cloud/openstack/graph/gateway_address_test.go)
+
 | Selection | Usable address allocated | Unusable address attempt observed | Suite / fixture exit |
 | --- | --- | --- | --- |
 | 06-grpc-e | Yes | No | 0 / 1 |

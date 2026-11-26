@@ -98,8 +98,10 @@ type Config struct {
 	TCPDefaultPoolTLS bool
 	// TCPWeightedDefaultPools enables separate pools for weighted TCPRoute references.
 	TCPWeightedDefaultPools bool
-	// UDPPacketDrop opts eligible UDPRoute pools into proportional packet discard.
+	// UDPPacketDrop opts eligible Endpoint UDPRoute pools into proportional packet discard.
 	UDPPacketDrop bool
+	// UDPNodePortPacketDrop opts eligible NodePort UDPRoute pools into proportional packet discard.
+	UDPNodePortPacketDrop bool
 	// TelemetryPolicy enables Experimental Gateway tracing on a capable Octavia provider.
 	TelemetryPolicy bool
 	// BackendClientCertificate enables the operator's separate backend client certificate map.

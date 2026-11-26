@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The shared Istio Pilot supports independently enabled client HTTP and gRPC routes on Services. [Build record](image.json) · [Waypoint, XMesh and registered mesh qualification](provider/mesh-consumer-service-routes/README.md)
+The signed controller preserves weighted forwarding and proportional discard on dedicated IPv4 NodePort listeners when the operator enables the feature. [Build record](image.json) · [Local NodePort traffic](provider/udp-nodeport-packet-drop/README.md)
+
+The shared Istio Pilot supports independently enabled client HTTP and gRPC routes on Services. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-aba071b9416112dd29e5852664913d3470013202/image.json) · [Waypoint, XMesh and registered mesh qualification](provider/mesh-consumer-service-routes/README.md)
 
 This controller can retire HTTPRoute policies after regional confirmation of the listener closure. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0e729b171594b058f09783aede6b7221eb62e85d/image.json) · [Redirect case reports](provider/closed-listener-policy-removal/README.md)
 

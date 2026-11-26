@@ -28,8 +28,9 @@ import (
 )
 
 const maxOctaviaMemberWeight = 256
+const udpWeightErrorDenominator = 256
 
-// ErrWeightedMembersUnrepresentable reports an exact ratio or endpoint count
+// ErrWeightedMembersUnrepresentable reports a ratio, binding or endpoint count
 // that cannot fit in one Octavia pool.
 var ErrWeightedMembersUnrepresentable = errors.New("weights cannot be represented in a single Octavia pool")
 
@@ -42,16 +43,19 @@ type WeightedServiceMembers struct {
 	Members []cloud.Member
 }
 
+type weightedDestination struct {
+	member cloud.Member
+	share  big.Int
+}
+
 // WeightedMembers divides each backend's weight among its unique eligible
 // destinations, then adds the shares of destinations reached through multiple backends.
+// For UDP, a ratio outside the exact member weight range may be rounded within
+// the allowed total variation distance.
 func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.Member, error) {
 	type readyGroup struct {
 		weight    int64
 		endpoints map[netip.AddrPort]struct{}
-	}
-	type weightedDestination struct {
-		member cloud.Member
-		share  big.Int
 	}
 	readyGroups := make([]readyGroup, 0, len(groups))
 	destinations := make(map[netip.AddrPort]*weightedDestination)
@@ -112,23 +116,34 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 		}
 	}
 
-	// Dividing by the GCD yields the smallest integral ratio and leaves draining
-	// endpoints at zero. If it exceeds Octavia's limit, no exact ratio can fit.
-	var gcd big.Int
+	// Dividing by the GCD yields the smallest integral ratio. Its largest
+	// member fits exactly when maxShare <= gcd * maxOctaviaMemberWeight.
+	var gcd, maxShare, exactLimit big.Int
 	for _, destination := range destinations {
 		gcd.GCD(nil, nil, &gcd, &destination.share)
+		if destination.share.Cmp(&maxShare) > 0 {
+			maxShare.Set(&destination.share)
+		}
+	}
+	exactLimit.Mul(&gcd, big.NewInt(maxOctaviaMemberWeight))
+	exact := maxShare.Cmp(&exactLimit) <= 0
+	if !exact {
+		if protocol != cloud.ListenerProtocolUDP {
+			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d: %w", protocol, maxOctaviaMemberWeight, ErrWeightedMembersUnrepresentable)
+		}
+		if !roundUDPWeights(destinations, &maxShare) {
+			return nil, fmt.Errorf("scaling and rounding the UDP backend ratio with maximum member weights from %d down to 1 did not meet the 0.390625 percentage point tolerance: %w", maxOctaviaMemberWeight, ErrWeightedMembersUnrepresentable)
+		}
 	}
 	members := make([]cloud.Member, 0, len(destinations))
 	active := 0
 	for _, destination := range destinations {
-		total := &destination.share
-		total.Quo(total, &gcd)
-		if !total.IsInt64() || total.Int64() > maxOctaviaMemberWeight {
-			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d: %w", protocol, maxOctaviaMemberWeight, ErrWeightedMembersUnrepresentable)
-		}
 		member := destination.member
-		member.Draining = total.Sign() == 0
-		member.Weight = int(total.Int64())
+		if exact {
+			weight.Quo(&destination.share, &gcd)
+			member.Weight = int(weight.Int64())
+		}
+		member.Draining = member.Weight == 0
 		if !member.Draining {
 			active++
 		}
@@ -141,4 +156,80 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 		return cmp.Or(cmp.Compare(left.Address, right.Address), cmp.Compare(left.Port, right.Port))
 	})
 	return members, nil
+}
+
+func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxShare *big.Int) bool {
+	// Equal shares round to the same weight at every scale. Group them so
+	// each candidate visits distinct shares instead of every destination.
+	type shareGroup struct {
+		share        *big.Int
+		count        int64
+		idealTotal   big.Int
+		roundedTotal big.Int
+		weight       int64
+	}
+	groups := make(map[string]*shareGroup)
+	for _, destination := range destinations {
+		if destination.share.Sign() == 0 {
+			continue
+		}
+		key := string(destination.share.Bytes())
+		group := groups[key]
+		if group == nil {
+			group = &shareGroup{share: &destination.share}
+			groups[key] = group
+		}
+		group.count++
+	}
+	var idealTotal, count big.Int
+	for _, group := range groups {
+		count.SetInt64(group.count)
+		group.idealTotal.Mul(group.share, &count)
+		idealTotal.Add(&idealTotal, &group.idealTotal)
+	}
+
+	var scale, rounded, roundedTotal big.Int
+	var difference, ideal, errorNumerator, errorDenominator big.Int
+	halfMaxShare := new(big.Int).Rsh(maxShare, 1)
+	toleranceDenominator := big.NewInt(udpWeightErrorDenominator)
+	for maximum := int64(maxOctaviaMemberWeight); maximum >= 1; maximum-- {
+		scale.SetInt64(maximum)
+		roundedTotal.SetInt64(0)
+		for _, group := range groups {
+			// Round to the nearest integer, with ties upward and a minimum of 1.
+			rounded.Mul(group.share, &scale)
+			rounded.Add(&rounded, halfMaxShare)
+			rounded.Quo(&rounded, maxShare)
+			group.weight = max(1, rounded.Int64())
+			rounded.SetInt64(group.weight)
+			count.SetInt64(group.count)
+			group.roundedTotal.Mul(&rounded, &count)
+			roundedTotal.Add(&roundedTotal, &group.roundedTotal)
+		}
+
+		// Total variation is half the sum of absolute differences between the
+		// normalized shares. Equal shares have equal differences, so using group
+		// totals includes each destination's contribution with its multiplicity.
+		errorNumerator.SetInt64(0)
+		for _, group := range groups {
+			difference.Mul(&group.roundedTotal, &idealTotal)
+			ideal.Mul(&group.idealTotal, &roundedTotal)
+			difference.Sub(&difference, &ideal)
+			errorNumerator.Add(&errorNumerator, difference.Abs(&difference))
+		}
+		errorNumerator.Mul(&errorNumerator, toleranceDenominator)
+		errorDenominator.Mul(&idealTotal, &roundedTotal)
+		errorDenominator.Lsh(&errorDenominator, 1)
+		if errorNumerator.Cmp(&errorDenominator) > 0 {
+			continue
+		}
+		for _, destination := range destinations {
+			destination.member.Weight = 0
+			if group := groups[string(destination.share.Bytes())]; group != nil {
+				destination.member.Weight = int(group.weight)
+			}
+		}
+		return true
+	}
+	return false
 }

@@ -377,7 +377,7 @@ func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *ga
 		rejected = telemetryIssue{"UnsupportedValue", "The collector Service must speak OTLP over HTTP/1.1"}
 		return
 	}
-	members, diagnostic, readErr := routebackend.TransportMembers(ctx, r.APIReader, service, ref.Port, corev1.ProtocolTCP, snapshot.topology, nil, false)
+	members, diagnostic, readErr := routebackend.TransportMembers(ctx, r.APIReader, service, ref.Port, corev1.ProtocolTCP, snapshot.topology, nil, routebackend.TransportMemberOptions{})
 	if readErr != nil {
 		err = readErr
 		return

@@ -281,15 +281,16 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			return invalid(errors.New("TCP connection rejection requires a positive TCP share and its complete real-member set"))
 		}
 	}
-	if drop := spec.UDPPacketDrop; drop != nil {
+	drop := spec.UDPPacketDrop
+	if drop != nil {
 		canForward := slices.ContainsFunc(spec.Members, func(member cloud.Member) bool { return !member.Draining })
-		if protocol != cloud.ListenerProtocolUDP || !drop.Valid() || spec.MemberMode != cloud.MemberModeEndpoint ||
+		if protocol != cloud.ListenerProtocolUDP || !drop.Valid() ||
 			spec.HealthMonitor != (cloud.HealthMonitorConfig{}) || len(spec.ScopedListenerPorts) > 1 ||
 			drop.DropsAll() && len(spec.Members) != 0 || !drop.DropsAll() && !canForward {
-			return invalid(errors.New("UDP packet drop requires a dedicated UDP Endpoint listener, no monitor and a complete real-member set"))
+			return invalid(errors.New("UDP packet drop requires a dedicated UDP listener, no monitor and a complete real-member set"))
 		}
 	}
-	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable && fraction == nil {
+	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable && fraction == nil && drop == nil {
 		return invalid(errors.New("at least one ready backend member is required"))
 	}
 	if routedExternal {
@@ -366,7 +367,7 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			return invalid(errors.New("routed members require an IPv4 Endpoint transport or external HTTP pool"))
 		}
 		if spec.MemberMode == cloud.MemberModeEndpoint {
-			if !address.Is4() || !address.IsGlobalUnicast() || address.IsLoopback() || address.IsLinkLocalUnicast() {
+			if !cloud.IsUnicastIPv4MemberAddress(address) {
 				return invalid(errors.New("endpoint members require unicast IPv4 destinations"))
 			}
 			if member.ProviderID != "" {
@@ -374,6 +375,8 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			}
 		} else if member.Draining {
 			return invalid(errors.New("draining members require endpoint mode"))
+		} else if drop != nil && !cloud.IsUnicastIPv4MemberAddress(address) {
+			return invalid(errors.New("UDP packet drop requires unicast IPv4 NodePort destinations"))
 		}
 		member.Address = address.String()
 		key := memberKey(member.Address, member.Port)

@@ -127,7 +127,8 @@ func run(ctx context.Context) error {
 	var httpRequestRedirect, longHTTPHostnames, literalHTTPPaths, httpHeaderName256 bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
-	var tcpConnectionRejection, tcpDefaultPoolTLS, tcpWeightedDefaultPools, udpPacketDrop bool
+	var tcpConnectionRejection, tcpDefaultPoolTLS, tcpWeightedDefaultPools bool
+	var udpPacketDrop, udpNodePortPacketDrop bool
 	var xBackendSessionPersistence bool
 	var routeSessionPersistence bool
 	var httpRequestMirror bool
@@ -174,6 +175,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tcpWeightedDefaultPools, "octavia-tcp-weighted-default-pools", false, "use separate pools and explicit rejection shares for weighted Experimental TCPRoutes with authenticated XBackends")
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject unavailable TCPRoute and TLSRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
+	flag.BoolVar(&udpNodePortPacketDrop, "octavia-udp-nodeport-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 NodePort listeners")
 	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend and Service policy session cookies or HTTP headers with optional absolute timeout")
 	flag.BoolVar(&routeSessionPersistence, "experimental-route-session-persistence", false, "use regional Octavia capabilities for Experimental HTTPRoute and GRPCRoute rule session persistence")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
@@ -288,6 +290,7 @@ func run(ctx context.Context) error {
 		TCPDefaultPoolTLS:             tcpDefaultPoolTLS,
 		TCPWeightedDefaultPools:       tcpWeightedDefaultPools,
 		UDPPacketDrop:                 udpPacketDrop,
+		UDPNodePortPacketDrop:         udpNodePortPacketDrop,
 		XBackendSessionPersistence:    xBackendSessionPersistence,
 		RouteSessionPersistence:       routeSessionPersistence,
 		TelemetryPolicy:               telemetryPolicy,
@@ -373,7 +376,7 @@ func run(ctx context.Context) error {
 		BackendRetryBudget:     controllerConfig.BackendRetryBudgetEnabled(),
 		TCPConnectionRejection: tcpConnectionRejection,
 		TCPDefaultPoolTLS:      tcpDefaultPoolTLS,
-		UDPPacketDrop:          udpPacketDrop,
+		UDPPacketDrop:          udpPacketDrop || udpNodePortPacketDrop,
 		GRPCContentType:        grpcContentType,
 		TLSSNIPassthrough:      tlsSNIPassthrough,
 		TLSSNISuffix:           tlsSNISuffix,
