@@ -43,7 +43,11 @@ func (p *routePlan) setResolvedRefs(route *transportRoute, diagnostic *model.Dia
 		p.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs", "Backend references are resolved")
 		return
 	}
-	p.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message)
+	status := metav1.ConditionFalse
+	if diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
+		status = metav1.ConditionUnknown
+	}
+	p.resolved = routeCondition(route, "ResolvedRefs", status, diagnostic.Reason, diagnostic.Message)
 }
 
 func (p *routePlan) rejectBackend(route *transportRoute, diagnostic *model.Diagnostic) {
@@ -147,6 +151,11 @@ func (r *Reconciler) updateStatuses(ctx context.Context, route *transportRoute, 
 			slices.Equal(previous.Conditions, current.Conditions)
 	}) {
 		return nil
+	}
+	for _, plan := range plans {
+		if err := plan.serviceImports.validate(ctx, r); err != nil {
+			return err
+		}
 	}
 	return r.Status().Patch(ctx, route.Object, controller.OptimisticMergeFrom(base))
 }

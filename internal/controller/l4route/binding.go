@@ -91,6 +91,7 @@ func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identit
 	}
 	if first.desired == nil || second.desired == nil || first.desired.Identity != identity || second.desired.Identity != identity ||
 		first.target != second.target || !slices.Equal(first.listenerPorts, second.listenerPorts) ||
+		!reflect.DeepEqual(first.serviceImports, second.serviceImports) ||
 		revisionOf(first.parent.class) != revisionOf(second.parent.class) ||
 		!sameGatewayRevision(r.Config, first.parent.gateway, second.parent.gateway) {
 		return ctrl.Result{}, controller.ErrGraphInputChanged
@@ -110,6 +111,9 @@ func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identit
 		binding.Forwarding = controller.RouteGatewayTarget{Value: first.target, Generation: current.GetGeneration()}
 	}
 	if err := controller.ApplyRouteGatewayBinding(r.Config, current.Object, bindings, binding); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := first.serviceImports.validate(ctx, r); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.Patch(ctx, current.Object, controller.OptimisticMergeFrom(base)); err != nil {

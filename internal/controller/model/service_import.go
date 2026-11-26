@@ -147,7 +147,11 @@ func (observation ServiceImportObservation) Destinations(selected *gatewayv1.Por
 	if spec.Type != mcs.ClusterSetIP && spec.Type != mcs.Headless {
 		return nil, nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backend ServiceImport must use ClusterSetIP or Headless")
 	}
-	port, diagnostic := serviceImportPort(spec, selected)
+	protocol := corev1.ProtocolTCP
+	if kind == "UDPRoute" {
+		protocol = corev1.ProtocolUDP
+	}
+	port, diagnostic := serviceImportPort(spec, selected, protocol)
 	if diagnostic != nil {
 		return nil, nil, diagnostic
 	}
@@ -248,7 +252,7 @@ func serviceImportIPv4(address netip.Addr) bool {
 	return address.Is4() && address.IsGlobalUnicast() && !address.IsLoopback() && !address.IsLinkLocalUnicast()
 }
 
-func serviceImportPort(spec *mcs.ServiceImportSpec, selected *gatewayv1.PortNumber) (*corev1.ServicePort, *Diagnostic) {
+func serviceImportPort(spec *mcs.ServiceImportSpec, selected *gatewayv1.PortNumber, protocol corev1.Protocol) (*corev1.ServicePort, *Diagnostic) {
 	number := int32(ptr.Deref(selected, 0))
 	if number < 1 || number > 65535 {
 		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backend ServiceImport requires a port between 1 and 65535")
@@ -259,20 +263,24 @@ func serviceImportPort(spec *mcs.ServiceImportSpec, selected *gatewayv1.PortNumb
 		if candidate.Port != number {
 			continue
 		}
-		if candidate.Protocol != "" && candidate.Protocol != corev1.ProtocolTCP {
+		candidateProtocol := candidate.Protocol
+		if candidateProtocol == "" {
+			candidateProtocol = corev1.ProtocolTCP
+		}
+		if candidateProtocol != protocol {
 			unsupportedProtocol = true
 			continue
 		}
 		if port != nil {
-			return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backend ServiceImport publishes more than one TCP port with the requested number")
+			return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("backend ServiceImport publishes more than one %s port with the requested number", protocol))
 		}
-		port = &corev1.ServicePort{Port: number, Name: candidate.Name, Protocol: corev1.ProtocolTCP, AppProtocol: candidate.AppProtocol}
+		port = &corev1.ServicePort{Port: number, Name: candidate.Name, Protocol: protocol, AppProtocol: candidate.AppProtocol}
 	}
 	if port != nil {
 		return port, nil
 	}
 	if unsupportedProtocol {
-		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend ServiceImport port must use TCP")
+		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("backend ServiceImport port must use %s", protocol))
 	}
 	return nil, backendDiagnostic(gatewayv1.RouteReasonBackendNotFound, "backend ServiceImport does not expose the referenced port")
 }

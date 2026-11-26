@@ -1,0 +1,776 @@
+{
+  "upstreamGatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+  "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+  "protocolTargets": "A Headless ServiceImport and a separately authorized core Service with the same namespace and name.",
+  "weights": {
+    "localService": 3,
+    "serviceImport": 1
+  },
+  "samples": {
+    "earlier": {
+      "tcp": {
+        "standard": {
+          "earlierSignedMirrorCandidate": true,
+          "controller": {
+            "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d",
+            "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
+            "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede"
+          },
+          "channel": "standard",
+          "protocol": "tcp",
+          "kubernetes": "v1.36.2",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+          "phases": {
+            "baseline": {
+              "local": 185,
+              "imported": 0,
+              "rejected": 71,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 1
+                },
+                "importRoutedWithoutMemberSubnet": false,
+                "connectionRejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                },
+                "tcpAccepts": {
+                  "service": 185,
+                  "remote": 0
+                },
+                "HAProxyConfigSHA256": "dad74a85754790813f7884a6564cea270ab16e895469556bbe3b2ae6df9d929f"
+              },
+              "sampleSHA256": {
+                "baseline.control.streams.json": "5f5c9ef987f3c1a5695da8d813d49c02472a9ff5a1273db320a986100307a3f0",
+                "baseline.mixed.streams.json": "d30e85da6b49aba839bc924ea11d86c99021b999e3fc386c5f6c8e3b3180643f"
+              }
+            }
+          },
+          "rawSHA256": "9f4ce22e9726c562c186bc52af57839968804daacc7420d00c834bee9c457a88"
+        },
+        "experimental": {
+          "earlierSignedMirrorCandidate": true,
+          "controller": {
+            "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d",
+            "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
+            "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede"
+          },
+          "channel": "experimental",
+          "protocol": "tcp",
+          "kubernetes": "v1.36.2",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+          "phases": {
+            "baseline": {
+              "local": 203,
+              "imported": 0,
+              "rejected": 53,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 1
+                },
+                "importRoutedWithoutMemberSubnet": false,
+                "connectionRejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                },
+                "tcpAccepts": {
+                  "service": 203,
+                  "remote": 0
+                },
+                "HAProxyConfigSHA256": "a12be8ef83e0b81011d581ec1fba37b9aac5e26e81aed93aa25b2b2f85b25568"
+              },
+              "sampleSHA256": {
+                "baseline.control.streams.json": "07a39d20c3e497ef6a064e70955cee14597e751c38b2ba212ff9a5d6d8cac513",
+                "baseline.mixed.streams.json": "aab9b3ef7b99fd01ab881128e63cf6637ac26e8a946f2acd934d4784cf6bd245"
+              }
+            }
+          },
+          "rawSHA256": "4cc897fbf89b272eb09f243496296e59d6b462dc005f3d96a0f9d2be6e76146f"
+        }
+      },
+      "udp": {
+        "standard": {
+          "earlierSignedMirrorCandidate": true,
+          "controller": {
+            "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d",
+            "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
+            "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede"
+          },
+          "channel": "standard",
+          "protocol": "udp",
+          "kubernetes": "v1.36.4",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+          "phases": {
+            "predecessor": {
+              "local": 48,
+              "imported": 0,
+              "rejected": 16,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 4,
+                  "numerator": 1
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 0,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 16
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 0,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": false
+              },
+              "sampleSHA256": {
+                "predecessor.packets.json": "4248d534c42ab54f396e49f9e931f82ba0afb7d444a0e07852fa1924065e1c4a"
+              }
+            }
+          },
+          "rawSHA256": "c37bffa94e58c1697def13614de654e4d47d900875228910a70ebe71d3218f2f"
+        },
+        "experimental": {
+          "earlierSignedMirrorCandidate": true,
+          "controller": {
+            "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d",
+            "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
+            "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede"
+          },
+          "channel": "experimental",
+          "protocol": "udp",
+          "kubernetes": "v1.36.4",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+          "phases": {
+            "predecessor": {
+              "local": 48,
+              "imported": 0,
+              "rejected": 16,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 4,
+                  "numerator": 1
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 0,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 16
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 0,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": false
+              },
+              "sampleSHA256": {
+                "predecessor.packets.json": "4248d534c42ab54f396e49f9e931f82ba0afb7d444a0e07852fa1924065e1c4a"
+              }
+            }
+          },
+          "rawSHA256": "bc627c7e77bf9f308533a2c4d2a3c0179ec4aa31a01d46afb90b454f49afb912"
+        }
+      }
+    },
+    "candidate": {
+      "tcp": {
+        "standard": {
+          "earlierSignedMirrorCandidate": false,
+          "controller": {
+            "sourceRevision": "71d946b555e2780793ecdca99592d5da7f5db02a",
+            "manifestDigest": "sha256:72043752d124f24dddd5e2e083cffb5ef6b9e31754502b56a43347fa17bc03a5",
+            "managerSHA256": "2f691e8aa22b7a2811021722599873e80b58489eea9d961b97d160d1610f9c01"
+          },
+          "channel": "standard",
+          "protocol": "tcp",
+          "kubernetes": "v1.36.2",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+          "phases": {
+            "granted": {
+              "local": 192,
+              "imported": 64,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 3,
+                  "remote": 1
+                },
+                "importRoutedWithoutMemberSubnet": true,
+                "connectionRejection": null,
+                "tcpAccepts": {
+                  "service": 192,
+                  "remote": 64
+                },
+                "HAProxyConfigSHA256": "d8142385e0c8be4489ef732d7fccb432493ff9cff62b3886ca9a2408a8619664"
+              },
+              "sampleSHA256": {
+                "granted.control.streams.json": "eb6cd4ce86c51271a1d57aa2de3af4e91a9212bf2b62919355ee72fd3d802576",
+                "granted.mixed.streams.json": "f0e590be0095b4d6396d87b17216490b3d5a9de3ac9ec0cbd7ff537cd6d7d6bf"
+              }
+            },
+            "withdrawn": {
+              "local": 188,
+              "imported": 0,
+              "rejected": 68,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 1
+                },
+                "importRoutedWithoutMemberSubnet": false,
+                "connectionRejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                },
+                "tcpAccepts": {
+                  "service": 188,
+                  "remote": 0
+                },
+                "HAProxyConfigSHA256": "2c56da08e8a4ef2523327d6c89f1905a47b5c5ba0c44f86a327963c435236b11"
+              },
+              "sampleSHA256": {
+                "withdrawn.control.streams.json": "e2f7154d359864f6f18de790c2aa66ee8b6ad43c45235bf36aeeb91261a9ebc8",
+                "withdrawn.mixed.streams.json": "162f5c9c7f7e90bff9644723de530a3ba543be44651f78e798e7b4b52a2fc243"
+              }
+            },
+            "restored": {
+              "local": 192,
+              "imported": 64,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 3,
+                  "remote": 1
+                },
+                "importRoutedWithoutMemberSubnet": true,
+                "connectionRejection": null,
+                "tcpAccepts": {
+                  "service": 192,
+                  "remote": 64
+                },
+                "HAProxyConfigSHA256": "077c0991dd32c75c8cc41b7864bc0c7077655b1e2482f1dc58947e42abf0a2a1"
+              },
+              "sampleSHA256": {
+                "restored.control.streams.json": "94a3b2c0678295803712a2cd04b9924543f1377e40f0e1f923bb988564db0eb0",
+                "restored.mixed.streams.json": "16c84f7a21dcca78d6d9d621c500a7c5431fa755a569827fe5bfafbbffc87c5f"
+              }
+            }
+          },
+          "rawSHA256": "53848dfb8024a1caa70d5318be003cf16ecf2124dee26e9f9de67c7d1bbc572b"
+        },
+        "experimental": {
+          "earlierSignedMirrorCandidate": false,
+          "controller": {
+            "sourceRevision": "71d946b555e2780793ecdca99592d5da7f5db02a",
+            "manifestDigest": "sha256:72043752d124f24dddd5e2e083cffb5ef6b9e31754502b56a43347fa17bc03a5",
+            "managerSHA256": "2f691e8aa22b7a2811021722599873e80b58489eea9d961b97d160d1610f9c01"
+          },
+          "channel": "experimental",
+          "protocol": "tcp",
+          "kubernetes": "v1.36.2",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+          "phases": {
+            "granted": {
+              "local": 192,
+              "imported": 64,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 3,
+                  "remote": 1
+                },
+                "importRoutedWithoutMemberSubnet": true,
+                "connectionRejection": null,
+                "tcpAccepts": {
+                  "service": 192,
+                  "remote": 64
+                },
+                "HAProxyConfigSHA256": "5863a3178906ecba947cf7e836fd6558a2d4d1bf42eea3fd58ef540b0697a221"
+              },
+              "sampleSHA256": {
+                "granted.control.streams.json": "55a3e81e086efc54c1348f2ee563532654ed5f9639f0ca2c8a2d270f1f550686",
+                "granted.mixed.streams.json": "c48a9b50c83f58159c25cfea3dfbe8829cd54aa799e1397e8732c15700df6c96"
+              }
+            },
+            "withdrawn": {
+              "local": 184,
+              "imported": 0,
+              "rejected": 72,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 1
+                },
+                "importRoutedWithoutMemberSubnet": false,
+                "connectionRejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                },
+                "tcpAccepts": {
+                  "service": 184,
+                  "remote": 0
+                },
+                "HAProxyConfigSHA256": "edfeda971d4619139d0a3fba7f8e8250371f92191c2b570be090cd41d9dcd484"
+              },
+              "sampleSHA256": {
+                "withdrawn.control.streams.json": "4ec049f017e0b82291861610d8e480d2159090adb28e4218b6fa1fbc3934bc3a",
+                "withdrawn.mixed.streams.json": "8504a29146c1a1f8ddf596923dad5a4e899c05c2812cf72c3756bc0357f5a525"
+              }
+            },
+            "restored": {
+              "local": 192,
+              "imported": 64,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "poolMembers": {
+                  "service": 3,
+                  "remote": 1
+                },
+                "importRoutedWithoutMemberSubnet": true,
+                "connectionRejection": null,
+                "tcpAccepts": {
+                  "service": 192,
+                  "remote": 64
+                },
+                "HAProxyConfigSHA256": "ae3576baa73ab3c1ef5852816e0e6193556a3f48fa28a585200a8a5fadda1a84"
+              },
+              "sampleSHA256": {
+                "restored.control.streams.json": "072364e17ca6901df3fc1e78d031cab89ffc3ae28e6b921b40a5ce5a9a5618b5",
+                "restored.mixed.streams.json": "664da8bc055a99d700d5098c9d57272cedd5f978a8db38eb6996a0939edefac4"
+              }
+            }
+          },
+          "rawSHA256": "245d8dc6821f1c4a607b0827c984d01b841b77475746c8e6dbbd08fd4d372157"
+        }
+      },
+      "udp": {
+        "standard": {
+          "earlierSignedMirrorCandidate": false,
+          "controller": {
+            "sourceRevision": "71d946b555e2780793ecdca99592d5da7f5db02a",
+            "manifestDigest": "sha256:72043752d124f24dddd5e2e083cffb5ef6b9e31754502b56a43347fa17bc03a5",
+            "managerSHA256": "2f691e8aa22b7a2811021722599873e80b58489eea9d961b97d160d1610f9c01"
+          },
+          "channel": "standard",
+          "protocol": "udp",
+          "kubernetes": "v1.36.4",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+          "phases": {
+            "granted": {
+              "local": 48,
+              "imported": 16,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 16,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 0
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 16,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": true
+              },
+              "sampleSHA256": {
+                "granted.packets.json": "a77950bc8c3595c8ad7c184f6bde35011243236d65027ebbcb6e300205438bf5"
+              }
+            },
+            "restored": {
+              "local": 48,
+              "imported": 16,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 16,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 0
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 16,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": true
+              },
+              "sampleSHA256": {
+                "restored.packets.json": "60e9608f467536cbbb2c044bf81668696c563af17e9c1f9b784991a9b0d83235"
+              }
+            },
+            "withdrawal": {
+              "local": 48,
+              "imported": 0,
+              "rejected": 16,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 4,
+                  "numerator": 1
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 0,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 16
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 0,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": false
+              },
+              "sampleSHA256": {
+                "withdrawal.packets.json": "21b568fd8bff8c89d38a8c2fdf6604c2e4188067964d7654f4070f4853775b1f"
+              }
+            }
+          },
+          "rawSHA256": "31ca97c4bf4a33f93bb9e085993ed7af37f7d5cd84f21a78488859cbfaee7210"
+        },
+        "experimental": {
+          "earlierSignedMirrorCandidate": false,
+          "controller": {
+            "sourceRevision": "71d946b555e2780793ecdca99592d5da7f5db02a",
+            "manifestDigest": "sha256:72043752d124f24dddd5e2e083cffb5ef6b9e31754502b56a43347fa17bc03a5",
+            "managerSHA256": "2f691e8aa22b7a2811021722599873e80b58489eea9d961b97d160d1610f9c01"
+          },
+          "channel": "experimental",
+          "protocol": "udp",
+          "kubernetes": "v1.36.4",
+          "MCS": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "gatewayAPIBundle": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+          "phases": {
+            "granted": {
+              "local": 48,
+              "imported": 16,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 16,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 0
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 16,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": true
+              },
+              "sampleSHA256": {
+                "granted.packets.json": "a77950bc8c3595c8ad7c184f6bde35011243236d65027ebbcb6e300205438bf5"
+              }
+            },
+            "restored": {
+              "local": 48,
+              "imported": 16,
+              "rejected": 0,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 16,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 0
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 16,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": true
+              },
+              "sampleSHA256": {
+                "restored.packets.json": "60e9608f467536cbbb2c044bf81668696c563af17e9c1f9b784991a9b0d83235"
+              }
+            },
+            "withdrawal": {
+              "local": 48,
+              "imported": 0,
+              "rejected": 16,
+              "independentControl": 16,
+              "route": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "controlRoute": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "provider": {
+                "udpPacketDrop": {
+                  "denominator": 4,
+                  "numerator": 1
+                },
+                "kernelAndPodCounters": {
+                  "kernel": {
+                    "control": 16,
+                    "foreign": 0,
+                    "ingress_control": 16,
+                    "ingress_target": 64,
+                    "invalidDrop": 0,
+                    "localDrop": 0,
+                    "native_input": 0,
+                    "primary": 48,
+                    "weightedDrop": 16
+                  },
+                  "pods": {
+                    "control": 16,
+                    "foreign": 0,
+                    "primary": 48
+                  }
+                },
+                "importRoutedWithoutMemberSubnet": false
+              },
+              "sampleSHA256": {
+                "withdrawal.packets.json": "21b568fd8bff8c89d38a8c2fdf6604c2e4188067964d7654f4070f4853775b1f"
+              }
+            }
+          },
+          "rawSHA256": "66170435330c32937bc6ee24ea9d6dfaf12190391f07de205d6bffc835bb689b"
+        }
+      }
+    }
+  }
+}

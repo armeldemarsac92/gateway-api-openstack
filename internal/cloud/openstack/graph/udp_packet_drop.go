@@ -219,16 +219,16 @@ func staleUDPDestinations(route desiredRoute, observed observedRouteGraph) bool 
 	if len(observed.members) != 0 && int64(wanted.Numerator)*int64(current.Denominator) > int64(current.Numerator)*int64(wanted.Denominator) {
 		return true
 	}
-	ready := make(map[string]struct{}, len(route.members))
+	ready := make(map[string]string, len(route.members))
 	for _, member := range route.members {
 		if !member.Draining {
-			ready[memberKey(member.Address, member.Port)] = struct{}{}
+			ready[memberKey(member.Address, member.Port)] = route.memberSubnet(member)
 		}
 	}
 	return slices.ContainsFunc(observed.members, func(member pools.Member) bool {
-		_, wanted := ready[memberKey(member.Address, member.ProtocolPort)]
+		subnet, wanted := ready[memberKey(member.Address, member.ProtocolPort)]
 		_, unreported := observed.memberBatchUnreported[member.ID]
-		return !wanted && (unreported || member.AdminStateUp && member.Weight > 0)
+		return (!wanted || member.SubnetID != subnet) && (unreported || member.AdminStateUp && member.Weight > 0)
 	})
 }
 

@@ -40,10 +40,11 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // SetupWithManager registers the configured route kind and its attachment and backend dependencies.
-func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
+func (r *Reconciler) SetupWithManager(manager ctrl.Manager, imports *controller.ServiceImportWatch) error {
 	if r.Coordinator == nil {
 		return graph.ErrCoordinatorRequired
 	}
@@ -73,6 +74,10 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.tcpXBackendsEnabled() {
 		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackendPod), builder.WithPredicates(controller.XBackendPodPredicate()))
+	}
+	if imports != nil && r.Config.MulticlusterServiceImports {
+		imports.WatchCRD(setup)
+		setup.WatchesRawSource(imports.Subscribe(r.enqueueServiceImport))
 	}
 	return setup.Complete(r)
 }
@@ -256,16 +261,45 @@ func (r *Reconciler) enqueueService(ctx context.Context, object client.Object) [
 }
 
 func (r *Reconciler) enqueueEndpointSlice(ctx context.Context, object client.Object) []reconcile.Request {
-	name := object.GetLabels()[discoveryv1.LabelServiceName]
-	if name == "" {
-		return nil
+	keys := routeRequests{}
+	if name := object.GetLabels()[discoveryv1.LabelServiceName]; name != "" {
+		key := client.ObjectKey{Namespace: object.GetNamespace(), Name: name}
+		keys.add(r.cachedRoutes(ctx, client.MatchingFields{controller.IndexL4RouteByBackendService: controller.ObjectKeyString(key)}))
 	}
-	return r.enqueueServiceKey(ctx, client.ObjectKey{Namespace: object.GetNamespace(), Name: name})
+	if r.Config.MulticlusterServiceImports {
+		key := model.ServiceImportEndpointSliceKey(object.(*discoveryv1.EndpointSlice))
+		if key.Name != "" {
+			r.addServiceImportRoutes(ctx, keys, key)
+		}
+	}
+	return controller.SortedRequests(keys)
 }
 
 func (r *Reconciler) enqueueServiceKey(ctx context.Context, key client.ObjectKey) []reconcile.Request {
 	keys := routeRequests{}
 	keys.add(r.cachedRoutes(ctx, client.MatchingFields{controller.IndexL4RouteByBackendService: controller.ObjectKeyString(key)}))
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) addServiceImportRoutes(ctx context.Context, keys routeRequests, key client.ObjectKey) {
+	keys.add(r.cachedRoutes(ctx, client.MatchingFields{controller.IndexL4RouteByServiceImport: controller.ObjectKeyString(key)}))
+}
+
+func (r *Reconciler) enqueueServiceImport(ctx context.Context, object client.Object) []reconcile.Request {
+	keys := routeRequests{}
+	if key := client.ObjectKeyFromObject(object); key.Name != "" {
+		r.addServiceImportRoutes(ctx, keys, key)
+	} else {
+		// An empty key signals discovery of a CRD install or removal.
+		for _, route := range r.cachedRoutes(ctx) {
+			if slices.ContainsFunc(route.backendRefs, func(ref gatewayv1.BackendRef) bool {
+				_, imported := model.ServiceImportReference(route.GetNamespace(), ref.BackendObjectReference)
+				return imported
+			}) {
+				keys[client.ObjectKeyFromObject(route)] = struct{}{}
+			}
+		}
+	}
 	return controller.SortedRequests(keys)
 }
 
@@ -280,12 +314,18 @@ func (r *Reconciler) enqueueGrant(ctx context.Context, object client.Object) []r
 			continue
 		}
 		for _, to := range grant.Spec.To {
-			if to.Group != "" || to.Kind != "Service" {
+			var byNamespace, byKey string
+			switch {
+			case to.Group == "" && to.Kind == "Service":
+				byNamespace, byKey = controller.IndexL4RouteByBackendNamespace, controller.IndexL4RouteByBackendService
+			case r.Config.MulticlusterServiceImports && to.Group == model.ServiceImportGroup && to.Kind == model.ServiceImportKind:
+				byNamespace, byKey = controller.IndexL4RouteByServiceImportNamespace, controller.IndexL4RouteByServiceImport
+			default:
 				continue
 			}
-			field, value := controller.IndexL4RouteByBackendNamespace, grant.Namespace
+			field, value := byNamespace, grant.Namespace
 			if to.Name != nil {
-				field = controller.IndexL4RouteByBackendService
+				field = byKey
 				value = controller.ObjectKeyString(client.ObjectKey{Namespace: grant.Namespace, Name: string(*to.Name)})
 			}
 			keys.add(r.cachedRoutes(ctx, client.InNamespace(string(from.Namespace)), client.MatchingFields{field: value}))

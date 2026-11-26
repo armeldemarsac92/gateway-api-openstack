@@ -345,6 +345,16 @@ func backendReferences(routes []gatewayv1.HTTPRoute, enableServiceImport, enable
 // ObserveServiceImport uses a live reader after the caller checks authorization.
 // An absent API or a failed read withdraws this destination independently of Services.
 func ObserveServiceImport(ctx context.Context, reader client.Reader, key types.NamespacedName) (model.ServiceImportObservation, error) {
+	return observeServiceImport(ctx, reader, key, true)
+}
+
+// ObserveServiceImportReference validates an authorized import reference
+// without reading its member inventory, for example when its weight is zero.
+func ObserveServiceImportReference(ctx context.Context, reader client.Reader, key types.NamespacedName) (model.ServiceImportObservation, error) {
+	return observeServiceImport(ctx, reader, key, false)
+}
+
+func observeServiceImport(ctx context.Context, reader client.Reader, key types.NamespacedName, observeMembers bool) (model.ServiceImportObservation, error) {
 	observation := model.ServiceImportObservation{Key: key}
 	var backend mcs.ServiceImport
 	err := reader.Get(ctx, key, &backend)
@@ -353,7 +363,7 @@ func ObserveServiceImport(ctx context.Context, reader client.Reader, key types.N
 		if backend.DeletionTimestamp.IsZero() && backend.UID != "" {
 			observation.UID, observation.Generation, observation.Spec = backend.UID, backend.Generation, &backend.Spec
 			observation.ReadyIssue = model.ServiceImportReadiness(&backend)
-			if backend.Spec.Type == mcs.Headless && observation.ReadyIssue == nil && backend.Status.EndpointSliceObjects != mcs.EndpointSliceObjectsAbsent {
+			if observeMembers && backend.Spec.Type == mcs.Headless && observation.ReadyIssue == nil && backend.Status.EndpointSliceObjects != mcs.EndpointSliceObjectsAbsent {
 				observation.SourceClusters = backend.Status.Clusters
 				err := observeServiceImportEndpointSlices(ctx, reader, &observation)
 				if ctx.Err() != nil {

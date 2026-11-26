@@ -55,17 +55,18 @@ type Reconciler struct {
 }
 
 type routePlan struct {
-	parent        routeParent
-	parents       []routeParent
-	resolved      metav1.Condition
-	programmed    metav1.Condition
-	desired       *cloud.RouteSpec
-	target        string
-	targetStatus  metav1.Condition
-	listenerPorts []int
-	detach        bool
-	requeue       time.Duration
-	readError     error
+	parent         routeParent
+	parents        []routeParent
+	resolved       metav1.Condition
+	programmed     metav1.Condition
+	desired        *cloud.RouteSpec
+	target         string
+	targetStatus   metav1.Condition
+	listenerPorts  []int
+	detach         bool
+	requeue        time.Duration
+	readError      error
+	serviceImports serviceImportInputs
 }
 
 // Reconcile evaluates listener attachment and backend references independently.
@@ -300,6 +301,10 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 	if err != nil {
 		return routePlan{}, err
 	}
+	plan.serviceImports.grants = authRejections.importGrants
+	if authRejections.retryImports {
+		plan.requeue = 5 * time.Second
+	}
 	collect := (collectTCP || collectUDP) && authRejections.rejectWeight > 0
 	if authRejections.active != nil && !collect {
 		plan.rejectBackend(route, authRejections.active)
@@ -337,12 +342,12 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 	// Validate disabled Services in the Gateway's member mode without reading
 	// their destinations. Before a topology is bound, keep the Endpoint checks
 	// used for multiple references.
-	var inactiveMode, activeMode, xBackendMode cloud.MemberMode
+	var inactiveMode, activeMode, topologyMode cloud.MemberMode
 	var collectUDPShare bool
 	if len(route.backendRefs) > 1 {
 		inactiveMode = cloud.MemberModeEndpoint
 	}
-	if (inactiveMode != "" || collectTCP || collectUDP || slices.ContainsFunc(refs, func(ref backendReference) bool { return ref.xBackend })) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+	if (inactiveMode != "" || collectTCP || collectUDP || slices.ContainsFunc(refs, func(ref backendReference) bool { return ref.xBackend || ref.serviceImport })) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
 		topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
 		if err != nil {
 			if collect {
@@ -354,7 +359,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		if inactiveMode != "" {
 			inactiveMode = topology.Topology.MemberMode
 		}
-		xBackendMode = topology.Topology.MemberMode
+		topologyMode = topology.Topology.MemberMode
 		collectUDPShare = r.udpPacketDropEnabled(parent.gateway, topology, plan.listenerPorts)
 		if collectTCP || collectUDPShare {
 			activeMode = topology.Topology.MemberMode
@@ -366,9 +371,13 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, xBackendMode, collectShare)
+	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, topologyMode, collectShare)
 	if err != nil {
 		return routePlan{}, err
+	}
+	plan.serviceImports.imports = resolvedRejections.imports
+	if resolvedRejections.retryImports {
+		plan.requeue = 5 * time.Second
 	}
 	activeRejection := cmp.Or(authRejections.active, resolvedRejections.active)
 	inactiveRejection := cmp.Or(authRejections.inactive, resolvedRejections.inactive)
@@ -669,7 +678,7 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(component.Outcome, route.GetUID())}, nil
 	}
 	if checkpoint.Value != "" && !checkpoint.Observed {
-		if err := r.recordObservedTarget(ctx, route, identity, checkpoint); err != nil {
+		if err := r.recordObservedTarget(ctx, route, identity, checkpoint, plan.serviceImports); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
