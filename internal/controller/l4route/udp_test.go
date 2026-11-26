@@ -41,6 +41,13 @@ import (
 )
 
 func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
+	for _, mode := range []cloud.MemberMode{cloud.MemberModeEndpoint, cloud.MemberModeNodePort} {
+		t.Run(string(mode), func(t *testing.T) { testUDPPacketDropGrantLifecycle(t, mode) })
+	}
+}
+
+func testUDPPacketDropGrantLifecycle(t *testing.T, mode cloud.MemberMode) {
+	t.Helper()
 	gateway, class, route := udpRouteFixture()
 	localRef, local, localEndpoints := udpBackendFixture(route.Namespace, "primary", 3, "10.1.2.3")
 	remoteRef, remote, remoteEndpoints := udpBackendFixture("remote", "secondary", 1, "10.1.2.4")
@@ -54,12 +61,35 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: &remoteRef.Name}},
 		},
 	}
-	r := testReconciler(t, gateway, class, route, local, localEndpoints, remote, remoteEndpoints, grant)
+	objects := []client.Object{gateway, class, route, local, localEndpoints, remote, remoteEndpoints, grant}
+	members := []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 3}, {Address: "10.1.2.4", Port: 9090, Weight: 1}}
+	var worker *corev1.Node
+	if mode == cloud.MemberModeNodePort {
+		worker = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}, Spec: corev1.NodeSpec{ProviderID: "openstack:///worker"},
+			Status: corev1.NodeStatus{
+				Addresses:  []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.44"}},
+				Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+			},
+		}
+		objects = append(objects, worker)
+		for i, service := range []*corev1.Service{local, remote} {
+			service.Spec.Type = corev1.ServiceTypeNodePort
+			service.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyLocal
+			service.Spec.Ports[0].NodePort = int32(32000 + i)
+		}
+		localEndpoints.Endpoints[0].NodeName, remoteEndpoints.Endpoints[0].NodeName = &worker.Name, &worker.Name
+		members = []cloud.Member{
+			{Address: "192.0.2.44", Port: 32000, Weight: 3, ProviderID: worker.Spec.ProviderID},
+			{Address: "192.0.2.44", Port: 32001, Weight: 1, ProviderID: worker.Spec.ProviderID},
+		}
+	}
+	r := testReconciler(t, objects...)
 	r.Protocol = gatewayv1.UDPProtocolType
 	r.Coordinator = &graph.Coordinator{}
-	r.Config.UDPPacketDrop = true
+	r.Config.UDPPacketDrop = mode == cloud.MemberModeEndpoint
+	r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeNodePort
 	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
-	id := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	id := bindFixture(t, r, gateway, route, mode)
 	r.Writer = readyRouteWriter(t, r)
 	reconcile := func() graph.RouteInputs {
 		t.Helper()
@@ -71,7 +101,6 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 		}
 		return input
 	}
-	members := []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 3}, {Address: "10.1.2.4", Port: 9090, Weight: 1}}
 	check := func(input graph.RouteInputs, drop cloud.UDPPacketDrop, want []cloud.Member, status metav1.ConditionStatus, reason string) {
 		t.Helper()
 		spec := input.Nodes[0].Spec
@@ -86,6 +115,18 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 	original := reconcile()
 	check(original, cloud.UDPPacketDrop{Denominator: 1}, members, metav1.ConditionTrue, "ResolvedRefs")
 
+	if worker != nil {
+		if err := r.Get(t.Context(), client.ObjectKeyFromObject(worker), worker); err != nil {
+			t.Fatal(err)
+		}
+		worker.Status.Addresses = append([]corev1.NodeAddress{
+			{Type: corev1.NodeInternalIP, Address: "127.0.0.1"},
+			{Type: corev1.NodeInternalIP, Address: "::ffff:192.0.2.44"},
+		}, worker.Status.Addresses...)
+		if err := r.Status().Update(t.Context(), worker); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := r.Delete(t.Context(), grant); err != nil {
 		t.Fatal(err)
 	}
@@ -93,9 +134,15 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 	if err := original.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
 		t.Fatalf("a grant withdrawal did not fence the previous UDP graph: %v", err)
 	}
-	partial := []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 1}}
+	partial := slices.Clone(members[:1])
+	partial[0].Weight = 1
 	revoked := reconcile()
 	check(revoked, cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial, metav1.ConditionFalse, "RefNotPermitted")
+	r.Config.UDPPacketDrop, r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeNodePort, mode == cloud.MemberModeEndpoint
+	if plan, err := r.planRoute(t.Context(), viewRoute(route), id, true); err != nil || plan.desired != nil || !plan.detach {
+		t.Fatalf("the other member mode's option programmed %s discard: %+v, %v", mode, plan, err)
+	}
+	r.Config.UDPPacketDrop, r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeEndpoint, mode == cloud.MemberModeNodePort
 
 	grant.ResourceVersion = ""
 	if err := r.Create(t.Context(), grant); err != nil {
@@ -107,7 +154,9 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 	}
 	check(reconcile(), cloud.UDPPacketDrop{Denominator: 1}, members, metav1.ConditionTrue, "ResolvedRefs")
 
-	if err := r.Delete(t.Context(), remoteEndpoints); err != nil {
+	if worker != nil {
+		forgetEndpointNode(t, r, remoteEndpoints)
+	} else if err := r.Delete(t.Context(), remoteEndpoints); err != nil {
 		t.Fatal(err)
 	}
 	check(reconcile(), cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial, metav1.ConditionTrue, "ResolvedRefs")
@@ -121,6 +170,22 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 	plan, err = r.planRoute(t.Context(), viewRoute(route), id, true)
 	if err != nil || plan.desired != nil || !plan.detach {
 		t.Fatalf("unavailable drop capability did not fail closed: %+v, %v", plan, err)
+	}
+	if worker != nil {
+		r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
+		forgetEndpointNode(t, r, localEndpoints)
+		check(reconcile(), cloud.UDPPacketDrop{Numerator: 1, Denominator: 1}, nil, metav1.ConditionTrue, "ResolvedRefs")
+	}
+}
+
+func forgetEndpointNode(t *testing.T, r *Reconciler, endpoints *discoveryv1.EndpointSlice) {
+	t.Helper()
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(endpoints), endpoints); err != nil {
+		t.Fatal(err)
+	}
+	endpoints.Endpoints[0].NodeName = nil
+	if err := r.Update(t.Context(), endpoints); err != nil {
+		t.Fatal(err)
 	}
 }
 

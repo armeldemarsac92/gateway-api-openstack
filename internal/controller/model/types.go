@@ -104,6 +104,8 @@ type Diagnostic struct {
 	Scope     DiagnosticScope
 	// NoReadyEndpoints identifies a complete endpoint observation with no ready backend.
 	NoReadyEndpoints bool
+	// NoEligibleWorkers identifies a complete NodePort observation with no eligible worker.
+	NoEligibleWorkers bool
 }
 
 func (d *Diagnostic) Error() string { return d.Message }

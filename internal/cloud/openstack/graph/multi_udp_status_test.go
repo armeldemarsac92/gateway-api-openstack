@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gophercloud/gophercloud/v2"
 )
 
 func TestMultiUDPDeferredObservationRequiresServingRouteEdges(t *testing.T) {
@@ -116,6 +117,38 @@ func newUDPPacketDropProvider(f *tcpGraphFixture) *Provider {
 	return newTestProvider(f.t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{UDPPacketDrop: true})
 }
 
+func TestUDPPacketDropUsesAuthorizedNodePorts(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	f.spec.Routes[0].Spec.MemberMode = "" // The default normalizes to NodePort.
+	f.spec.Routes[0].Spec.Members = []cloud.Member{
+		{Address: "192.0.2.44", Port: 32000, Weight: 3},
+		{Address: "192.0.2.44", Port: 32001, Weight: 1},
+	}
+	f.spec.Routes[1].Spec.MemberMode = cloud.MemberModeNodePort
+	f.spec.Routes[1].Spec.Members = []cloud.Member{{Address: "192.0.2.44", Port: 32002, Weight: 1}}
+	testUDPPacketDropAtomicReplacement(t, f)
+}
+
+func TestUDPPacketDropRejectsIneligibleNodePortAddresses(t *testing.T) {
+	for _, address := range []string{"2001:db8::1", "::ffff:192.0.2.44", "127.0.0.1"} {
+		t.Run(address, func(t *testing.T) {
+			f := newUDPPacketDropFixture(t)
+			route := &f.spec.Routes[0].Spec
+			route.MemberMode = cloud.MemberModeNodePort
+			route.HealthMonitor = cloud.HealthMonitorConfig{}
+			route.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+			route.Members = []cloud.Member{{Address: address, Port: 32000}}
+			client := safetyServiceClient(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+				t.Errorf("cloud request for ineligible UDP member: %s %s", request.Method, request.URL)
+			}))
+			provider := newTestProvider(t, ServiceClients{LoadBalancer: client, Network: client, ProjectID: hibiscusProject}, ProviderConfig{UDPPacketDrop: true})
+			if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrTerminalValidation) {
+				t.Fatalf("error = %v, want terminal validation", err)
+			}
+		})
+	}
+}
+
 func TestUDPPacketDropRetainsOnlyTheObservedWeightedPool(t *testing.T) {
 	f := newUDPPacketDropFixture(t)
 	provider := newUDPPacketDropProvider(f)
@@ -148,7 +181,11 @@ func TestUDPPacketDropRetainsOnlyTheObservedWeightedPool(t *testing.T) {
 }
 
 func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
-	f := newUDPPacketDropFixture(t)
+	testUDPPacketDropAtomicReplacement(t, newUDPPacketDropFixture(t))
+}
+
+func testUDPPacketDropAtomicReplacement(t *testing.T, f *tcpGraphFixture) {
+	t.Helper()
 	route := &f.spec.Routes[0].Spec
 	provider := newUDPPacketDropProvider(f)
 	f.settleTransportGraph(provider)
@@ -194,12 +231,14 @@ func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
 	f.settleTransportGraph(provider)
 	checkSibling()
 
+	retained := granted[0]
+	retained.Weight = 1
 	for _, phase := range []struct {
 		name    string
 		drop    cloud.UDPPacketDrop
 		members []cloud.Member
 	}{
-		{name: "partial withdrawal", drop: cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, members: []cloud.Member{{Address: "10.1.2.3", Port: 8080, Weight: 1}}},
+		{name: "partial withdrawal", drop: cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, members: []cloud.Member{retained}},
 		{name: "all traffic unavailable", drop: cloud.UDPPacketDrop{Numerator: 1, Denominator: 1}},
 		{name: "restore the original weights", drop: cloud.UDPPacketDrop{Denominator: 1}, members: granted},
 	} {
@@ -411,7 +450,19 @@ func TestUDPPacketDropDiscoveryFailureAllowsUnrelatedListenerRemoval(t *testing.
 }
 
 func TestUDPPacketDropValidatesOnlyItsListenerSecurity(t *testing.T) {
+	t.Run("withdrawn destination", func(t *testing.T) { testUDPPacketDropSecurityOutage(t, true) })
+	t.Run("increased drop with identical destinations", func(t *testing.T) { testUDPPacketDropSecurityOutage(t, false) })
+}
+
+func testUDPPacketDropSecurityOutage(t *testing.T, withdrawDestination bool) {
+	t.Helper()
 	f := newUDPPacketDropFixture(t)
+	route := &f.spec.Routes[0].Spec
+	route.MemberMode = cloud.MemberModeNodePort
+	route.Members = []cloud.Member{
+		{Address: "192.0.2.44", Port: 32000, Weight: 3},
+		{Address: "192.0.2.44", Port: 32001, Weight: 1},
+	}
 	f.settleTransportGraph(newUDPPacketDropProvider(f))
 	gateway := &f.spec.Gateway.Spec
 	const group = "96d7a899-4f5d-4cf5-9842-5cc66ad91575"
@@ -420,9 +471,9 @@ func TestUDPPacketDropValidatesOnlyItsListenerSecurity(t *testing.T) {
 	for i := range f.spec.Routes {
 		f.spec.Routes[i].Spec.GatewayRequirements.VIPSecurityGroupIDs = gateway.VIPSecurityGroupIDs
 	}
-	route := &f.spec.Routes[0].Spec
 	route.HealthMonitor = cloud.HealthMonitorConfig{}
 	route.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+	neutronUnavailable := false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
 		case "/", "/v2/":
@@ -434,6 +485,10 @@ func TestUDPPacketDropValidatesOnlyItsListenerSecurity(t *testing.T) {
 				"id": gateway.VIPSubnetID, "network_id": "private", "project_id": hibiscusProject, "cidr": "192.0.2.0/24", "ip_version": 4,
 			}})
 		case "/v2.0/security-groups/" + group:
+			if neutronUnavailable {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			safetyWriteJSON(t, w, map[string]any{"security_group": map[string]any{
 				"id": group, "project_id": hibiscusProject, "security_group_rules": []any{map[string]any{
 					"direction": "ingress", "ethertype": "IPv4", "protocol": "udp", "port_range_min": gateway.ListenerPort, "port_range_max": gateway.ListenerPort,
@@ -454,6 +509,37 @@ func TestUDPPacketDropValidatesOnlyItsListenerSecurity(t *testing.T) {
 	want := []string{"DELETE " + tcpPool, "POST " + tcpPools, "PUT " + tcpListener, "PUT " + tcpMembers}
 	if !slices.Equal(f.writes[before:], want) || f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
 		t.Fatalf("sibling ingress denied the authorized listener's transition: wrote %v, want %v", f.writes[before:], want)
+	}
+	f.inventory[tcpPool]["provisioning_status"] = "ACTIVE"
+	before = len(f.writes)
+	neutronUnavailable = true
+	node := &f.spec.Routes[0]
+	node.Disposition, node.RetainListenerPorts = cloud.GraphPreserve, route.ScopedListenerPorts
+	checkHeld := func() {
+		t.Helper()
+		result, err := provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if err != nil || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || len(f.writes) != before ||
+			f.inventory[tcpListener]["default_pool_id"] != "pool" {
+			t.Fatalf("temporary security outage disrupted the authorized pool: %v, writes %v", err, f.writes[before:])
+		}
+	}
+	checkHeld() // Keep the exact serving set while the route is held.
+	node.Disposition, node.RetainListenerPorts = cloud.GraphEnsure, nil
+	serving := slices.Clone(route.Members)
+	newWorker := cloud.Member{Address: "192.0.2.45", Port: 32000, Weight: 1}
+	route.Members = append(route.Members, newWorker)
+	checkHeld() // Defer the new worker until Neutron validates it.
+	route.Members = serving
+	if withdrawDestination {
+		route.Members = []cloud.Member{serving[0], newWorker}
+		route.Members[0].Weight = 1
+	}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	result, err := provider.ReconcileGatewayGraph(t.Context(), f.spec)
+	if !gophercloud.ResponseCodeIs(err, http.StatusServiceUnavailable) || result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
+		!slices.Equal(f.writes[before:], []string{"DELETE " + tcpPool}) || f.inventory[tcpListener]["default_pool_id"] != nil ||
+		f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("temporary security outage left stale UDP forwarding active: %v, writes %v", err, f.writes[before:])
 	}
 }
 
