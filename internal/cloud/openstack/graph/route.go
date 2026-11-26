@@ -456,10 +456,10 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			!unavailable && !backend.RoutedExternal) {
 			return invalid(errors.New("ServiceImport requires a routed pool without Service transport policies"))
 		}
-		routedXBackend := xBackend && !spec.GRPC && backend.BackendRetryBudget == nil && !backend.InvalidReference
+		routedXBackend := xBackend && backend.BackendRetryBudget == nil && !backend.InvalidReference
 		if backend.RoutedExternal && (spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 ||
 			!serviceImport && !routedXBackend) {
-			return invalid(errors.New("routed external members require an unmanaged Endpoint pool for ServiceImport or HTTP XBackend"))
+			return invalid(errors.New("routed external members require an unmanaged Endpoint pool for ServiceImport or XBackend"))
 		}
 		if xBackend && backend.BackendTLS != nil && !deniedTLS &&
 			(spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {

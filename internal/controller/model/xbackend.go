@@ -255,8 +255,6 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	spec = XBackendSpecForRoute(spec, profile.RouteKind)
 	if profile.RouteKind == GRPCRouteKind {
 		switch {
-		case spec.Type != gatewayx.BackendTypeEndpointSelector:
-			return backendDiagnostic(unsupported, "GRPCRoute XBackend requires type EndpointSelector")
 		case spec.SessionPersistence != nil:
 			return backendDiagnostic(unsupported, "XBackend sessionPersistence is unsupported on GRPCRoute")
 		case *spec.Protocol != gatewayx.BackendProtocolGRPC && *spec.Protocol != gatewayx.BackendProtocolHTTP2 && *spec.Protocol != gatewayx.BackendProtocolH2C:

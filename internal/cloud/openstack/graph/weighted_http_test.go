@@ -912,29 +912,34 @@ func TestGRPCRouteXBackendPoolRequiresHTTP2(t *testing.T) {
 		Members: []cloud.Member{{Address: "10.2.0.5", Port: 8080}},
 		Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/echo.v1.Echo/Call"}},
 	}}
-	backend := &spec.HTTPBackends[0]
 	provider := &Provider{projectID: identity.OpenStackProjectID, fixedHTTPResponses: true, backendH2C: true}
-	if _, err := provider.buildDesiredRoute(spec); err == nil {
-		t.Fatal("a GRPCRoute XBackend pool with members must reject HTTP/1.1")
-	}
+	for _, routed := range []bool{false, true} {
+		group := spec
+		group.HTTPBackends = slices.Clone(spec.HTTPBackends)
+		backend := &group.HTTPBackends[0]
+		backend.RoutedExternal = routed
+		if _, err := provider.buildDesiredRoute(group); err == nil {
+			t.Fatal("a GRPCRoute XBackend pool with members must reject HTTP/1.1")
+		}
 
-	backend.BackendH2C = true
-	clear, err := provider.buildDesiredRoute(spec)
-	if err != nil || len(clear.httpParts) != 1 || !clear.httpParts[0].spec.BackendH2C || clear.httpParts[0].monitorType() != "TCP" {
-		t.Fatalf("want a single h2c pool with a TCP monitor, got %#v, %v", clear.httpParts, err)
-	}
+		backend.BackendH2C = true
+		clear, err := provider.buildDesiredRoute(group)
+		if err != nil || len(clear.httpParts) != 1 || !clear.httpParts[0].spec.BackendH2C || clear.httpParts[0].monitorType() != "TCP" {
+			t.Fatalf("want a single h2c pool with a TCP monitor, got %#v, %v", clear.httpParts, err)
+		}
 
-	backend.BackendH2C = false
-	backend.BackendTLS = &cloud.BackendTLSValidation{Hostname: "echo.example.test", RequireH2: true}
-	authenticated, err := provider.buildDesiredRoute(spec)
-	if err != nil || len(authenticated.httpParts) != 1 || authenticated.httpParts[0].xBackendALPN() != "h2" {
-		t.Fatalf("want a single authenticated pool offering h2, got %#v, %v", authenticated.httpParts, err)
-	}
+		backend.BackendH2C = false
+		backend.BackendTLS = &cloud.BackendTLSValidation{Hostname: "echo.example.test", RequireH2: true}
+		authenticated, err := provider.buildDesiredRoute(group)
+		if err != nil || len(authenticated.httpParts) != 1 || authenticated.httpParts[0].xBackendALPN() != "h2" {
+			t.Fatalf("want a single authenticated pool offering h2, got %#v, %v", authenticated.httpParts, err)
+		}
 
-	backend.BackendTLS, backend.Members, backend.Port, backend.Unavailable = nil, nil, 0, true
-	refused, err := provider.buildDesiredRoute(spec)
-	if err != nil || len(refused.httpParts) != 1 || !refused.httpParts[0].unavailable || refused.httpParts[0].fixedResponse || len(refused.httpParts[0].policies) == 0 {
-		t.Fatalf("want an empty pool retaining the gRPC match for UNAVAILABLE, got %#v, %v", refused.httpParts, err)
+		backend.BackendTLS, backend.Members, backend.Port, backend.Unavailable = nil, nil, 0, true
+		refused, err := provider.buildDesiredRoute(group)
+		if err != nil || len(refused.httpParts) != 1 || !refused.httpParts[0].unavailable || refused.httpParts[0].fixedResponse || len(refused.httpParts[0].policies) == 0 {
+			t.Fatalf("want an empty pool retaining the gRPC match for UNAVAILABLE, got %#v, %v", refused.httpParts, err)
+		}
 	}
 }
 
