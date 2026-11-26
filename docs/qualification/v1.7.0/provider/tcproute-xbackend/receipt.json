@@ -1,0 +1,1680 @@
+{
+  "baseline": {
+    "standard": {
+      "channel": "standard",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "controller": {
+        "sourceRevision": "7633c14927b8e3331edad31c2ac43bc6448d499d",
+        "manifestDigest": "sha256:642ec360e9dd5b90c8477848abc41c0db407946618cb95385fbfd6c6abc9b226",
+        "configDigest": "sha256:9d1847e4f086ec7a971bf160e08bf0aa703b6cdd695619491f60b1dbd3b1e6f6",
+        "managerSHA256": "28b4e3deba8c07fce2cddfa0c337e29b5fed04578de044012b6fd4d811ce67ff"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+        "filesVerified": 674
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "schemas": {
+        "TCPRoute": "2580b6c8dd46fff2e35a9d005ebfd007b38d4b9ca538cbb787de8718b7068317"
+      },
+      "xBackendCRD": false,
+      "admittedRoutes": {
+        "control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "control"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "port": 18443,
+                  "weight": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "regionalCapabilities": [
+        "tcp_connection_rejection_v1"
+      ],
+      "memberMode": "Endpoint",
+      "tcpMemberBatchCallbacks": 0,
+      "boundary": "Local envtest, local Pod and Service echo reachability, Octavia WSGI REST and SQLAlchemy, installed Amphora agent and TCP member-batch worker, running HAProxy. Local adapters supply Keystone, Neutron, remaining RPC completion, Amphora transport and service control.",
+      "phases": {
+        "standard": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:ddafc79fe56bb0c4445b56d24586089d9fffd769be1d92d87018d84db13b47b9",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "46d464f9714e08db4797b835c84cdc8133997e4eaff534b369dcf0e677c2bfec",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 10.106,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16
+              }
+            }
+          }
+        }
+      },
+      "rawReceiptSHA256": "09681f7537b0000ce40446f44820f683226c1ef18f119b27f9a50065e818e1d0"
+    },
+    "experimental": {
+      "channel": "experimental",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "controller": {
+        "sourceRevision": "7633c14927b8e3331edad31c2ac43bc6448d499d",
+        "manifestDigest": "sha256:642ec360e9dd5b90c8477848abc41c0db407946618cb95385fbfd6c6abc9b226",
+        "configDigest": "sha256:9d1847e4f086ec7a971bf160e08bf0aa703b6cdd695619491f60b1dbd3b1e6f6",
+        "managerSHA256": "28b4e3deba8c07fce2cddfa0c337e29b5fed04578de044012b6fd4d811ce67ff"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+        "filesVerified": 674
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schemas": {
+        "TCPRoute": "496c460578b363bf9f2c6fe8f13ead34eed3343ffe99fc9355fdb5bf7a1e881b",
+        "XBackend": "aa57c3697975accff8f7d0ccce3cd542ce62c6e517e0eab2a68b4fa52a67bf4a"
+      },
+      "xBackendCRD": true,
+      "admittedRoutes": {
+        "control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "control"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "port": 18443,
+                  "weight": 1
+                }
+              ]
+            }
+          ]
+        },
+        "mixed": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "mixed"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "port": 18443,
+                  "weight": 3
+                },
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "echo",
+                  "weight": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "regionalCapabilities": [
+        "tcp_connection_rejection_v1"
+      ],
+      "memberMode": "Endpoint",
+      "tcpMemberBatchCallbacks": 1,
+      "boundary": "Local envtest, local Pod and Service echo reachability, Octavia WSGI REST and SQLAlchemy, installed Amphora agent and TCP member-batch worker, running HAProxy. Local adapters supply Keystone, Neutron, remaining RPC completion, Amphora transport and service control.",
+      "phases": {
+        "baseline": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "mixed": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:df2ff6fe00b4f532d346e8f9ac482e7d0bc7dc1c9f9f09b7c9da4f06e6d69526/tcp:ed705db409f340f5ae1c855aa76ffbd9aa06a961083709415d4c7e513dbff891",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "mixed": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "mixed"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "False",
+                  "reason": "InvalidKind",
+                  "message": "the TCPRoute backendRef must refer to a core Service",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v2:3e7d5602672ed34a9de439c65d311082582152444430f57cc4c19e2625482771/tcp:fa8b6ed2ce22d34ace040f1b157c6386e354cc8e7063f978b9e79d15f00a4d5e",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "backendAncestors": [],
+          "pod": {
+            "label": "eligible",
+            "ready": true,
+            "ip": "198.51.100.6"
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "mixed": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                }
+              },
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "e675a48c67cace26f72ad475a9d5ec71feda15de9d64557b45d3e186c0d86cd4",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 15.361,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              }
+            },
+            "mixed": {
+              "freshConnections": 256,
+              "echoesAndCloses": {
+                "service": 182,
+                "rejected": 74
+              },
+              "probePayloadsAtOrigins": {
+                "service": 182,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 182,
+                "xbackend": 0
+              },
+              "ineligibleOriginDirectProbe": "xbackend"
+            }
+          }
+        }
+      },
+      "xBackend": {
+        "apiVersion": "gateway.networking.x-k8s.io/v1alpha1",
+        "name": "echo",
+        "namespace": "raw-tcp",
+        "generation": 1,
+        "spec": {
+          "endpointSelector": {
+            "matchLabels": {
+              "app": "eligible"
+            }
+          },
+          "port": {
+            "number": 18443
+          },
+          "protocol": "TCP",
+          "tls": {
+            "mode": "None"
+          },
+          "type": "EndpointSelector"
+        }
+      },
+      "rawReceiptSHA256": "8c14577bf6ad1f1add23a0aeabd43a912465065f0c681bf878029db00cc77b26"
+    }
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "controller": {
+        "sourceRevision": "62ac0896591cc64c266d9159453f143c4fc6d05c",
+        "manifestDigest": "sha256:f5aaff9c00af26c85e8b9a9f561a2bf9d817616436f32b382c0ba462b5d58f1a",
+        "configDigest": "sha256:dab8d4ebf62f2170a47645121f53d4a44cc38033d68cd8c779da068a6ca54c49",
+        "managerSHA256": "64fbbc3eb657941c105ad3010fb2890845257fcc9ad426c07e6645e02607ce9e"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+        "filesVerified": 674
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "schemas": {
+        "TCPRoute": "2580b6c8dd46fff2e35a9d005ebfd007b38d4b9ca538cbb787de8718b7068317"
+      },
+      "xBackendCRD": false,
+      "admittedRoutes": {
+        "control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "control"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "port": 18443,
+                  "weight": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "regionalCapabilities": [
+        "tcp_connection_rejection_v1"
+      ],
+      "memberMode": "Endpoint",
+      "tcpMemberBatchCallbacks": 0,
+      "boundary": "Local envtest, local Pod and Service echo reachability, Octavia WSGI REST and SQLAlchemy, installed Amphora agent and TCP member-batch worker, running HAProxy. Local adapters supply Keystone, Neutron, remaining RPC completion, Amphora transport and service control.",
+      "phases": {
+        "standard": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:d69b3eb946955a5291ef9259bd7a4ed0f2bebeaad1f39ee50caf97423366d3db",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "0f6b988f45f30fb0c7516ab8528f52042335f54de823b0b438f04e6684553b10",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 7.097,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16
+              }
+            }
+          }
+        }
+      },
+      "rawReceiptSHA256": "208561d99a0f14865bd6505d8de28ebff64b0ab1385e66c7f607a9699f8ef2a0"
+    },
+    "experimental": {
+      "channel": "experimental",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "controller": {
+        "sourceRevision": "62ac0896591cc64c266d9159453f143c4fc6d05c",
+        "manifestDigest": "sha256:f5aaff9c00af26c85e8b9a9f561a2bf9d817616436f32b382c0ba462b5d58f1a",
+        "configDigest": "sha256:dab8d4ebf62f2170a47645121f53d4a44cc38033d68cd8c779da068a6ca54c49",
+        "managerSHA256": "64fbbc3eb657941c105ad3010fb2890845257fcc9ad426c07e6645e02607ce9e"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+        "filesVerified": 674
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schemas": {
+        "TCPRoute": "496c460578b363bf9f2c6fe8f13ead34eed3343ffe99fc9355fdb5bf7a1e881b",
+        "XBackend": "aa57c3697975accff8f7d0ccce3cd542ce62c6e517e0eab2a68b4fa52a67bf4a"
+      },
+      "xBackendCRD": true,
+      "admittedRoutes": {
+        "control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "control"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "port": 18443,
+                  "weight": 1
+                }
+              ]
+            }
+          ]
+        },
+        "mixed": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "mixed"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "port": 18443,
+                  "weight": 3
+                },
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "echo",
+                  "weight": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "regionalCapabilities": [
+        "tcp_connection_rejection_v1"
+      ],
+      "memberMode": "Endpoint",
+      "tcpMemberBatchCallbacks": 4,
+      "boundary": "Local envtest, local Pod and Service echo reachability, Octavia WSGI REST and SQLAlchemy, installed Amphora agent and TCP member-batch worker, running HAProxy. Local adapters supply Keystone, Neutron, remaining RPC completion, Amphora transport and service control.",
+      "phases": {
+        "selected": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "mixed": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:bbb7585fa1f1d9d640da85cf578e6c96117e338433d2832181a3b6fead3a47bc/tcp:ed705db409f340f5ae1c855aa76ffbd9aa06a961083709415d4c7e513dbff891",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "mixed": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "mixed"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v3:0ae77a434e9f54ec8bf8d05bd64538d7df602a048b780a24dda467dc3d7c9786/tcp:fa8b6ed2ce22d34ace040f1b157c6386e354cc8e7063f978b9e79d15f00a4d5e",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "backendAncestors": [
+            {
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "namespace": "raw-tcp"
+              },
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "XBackend is accepted by the Gateway",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          ],
+          "pod": {
+            "label": "eligible",
+            "ready": true,
+            "ip": "198.51.100.6"
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "mixed": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 3,
+                  "xbackend": 1
+                },
+                "rejection": null
+              },
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "6b232ec456e75251a95cdee9600a85531d3b05b43b777096dcd749d672bb6d28",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 17.764,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              }
+            },
+            "mixed": {
+              "freshConnections": 256,
+              "echoesAndCloses": {
+                "service": 192,
+                "xbackend": 64
+              },
+              "probePayloadsAtOrigins": {
+                "service": 192,
+                "xbackend": 64
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 192,
+                "xbackend": 64
+              }
+            }
+          }
+        },
+        "label-withdrawn": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "mixed": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:bbb7585fa1f1d9d640da85cf578e6c96117e338433d2832181a3b6fead3a47bc/tcp:ed705db409f340f5ae1c855aa76ffbd9aa06a961083709415d4c7e513dbff891",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "mixed": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "mixed"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v2:c99c209ee0e1e2abc3f8c2bc1209dc939e661cec96813eae4b8392951057a862/tcp:fa8b6ed2ce22d34ace040f1b157c6386e354cc8e7063f978b9e79d15f00a4d5e",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "backendAncestors": [
+            {
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "namespace": "raw-tcp"
+              },
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "XBackend is accepted by the Gateway",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          ],
+          "pod": {
+            "label": "other",
+            "ready": true,
+            "ip": "198.51.100.6"
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "mixed": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                }
+              },
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "87733fddd144d205db80ce2b947169e9cbfd5730fdb25046a2d24f1faac5d106",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 2.658,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              }
+            },
+            "mixed": {
+              "freshConnections": 256,
+              "echoesAndCloses": {
+                "service": 184,
+                "rejected": 72
+              },
+              "probePayloadsAtOrigins": {
+                "service": 184,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 184,
+                "xbackend": 0
+              },
+              "ineligibleOriginDirectProbe": "xbackend"
+            }
+          }
+        },
+        "label-restored": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "mixed": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:bbb7585fa1f1d9d640da85cf578e6c96117e338433d2832181a3b6fead3a47bc/tcp:ed705db409f340f5ae1c855aa76ffbd9aa06a961083709415d4c7e513dbff891",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "mixed": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "mixed"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v3:0ae77a434e9f54ec8bf8d05bd64538d7df602a048b780a24dda467dc3d7c9786/tcp:fa8b6ed2ce22d34ace040f1b157c6386e354cc8e7063f978b9e79d15f00a4d5e",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "backendAncestors": [
+            {
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "namespace": "raw-tcp"
+              },
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "XBackend is accepted by the Gateway",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          ],
+          "pod": {
+            "label": "eligible",
+            "ready": true,
+            "ip": "198.51.100.6"
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "mixed": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 3,
+                  "xbackend": 1
+                },
+                "rejection": null
+              },
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "46456bed1a7cf57d8f74c75f38eec2a101cb8a1cb803ef71aaa3551c1334f18b",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 2.434,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              }
+            },
+            "mixed": {
+              "freshConnections": 256,
+              "echoesAndCloses": {
+                "service": 192,
+                "xbackend": 64
+              },
+              "probePayloadsAtOrigins": {
+                "service": 192,
+                "xbackend": 64
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 192,
+                "xbackend": 64
+              }
+            }
+          }
+        },
+        "readiness-withdrawn": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "mixed": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:bbb7585fa1f1d9d640da85cf578e6c96117e338433d2832181a3b6fead3a47bc/tcp:ed705db409f340f5ae1c855aa76ffbd9aa06a961083709415d4c7e513dbff891",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "mixed": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "mixed"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v2:c99c209ee0e1e2abc3f8c2bc1209dc939e661cec96813eae4b8392951057a862/tcp:fa8b6ed2ce22d34ace040f1b157c6386e354cc8e7063f978b9e79d15f00a4d5e",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "backendAncestors": [
+            {
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "namespace": "raw-tcp"
+              },
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "XBackend is accepted by the Gateway",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          ],
+          "pod": {
+            "label": "eligible",
+            "ready": false,
+            "ip": "198.51.100.6"
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "mixed": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": {
+                  "reject_weight": 1,
+                  "total_weight": 4
+                }
+              },
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "87733fddd144d205db80ce2b947169e9cbfd5730fdb25046a2d24f1faac5d106",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 2.477,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              }
+            },
+            "mixed": {
+              "freshConnections": 256,
+              "echoesAndCloses": {
+                "service": 194,
+                "rejected": 62
+              },
+              "probePayloadsAtOrigins": {
+                "service": 194,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 194,
+                "xbackend": 0
+              },
+              "ineligibleOriginDirectProbe": "xbackend"
+            }
+          }
+        },
+        "readiness-restored": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "control": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "mixed": {
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "routes": {
+            "control": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "control"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v1:bbb7585fa1f1d9d640da85cf578e6c96117e338433d2832181a3b6fead3a47bc/tcp:ed705db409f340f5ae1c855aa76ffbd9aa06a961083709415d4c7e513dbff891",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "mixed": {
+              "generation": 1,
+              "parent": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "sectionName": "mixed"
+              },
+              "sameUIDAndSpec": true,
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "The TCP listener accepts this route",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "message": "Backend references are resolved",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "message": "Octavia programmed the TCP forwarding configuration",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/ForwardingTarget": {
+                  "status": "True",
+                  "reason": "Observed",
+                  "message": "v3:0ae77a434e9f54ec8bf8d05bd64538d7df602a048b780a24dda467dc3d7c9786/tcp:fa8b6ed2ce22d34ace040f1b157c6386e354cc8e7063f978b9e79d15f00a4d5e",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          },
+          "backendAncestors": [
+            {
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "edge",
+                "namespace": "raw-tcp"
+              },
+              "conditions": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "message": "XBackend is accepted by the Gateway",
+                  "observedGeneration": 1
+                }
+              }
+            }
+          ],
+          "pod": {
+            "label": "eligible",
+            "ready": true,
+            "ip": "198.51.100.6"
+          },
+          "provider": {
+            "loadBalancers": 1,
+            "listeners": {
+              "mixed": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 3,
+                  "xbackend": 1
+                },
+                "rejection": null
+              },
+              "control": {
+                "protocol": "TCP",
+                "port": 9444,
+                "tlsTermination": false,
+                "poolProtocol": "TCP",
+                "poolTLS": false,
+                "members": {
+                  "service": 1
+                },
+                "rejection": null
+              }
+            },
+            "HAProxyConfigSHA256": "3f4b9d4c464510b7ca584e956fafeae52c51a6893c20e13b53a97db8d1120d8b",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConverge": 2.492,
+          "traffic": {
+            "control": {
+              "freshConnections": 16,
+              "echoesAndCloses": {
+                "service": 16
+              },
+              "probePayloadsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 16,
+                "xbackend": 0
+              }
+            },
+            "mixed": {
+              "freshConnections": 256,
+              "echoesAndCloses": {
+                "service": 192,
+                "xbackend": 64
+              },
+              "probePayloadsAtOrigins": {
+                "service": 192,
+                "xbackend": 64
+              },
+              "tcpAcceptsAtOrigins": {
+                "service": 192,
+                "xbackend": 64
+              }
+            }
+          }
+        }
+      },
+      "xBackend": {
+        "apiVersion": "gateway.networking.x-k8s.io/v1alpha1",
+        "name": "echo",
+        "namespace": "raw-tcp",
+        "generation": 1,
+        "spec": {
+          "endpointSelector": {
+            "matchLabels": {
+              "app": "eligible"
+            }
+          },
+          "port": {
+            "number": 18443
+          },
+          "protocol": "TCP",
+          "tls": {
+            "mode": "None"
+          },
+          "type": "EndpointSelector"
+        }
+      },
+      "rawReceiptSHA256": "e7c009573235a8f7eefca174c7c96f6f816b821bbf5518b085460f372e47d5c9"
+    }
+  }
+}

@@ -343,6 +343,8 @@ To expose more than one TCP port on this Gateway, configure every listener as TC
 
 ### Forward TCP to an Experimental XBackend
 
+The local TCPRoute trial recorded binary echoes and connection closures during selector and readiness changes. [TCPRoute status and per-origin counts](qualification/v1.7.0/provider/tcproute-xbackend/README.md)
+
 Install the Gateway API v1.7.0 Experimental bundle, include the controller's `config/components/experimental` overlay, and pass `--gateway-api-channel=experimental`. Use a TCP Gateway with [Endpoint member mode and Unmanaged backend security](reference/class-configuration.md#direct-endpoint-members). The Amphora must reach the selected IPv4 Pod addresses on the XBackend port.
 
 The following example assumes a TCP listener named `postgres` on `database-edge` and ready Pods labeled `app: database` in the same namespace. The XBackend's `spec.port.number` supplies the destination port. Omit `port` from its route reference. Keep the XBackend in the route's namespace, even if the Gateway is elsewhere.
