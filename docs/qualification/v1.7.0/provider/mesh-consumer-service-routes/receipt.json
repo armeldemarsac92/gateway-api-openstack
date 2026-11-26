@@ -1,0 +1,118 @@
+{
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "aba071b9416112dd29e5852664913d3470013202",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:9338bce1c770b303902c0f567b0ac56dcf4e4b252a85194c0e75df6a2ead15e3",
+    "configDigest": "sha256:84dcbcd4100a7014aa7c8578752fe7c8b723bba459550404f90146778427c4c8",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "5db8be43f8a3d8ef7701c9f32d633df18be1928c163854fd387d1789ead8221a",
+    "managerSHA256": "05385f1689bb0f1ff1f601fa2c21fa71c51d88be022adcbd7957dce0cf0b972c",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "controllerSourceTree": "779ecb381ef208e6ce0cbfa5aeab13d6fc2dd1c9",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "pilot": {
+    "archiveIndexDigest": "sha256:0d9484eb42060ede9ade78255591c0594bff24cdc61c98e04188f48acff76e81",
+    "archiveSHA256": "d18aa65857462db51e6a495531abe684e5d908f16d0d1cee70e3e5ca3a15700a",
+    "buildBranch": "hibiscus/build-istio-serviceimport-parents",
+    "buildRun": 45821289725,
+    "buildURL": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45821289725",
+    "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
+    "istioTree": "2e647d504d82229533e40bd1d2681d755f2e4bcc",
+    "manifestDigest": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "patches": [
+      {
+        "path": "istio-1.31.0-service-consumer-http-route.patch",
+        "sha256": "5077b17868f951eabd4ce13648e307d5f497633ad82bfc2c2314d0315c43d1dd"
+      },
+      {
+        "path": "istio-1.31.0-serviceimport-parents.patch",
+        "sha256": "cdd2b8cf185e25c23871642c9e2acb9aa415f5e77f0bd57bfe9b35e25aa12c96"
+      },
+      {
+        "path": "istio-1.31.0-serviceimport-consumers.patch",
+        "sha256": "54f5cbfb2ab21d326da6cfef27c527836db7507c1be6ca175eab3096ee13b73a"
+      },
+      {
+        "path": "istio-1.31.0-service-consumer-grpc.patch",
+        "sha256": "e4974d420c1eb647688f3e20c0d6b3578f81eb170fbe60a7a7742e09d9a71a4d"
+      },
+      {
+        "path": "istio-1.31.0-service-consumer-http-request.patch",
+        "sha256": "f8def331b5f8a78180c70ca74407bddb2f251c735e2f25c176371fb3cdabc95d"
+      }
+    ],
+    "pilotDiscoverySHA256": "99dafcc2bd32c87bbef6c1c87f9452ade6d89d70100ef8a4d4eb2cf1235229d8",
+    "platform": "linux/amd64",
+    "sourceCommit": "329c846d3de8c2b06e5a238d59bc7aa1ece8d4ca"
+  },
+  "pilotPublication": {
+    "publisher": {
+      "headSha": "9a082908a601134963b3063a44c38da41c0c8196",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45834667418"
+    },
+    "publisherSource": {
+      "sha": "9a082908a601134963b3063a44c38da41c0c8196",
+      "verified": true,
+      "reason": "valid"
+    },
+    "release": {
+      "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-istio-329c846d3de8",
+      "tagName": "hibiscus-istio-329c846d3de8",
+      "assets": [
+        {
+          "name": "istio-1.31.0-service-consumer-grpc.patch",
+          "digest": "sha256:e4974d420c1eb647688f3e20c0d6b3578f81eb170fbe60a7a7742e09d9a71a4d",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/istio-1.31.0-service-consumer-grpc.patch"
+        },
+        {
+          "name": "istio-1.31.0-service-consumer-http-request.patch",
+          "digest": "sha256:f8def331b5f8a78180c70ca74407bddb2f251c735e2f25c176371fb3cdabc95d",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/istio-1.31.0-service-consumer-http-request.patch"
+        },
+        {
+          "name": "istio-1.31.0-service-consumer-http-route.patch",
+          "digest": "sha256:5077b17868f951eabd4ce13648e307d5f497633ad82bfc2c2314d0315c43d1dd",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/istio-1.31.0-service-consumer-http-route.patch"
+        },
+        {
+          "name": "istio-1.31.0-serviceimport-consumers.patch",
+          "digest": "sha256:54f5cbfb2ab21d326da6cfef27c527836db7507c1be6ca175eab3096ee13b73a",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/istio-1.31.0-serviceimport-consumers.patch"
+        },
+        {
+          "name": "istio-1.31.0-serviceimport-parents.patch",
+          "digest": "sha256:cdd2b8cf185e25c23871642c9e2acb9aa415f5e77f0bd57bfe9b35e25aa12c96",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/istio-1.31.0-serviceimport-parents.patch"
+        },
+        {
+          "name": "istio-pilot-1.31.0-hibiscus-329c846d3de8-linux-amd64.oci.tar",
+          "digest": "sha256:d18aa65857462db51e6a495531abe684e5d908f16d0d1cee70e3e5ca3a15700a",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/istio-pilot-1.31.0-hibiscus-329c846d3de8-linux-amd64.oci.tar"
+        },
+        {
+          "name": "mesh-http-grpc-service-consumers-329c846d3de8.json",
+          "digest": "sha256:6644e34e43f769c9c4752be9e600fd6e69b4fdb1d704d8ec7ce12b2621d98d76",
+          "url": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-329c846d3de8/mesh-http-grpc-service-consumers-329c846d3de8.json"
+        }
+      ]
+    },
+    "source": "329c846d3de8c2b06e5a238d59bc7aa1ece8d4ca",
+    "manifestDigest": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "anonymousManifestVerified": true
+  },
+  "registeredMeshReleaseEligible": true,
+  "filesSHA256": {
+    "mesh-experimental-profiles.yaml": "680ae3d9bf821c291764baed0a026a0663d9926145f1ba6b680a470b4cec680d",
+    "mesh-http-grpc-service-consumers-329c846d3de8.json": "6644e34e43f769c9c4752be9e600fd6e69b4fdb1d704d8ec7ce12b2621d98d76",
+    "mesh-standard-profiles.yaml": "738ae489ef8729bde27c083a531c4de97cc455d9d2178059a9a97d5bd9ae19ad",
+    "registered-mesh.json": "56b58dd22b73707d9c8934faf7ee51b716e438311438d3a7b33b3aba5962365b",
+    "xmesh-reporting.json": "20d8d494e7014424686e1ec1ad2d1fb15f5ee84c24e3b4dd154589b6c2220364"
+  }
+}
