@@ -40,7 +40,7 @@ The signed controller `597d921f` and Octavia `300b2638` source pair passed all 4
 
 The same revisions passed 40/40 Experimental GATEWAY-HTTP Core cases and 53/64 Experimental Extended cases. [Experimental reports](../common-gateway/597d921f-300b2638/README.md#experimental-http-with-default-parallelism)
 
-On Standard and Experimental, all 17 Core and 13 Extended gRPC cases passed. TCP passed all 20 Core and 11 Extended cases on each channel. Standard TLS Core passed all 21 cases. In each of the four gRPC and TCP Extended runs, the suite exited with 0 and the fixture exited with 1. The fixture did not record an allocation attempt for the unusable IP in `GatewayStaticAddresses`. [Per-channel results](../common-gateway/597d921f-300b2638/protocols.md)
+The 18 local gRPC, TCP, TLS and UDP selections recorded 264 passed, 0 failed and 0 skipped case entries across both channels. Cases recur across selections. All 18 upstream selections exited successfully. In 8 Extended selections, the fixture did not observe an allocation attempt for the unusable address in `GatewayStaticAddresses`. [Per-channel results](../common-gateway/597d921f-300b2638/protocols.md)
 
 With the newer signed source pair, the isolated redirect-port-and-scheme case passed on both channels with revision-checked cleanup enabled. [Redirect traffic and policy removal](../provider/closed-listener-policy-removal/README.md)
 
