@@ -58,9 +58,9 @@ The three full Extended runs on this pair failed `BackendTLSPolicyInvalidKind`. 
 
 The isolated run completed cleanup. Its final grouped observation could not be decoded, so the exact instant at which Kubernetes stopped returning the HTTPRoute is unknown. The cause of the longer delay during the full suites remains open.
 
-## gRPC, TCP and TLS on the same revisions
+## gRPC, TCP, TLS and UDP on the same revisions
 
-On Standard and Experimental, all 17 Core and 13 Extended gRPC cases passed. TCP passed all 20 Core and 11 Extended cases on each channel. Standard TLS Core passed all 21 cases. In each of the four gRPC and TCP Extended runs, the suite exited with 0 and the fixture exited with 1. The fixture did not record an allocation attempt for the unusable IP in `GatewayStaticAddresses`. [Original protocol reports and address checks](protocols.md)
+The 18 local gRPC, TCP, TLS and UDP selections recorded 264 passed, 0 failed and 0 skipped case entries across both channels. Cases recur across selections. All 18 upstream selections exited successfully. In 8 Extended selections, the fixture did not observe an allocation attempt for the unusable address in `GatewayStaticAddresses`. [Original protocol reports and address checks](protocols.md)
 
 ## Environment and scope
 

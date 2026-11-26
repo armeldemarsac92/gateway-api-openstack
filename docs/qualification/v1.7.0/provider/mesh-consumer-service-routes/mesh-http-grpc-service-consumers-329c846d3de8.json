@@ -1,0 +1,1934 @@
+{
+  "grpcService": {
+    "channels": {
+      "experimental": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "explicitDefaultGRPCRule": true,
+        "firstClientRouteRecreated": true,
+        "guestMemoryMiB": 4992,
+        "operatorOptions": [
+          "--service-import-parents",
+          "--grpc-consumer-routes"
+        ],
+        "passed": true,
+        "pilotEnv": {
+          "ENABLE_MCS_HOST": "false",
+          "PILOT_ENABLE_AMBIENT": "true",
+          "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+          "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false"
+        },
+        "pilotFlagRemovedOnSameImage": false,
+        "renderSHA256": "9ee130c76e73857fa8b420450f247a5021147835c80bc97e21171bcd706c20fc",
+        "resultSHA256": "ef134cf86909e24eb08ee129235ad0417cdea6fcf9d0495086aa2efe9d07e64d",
+        "routeStatus": {
+          "bothConsumers": {
+            "mesh-cart/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "mesh-cart/httproute": {
+              "Accepted": "False/Conflicted"
+            },
+            "mesh-shop/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            }
+          },
+          "firstRemoved": {
+            "mesh-cart/httproute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            },
+            "mesh-shop/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            }
+          },
+          "firstRestored": {
+            "mesh-cart/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "mesh-cart/httproute": {
+              "Accepted": "False/Conflicted"
+            }
+          },
+          "httpOnly": {
+            "mesh-cart/httproute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          }
+        },
+        "runtimeImageID": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+        "servicePort": 7070,
+        "traffic": {
+          "bothConsumers": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "cart-25%"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-cart/observe": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            },
+            "mesh-producer/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "storefront"
+              ],
+              "successfulRPCs": 2
+            }
+          },
+          "firstRemoved": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "http-fallback"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "storefront"
+              ],
+              "successfulRPCs": 2
+            }
+          },
+          "firstRestored": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "cart-25%"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "storefront"
+              ],
+              "successfulRPCs": 2
+            }
+          },
+          "httpOnly": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "http-fallback"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            }
+          }
+        },
+        "waypointMethod": "/proto.EchoTestService/Echo"
+      },
+      "standard": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "explicitDefaultGRPCRule": true,
+        "firstClientRouteRecreated": true,
+        "guestMemoryMiB": 5632,
+        "operatorOptions": [
+          "--grpc-consumer-routes"
+        ],
+        "passed": true,
+        "pilotEnv": {
+          "ENABLE_MCS_HOST": null,
+          "PILOT_ENABLE_AMBIENT": "true",
+          "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": null,
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+          "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false"
+        },
+        "pilotFlagRemovedOnSameImage": true,
+        "renderSHA256": "3cd3520829eb3a588f5f671eec0222b300e8cc5b887537cd39c92d065030ebbe",
+        "resultSHA256": "6940f3569fa8ee0ad87d295cd542b35fd9dd1093eb862d3c7c33ba94e368fd8c",
+        "routeStatus": {
+          "bothConsumers": {
+            "mesh-cart/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "mesh-cart/httproute": {
+              "Accepted": "False/Conflicted"
+            },
+            "mesh-shop/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            }
+          },
+          "defaultRestored": {
+            "mesh-cart/grpcroute": {
+              "Accepted": "False/UnsupportedValue"
+            },
+            "mesh-cart/httproute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            },
+            "mesh-shop/grpcroute": {
+              "Accepted": "False/UnsupportedValue"
+            }
+          },
+          "firstRemoved": {
+            "mesh-cart/httproute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            },
+            "mesh-shop/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            }
+          },
+          "firstRestored": {
+            "mesh-cart/grpcroute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "mesh-cart/httproute": {
+              "Accepted": "False/Conflicted"
+            }
+          },
+          "httpOnly": {
+            "mesh-cart/httproute": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          }
+        },
+        "runtimeImageID": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+        "servicePort": 7070,
+        "traffic": {
+          "bothConsumers": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "cart-25%"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-cart/observe": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            },
+            "mesh-producer/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "storefront"
+              ],
+              "successfulRPCs": 2
+            }
+          },
+          "defaultRestored": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "http-fallback"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            }
+          },
+          "firstRemoved": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "http-fallback"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "storefront"
+              ],
+              "successfulRPCs": 2
+            }
+          },
+          "firstRestored": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "cart-25%"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "storefront"
+              ],
+              "successfulRPCs": 2
+            }
+          },
+          "httpOnly": {
+            "mesh-cart/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [
+                "http-fallback"
+              ],
+              "successfulRPCs": 2
+            },
+            "mesh-shop/lookup": {
+              "backend": "rpc-origin",
+              "responseMetadata": [],
+              "successfulRPCs": 2
+            }
+          }
+        },
+        "waypointMethod": "/proto.EchoTestService/Echo"
+      }
+    },
+    "controllerSource": "aba071b9416112dd29e5852664913d3470013202",
+    "controllerTree": "779ecb381ef208e6ce0cbfa5aeab13d6fc2dd1c9",
+    "receiptSHA256": "9ecaa9c658bb396ba20dc04f8593bf317a2b3d99933eec051629552c88c5552c"
+  },
+  "httpService": {
+    "experimental": {
+      "gatewayAPI": {
+        "gatewayclasses": {
+          "channel": "experimental",
+          "version": "v1.7.0"
+        },
+        "gateways": {
+          "channel": "experimental",
+          "version": "v1.7.0"
+        },
+        "grpcroutes": {
+          "channel": "experimental",
+          "version": "v1.7.0"
+        },
+        "httproutes": {
+          "channel": "experimental",
+          "version": "v1.7.0"
+        },
+        "referencegrants": {
+          "channel": "experimental",
+          "version": "v1.7.0"
+        }
+      },
+      "operatorOptions": [
+        "--consumer-routes",
+        "--grpc-consumer-routes",
+        "--service-import-parents"
+      ],
+      "passed": true,
+      "pilotEnv": {
+        "ENABLE_MCS_HOST": "false",
+        "PILOT_ENABLE_AMBIENT": "true",
+        "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": "true",
+        "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+        "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": "true",
+        "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false"
+      },
+      "receiptSHA256": "18f415290831dd6b2f9bbd8e1d46efc617706fe45d5dbb47fdf3cdd15c532ff4",
+      "renderSHA256": "e3789bc6a2e6cb7e8912a18dbdeb844c9727b65ac72951ca3aecbb4296962589",
+      "resultSHA256": "8bf7c426b1c927106a894716ccb2aa4ffabc41deae59a8d6abe9ea67e52a9c41",
+      "routeConditions": {
+        "direct": {
+          "Accepted": {
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True"
+          },
+          "ResolvedRefs": {
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "status": "True"
+          },
+          "ResolvedWaypoints": {
+            "observedGeneration": 1,
+            "reason": "ResolvedWaypoints",
+            "status": "True"
+          }
+        },
+        "requestHeaders": {
+          "Accepted": {
+            "observedGeneration": 2,
+            "reason": "Accepted",
+            "status": "True"
+          },
+          "ResolvedRefs": {
+            "observedGeneration": 2,
+            "reason": "ResolvedRefs",
+            "status": "True"
+          },
+          "ResolvedWaypoints": {
+            "observedGeneration": 2,
+            "reason": "ResolvedWaypoints",
+            "status": "True"
+          }
+        }
+      },
+      "runtimeImageID": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+      "traffic": {
+        "baseline": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "direct": {
+          "consumer/direct": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "ownerPolicy": {
+          "consumer/direct": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "consumer/lookup": [
+            {
+              "origin": [],
+              "requestHeaders": {},
+              "status": [
+                "403"
+              ]
+            },
+            {
+              "origin": [],
+              "requestHeaders": {},
+              "status": [
+                "403"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "requestHeaders": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second",
+                  "added"
+                ],
+                "x-ratio": [
+                  "cart-25%/%REQ(X-Example)%"
+                ],
+                "x-step": [
+                  "mutated"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second",
+                  "added"
+                ],
+                "x-ratio": [
+                  "cart-25%/%REQ(X-Example)%"
+                ],
+                "x-step": [
+                  "mutated"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "routeDeleted": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "routeDeletedWithPolicy": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "standard": {
+      "gatewayAPI": {
+        "gatewayclasses": {
+          "channel": "standard",
+          "version": "v1.7.0"
+        },
+        "gateways": {
+          "channel": "standard",
+          "version": "v1.7.0"
+        },
+        "grpcroutes": {
+          "channel": "standard",
+          "version": "v1.7.0"
+        },
+        "httproutes": {
+          "channel": "standard",
+          "version": "v1.7.0"
+        },
+        "referencegrants": {
+          "channel": "standard",
+          "version": "v1.7.0"
+        }
+      },
+      "operatorOptions": [
+        "--consumer-routes"
+      ],
+      "passed": true,
+      "pilotEnv": {
+        "ENABLE_MCS_HOST": null,
+        "PILOT_ENABLE_AMBIENT": "true",
+        "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": null,
+        "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": null,
+        "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": "true",
+        "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false"
+      },
+      "receiptSHA256": "d3d67ed9c61da07bb6fc400fcd9822964ee41874a09820c4de783e163c25dcf9",
+      "renderSHA256": "de6cb5e1113617c2771d1a8ec5cabbf42d39dae229daefd4ffcf49685fb8ace4",
+      "resultSHA256": "f0eb2fcec3421f9575267ccfcf8f8cbd5294bff4342c93cf08bca98b7bd6f404",
+      "routeConditions": {
+        "direct": {
+          "Accepted": {
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True"
+          },
+          "ResolvedRefs": {
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "status": "True"
+          },
+          "ResolvedWaypoints": {
+            "observedGeneration": 1,
+            "reason": "ResolvedWaypoints",
+            "status": "True"
+          }
+        },
+        "requestHeaders": {
+          "Accepted": {
+            "observedGeneration": 2,
+            "reason": "Accepted",
+            "status": "True"
+          },
+          "ResolvedRefs": {
+            "observedGeneration": 2,
+            "reason": "ResolvedRefs",
+            "status": "True"
+          },
+          "ResolvedWaypoints": {
+            "observedGeneration": 2,
+            "reason": "ResolvedWaypoints",
+            "status": "True"
+          }
+        }
+      },
+      "runtimeImageID": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+      "traffic": {
+        "baseline": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "direct": {
+          "consumer/direct": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "ownerPolicy": {
+          "consumer/direct": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "consumer/lookup": [
+            {
+              "origin": [],
+              "requestHeaders": {},
+              "status": [
+                "403"
+              ]
+            },
+            {
+              "origin": [],
+              "requestHeaders": {},
+              "status": [
+                "403"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "requestHeaders": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second",
+                  "added"
+                ],
+                "x-ratio": [
+                  "cart-25%/%REQ(X-Example)%"
+                ],
+                "x-step": [
+                  "mutated"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second",
+                  "added"
+                ],
+                "x-ratio": [
+                  "cart-25%/%REQ(X-Example)%"
+                ],
+                "x-step": [
+                  "mutated"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "routeDeleted": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ],
+          "peer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        },
+        "routeDeletedWithPolicy": {
+          "consumer/lookup": [
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            },
+            {
+              "origin": [
+                "http-origin"
+              ],
+              "requestHeaders": {
+                "x-example": [
+                  "example-value"
+                ],
+                "x-group": [
+                  "first",
+                  "second"
+                ],
+                "x-omit": [
+                  "before"
+                ],
+                "x-ratio": [
+                  "cart-25%"
+                ],
+                "x-step": [
+                  "original"
+                ]
+              },
+              "status": [
+                "200"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "pilot": {
+    "archiveIndexDigest": "sha256:0d9484eb42060ede9ade78255591c0594bff24cdc61c98e04188f48acff76e81",
+    "archiveSHA256": "d18aa65857462db51e6a495531abe684e5d908f16d0d1cee70e3e5ca3a15700a",
+    "buildBranch": "hibiscus/build-istio-serviceimport-parents",
+    "buildRun": 45821289725,
+    "buildURL": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45821289725",
+    "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
+    "istioTree": "2e647d504d82229533e40bd1d2681d755f2e4bcc",
+    "manifestDigest": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "patches": [
+      {
+        "path": "istio-1.31.0-service-consumer-http-route.patch",
+        "sha256": "5077b17868f951eabd4ce13648e307d5f497633ad82bfc2c2314d0315c43d1dd"
+      },
+      {
+        "path": "istio-1.31.0-serviceimport-parents.patch",
+        "sha256": "cdd2b8cf185e25c23871642c9e2acb9aa415f5e77f0bd57bfe9b35e25aa12c96"
+      },
+      {
+        "path": "istio-1.31.0-serviceimport-consumers.patch",
+        "sha256": "54f5cbfb2ab21d326da6cfef27c527836db7507c1be6ca175eab3096ee13b73a"
+      },
+      {
+        "path": "istio-1.31.0-service-consumer-grpc.patch",
+        "sha256": "e4974d420c1eb647688f3e20c0d6b3578f81eb170fbe60a7a7742e09d9a71a4d"
+      },
+      {
+        "path": "istio-1.31.0-service-consumer-http-request.patch",
+        "sha256": "f8def331b5f8a78180c70ca74407bddb2f251c735e2f25c176371fb3cdabc95d"
+      }
+    ],
+    "pilotDiscoverySHA256": "99dafcc2bd32c87bbef6c1c87f9452ade6d89d70100ef8a4d4eb2cf1235229d8",
+    "platform": "linux/amd64",
+    "sourceCommit": "329c846d3de8c2b06e5a238d59bc7aa1ece8d4ca"
+  },
+  "scope": "Local IPv4 single-network Istio ambient with Gateway API v1.7.0 Standard and Experimental.",
+  "serviceImportHTTP": {
+    "channel": "experimental",
+    "operatorOptions": [
+      "--service-import-parents",
+      "--grpc-consumer-routes"
+    ],
+    "passed": true,
+    "pilotEnv": {
+      "ENABLE_MCS_HOST": "false",
+      "PILOT_ENABLE_AMBIENT": "true",
+      "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": "true",
+      "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+      "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+      "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false"
+    },
+    "projection": {
+      "actualEndpoints": 1,
+      "ownerUIDMatches": true
+    },
+    "resultSHA256": "6865dc42c7ff445efce0b86e113b403949d543429318ae767fe27f67f755cd66",
+    "routeConditions": {
+      "first": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "other": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "producer": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "restored": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      }
+    },
+    "runtimeImageID": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "samePilotPodAsExperimentalGRPC": true,
+    "traffic": {
+      "bothConsumerRoutes": {
+        "client": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "cart"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "cart"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          }
+        ],
+        "homonymousService": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "core-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "core-origin"
+            ]
+          }
+        ],
+        "otherClient": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "storefront"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "storefront"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          }
+        ],
+        "producer": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "override-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "override-origin"
+            ]
+          }
+        ]
+      },
+      "firstRouteRemoved": {
+        "client": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "override-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "override-origin"
+            ]
+          }
+        ],
+        "homonymousService": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "core-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "core-origin"
+            ]
+          }
+        ],
+        "otherClient": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "storefront"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "storefront"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          }
+        ]
+      },
+      "firstRouteRestored": {
+        "client": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "cart"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "cart"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          }
+        ],
+        "homonymousService": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "core-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "core-origin"
+            ]
+          }
+        ],
+        "otherClient": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "storefront"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [
+              "storefront"
+            ],
+            "origin": [
+              "import-origin"
+            ]
+          }
+        ],
+        "producer": [
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "override-origin"
+            ]
+          },
+          {
+            "code": [
+              "200"
+            ],
+            "consumerHeader": [],
+            "origin": [
+              "override-origin"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
