@@ -49,6 +49,7 @@ const (
 	GatewayCapabilityFrontendAuthFallback      = "frontend_client_auth_insecure_fallback_v1"
 	GatewayCapabilityBackendRetryBudget        = "backend_retry_budget_v1"
 	GatewayCapabilityTCPDefaultPoolTLS         = "tcp_default_pool_tls_v1"
+	GatewayCapabilityTCPWeightedDefaultPools   = "tcp_weighted_default_pools_v1"
 	GatewayCapabilityTCPConnectionRejection    = "tcp_connection_rejection_v1"
 	GatewayCapabilityUDPPacketDrop             = "udp_packet_drop_v1"
 	GatewayCapabilityHTTPHeaderPersistence     = "http_header_persistence_v1"

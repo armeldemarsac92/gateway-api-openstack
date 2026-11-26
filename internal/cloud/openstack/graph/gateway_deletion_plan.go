@@ -65,6 +65,7 @@ type gatewayDeletionPlan struct {
 	defaultPoolListener      *listeners.Listener
 	defaultPoolPending       string
 	defaultUDPPacketDropPool string
+	tcpWeightedWithdraw      *graphMutation
 }
 
 // orderedSteps flattens the validated subplans in reverse dependency order.
@@ -120,7 +121,7 @@ func (p *Provider) buildGatewayDeletionPlanFromListeners(ctx context.Context, id
 			}
 			protocol = listener.Protocol
 		}
-		return p.buildDefaultPoolGatewayDeletionPlan(ctx, owners, lb, listener, protocol)
+		return p.buildDefaultPoolGatewayDeletionPlan(ctx, owners, lb, listener, protocol, inventory)
 	}
 	if p.fixedHTTPResponses {
 		// The previous controller can leave scalar policy roles on this HTTP Gateway.

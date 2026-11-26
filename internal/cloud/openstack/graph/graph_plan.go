@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
@@ -631,7 +632,7 @@ func observedRouteDeleteCompletions(desired desiredGatewayGraph, actual observed
 		if node.Disposition != cloud.GraphDelete {
 			continue
 		}
-		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpParts) != 0) {
+		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpParts) != 0 || len(actual.routes[index].tcpParts) != 0) {
 			continue
 		}
 		// Inventory was either completely observed or the parent was absent.
@@ -687,7 +688,7 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 	if err != nil {
 		return nil, err
 	}
-	if !actual.listener.AdminStateUp {
+	if !actual.listener.AdminStateUp && tcpWeightedListenerCanRestore(desired, actual, *actual.listener) {
 		plan = append(plan, graphMutation{kind: graphEnableListener, message: "Enabled Octavia listener after validating the Gateway graph"})
 	}
 	if !actual.loadBalancer.AdminStateUp {
@@ -712,6 +713,9 @@ func buildGatewayAddressRestorationPlan(networkID string, actual observedGateway
 }
 
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
+	if step := actual.deletion.tcpWeightedWithdraw; step != nil {
+		return []graphMutation{*step}
+	}
 	if actual.scoped {
 		for _, listener := range actual.scopedListeners {
 			if listener.DefaultPoolID != "" {
@@ -1191,9 +1195,16 @@ func (actual observedGatewayGraph) policyListener(route observedRouteGraph, id s
 
 func graphRoutePart(desired desiredGatewayGraph, step graphMutation) desiredRoute {
 	route := desired.routes[step.routeIndex]
-	for _, part := range route.httpParts {
-		if part.backendKey == step.backendKey {
-			return part
+	if strings.HasPrefix(step.backendKey, tcpWeightedPartPrefix) {
+		index := slices.IndexFunc(route.tcpParts, func(part desiredRoute) bool { return part.backendKey == step.backendKey })
+		if index >= 0 {
+			return route.tcpParts[index]
+		}
+	} else {
+		for _, part := range route.httpParts {
+			if part.backendKey == step.backendKey {
+				return part
+			}
 		}
 	}
 	return route
@@ -1350,6 +1361,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		return err
 	case graphUpdateListenerVirtualHosts:
 		err = p.octavia.SetListenerHTTPSVirtualHosts(ctx, listenerID, httpsVirtualHosts(step.scopedListener))
+	case graphSetTCPDefaultTargets:
+		err = p.octavia.SetTCPDefaultTargets(ctx, listenerID, step.tcpDefaultTargets, step.clearScalarTCPDefault)
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
 		if step.tcpDefaultPoolTLS || actual.tcpDefaultPoolTLS[listenerID] ||

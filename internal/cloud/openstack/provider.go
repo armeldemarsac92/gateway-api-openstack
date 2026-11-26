@@ -62,6 +62,11 @@ func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error
 	return p.graph.BackendRetryBudgetAvailable(ctx)
 }
 
+// TCPWeightedDefaultPoolsAvailable discovers regional weighted TCP selection.
+func (p *Provider) TCPWeightedDefaultPoolsAvailable(ctx context.Context) (bool, error) {
+	return p.graph.TCPWeightedDefaultPoolsAvailable(ctx)
+}
+
 // TCPDefaultPoolTLSAvailable discovers regional authenticated TCP default pools.
 func (p *Provider) TCPDefaultPoolTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.TCPDefaultPoolTLSAvailable(ctx)

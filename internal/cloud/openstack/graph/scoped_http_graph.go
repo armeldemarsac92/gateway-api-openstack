@@ -85,9 +85,9 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 	return actual, nil
 }
 
-func (route observedRouteGraph) validateScopedHTTPPoolChildren() error {
-	// Stock Octavia omits the pool pointer until a monitor exists. Confirm it
-	// against the complete monitor collection before changing any children.
+func (route observedRouteGraph) validateCompletePoolChildren() error {
+	// Stock Octavia omits the monitor pointer until a monitor exists. Confirm
+	// the pointer against the complete collection before changing children.
 	listedMonitorID := ""
 	if route.monitor != nil {
 		listedMonitorID = route.monitor.ID

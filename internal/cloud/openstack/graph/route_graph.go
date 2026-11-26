@@ -107,6 +107,7 @@ type observedRouteGraph struct {
 	monitor                *monitors.Monitor
 	policies               []observedRoutePolicy
 	httpParts              map[string]*observedRouteGraph
+	tcpParts               map[string]*observedRouteGraph
 	weightedPoolHeld       bool
 }
 
@@ -144,6 +145,9 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	}
 	if slices.Contains(bases, raw) && !openstackidentity.HTTPRuleNeedsPolicyIdentity(raw) {
 		return routeResourceRole{raw: raw, base: raw}, true
+	}
+	if role, ok := parseTCPWeightedResourceRole(raw); ok {
+		return role, slices.Contains(bases, role.base)
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
 		return routeResourceRole{raw: raw, base: base, backend: redirectPartKey(match), match: cell, redirect: true}, slices.Contains(bases, base)
@@ -190,13 +194,17 @@ func (route *observedRouteGraph) part(backend string) *observedRouteGraph {
 	if backend == "" {
 		return route
 	}
-	if route.httpParts == nil {
-		route.httpParts = make(map[string]*observedRouteGraph)
+	parts := &route.httpParts
+	if strings.HasPrefix(backend, tcpWeightedPartPrefix) {
+		parts = &route.tcpParts
 	}
-	if route.httpParts[backend] == nil {
-		route.httpParts[backend] = &observedRouteGraph{}
+	if *parts == nil {
+		*parts = make(map[string]*observedRouteGraph)
 	}
-	return route.httpParts[backend]
+	if (*parts)[backend] == nil {
+		(*parts)[backend] = &observedRouteGraph{}
+	}
+	return (*parts)[backend]
 }
 
 func (route observedRouteGraph) parts() []observedRouteGraph {
@@ -316,7 +324,7 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 	return p.observeRouteGraphsFromPools(ctx, owners, lb, listener, protocol, scopedListeners, poolInventory, nil, nil)
 }
 
-func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolInventory octavia.PoolInventory, recoverGateway *Identity, scopedPolicies map[string]httpsPolicyInventory) ([]observedRouteGraph, error) {
+func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolInventory octavia.PoolInventory, recoverGateway *Identity, scopedPolicies map[string]httpsPolicyInventory, weightedReadback ...map[string]octavia.TCPDefaultTargetObservation) ([]observedRouteGraph, error) {
 	var err error
 	lb, poolInventory.Items, err = omitTelemetryPoolsFromRoutes(lb, poolInventory.Items)
 	if err != nil {
@@ -331,6 +339,14 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 	if recoverGateway != nil {
 		inventory.recovered = make(map[openstackidentity.RouteOwnerProof]int)
 	}
+	var targetReadback map[string]octavia.TCPDefaultTargetObservation
+	if len(weightedReadback) != 0 {
+		targetReadback = weightedReadback[0]
+	}
+	frontends := scopedListeners
+	if listener != nil {
+		frontends = []listeners.Listener{*listener}
+	}
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
 	strictHTTP := scopedHTTP || protocol == cloud.ListenerProtocolHTTP && p.fixedHTTPResponses || containsHTTPFragmentPool(poolItems) ||
@@ -341,10 +357,6 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 			return hasObservedBackendTLS(pool, poolInventory.BackendTLS[pool.ID])
 		}) || recoverGateway != nil
 	if strictHTTP {
-		frontends := scopedListeners
-		if listener != nil {
-			frontends = []listeners.Listener{*listener}
-		}
 		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, frontends, func(listener listeners.Listener) string { return listener.ID }); err != nil {
 			return nil, err
 		}
@@ -378,12 +390,18 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		if _, duplicate := poolOwners[pool.ID]; duplicate {
 			return nil, fmt.Errorf("%w: %s pool %s appears more than once in the Gateway inventory", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)
 		}
+		weighted := strings.HasPrefix(role.backend, tcpWeightedPartPrefix)
+		if weighted && poolProtocol != cloud.ListenerProtocolTCP {
+			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: weighted TCP role on another transport", cloud.ErrOwnershipConflict)}
+		}
 		if usesDefaultPool(poolProtocol) {
-			if role.backend != "" {
+			if role.backend != "" && !weighted {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: HTTP backend roles cannot identify a transport pool", cloud.ErrOwnershipConflict)}
 			}
 			var err error
-			if scopedListeners != nil {
+			if weighted {
+				err = p.validateTCPWeightedPool(*pool, lb.ID, frontends, targetReadback, false)
+			} else if scopedListeners != nil {
 				err = p.validateScopedDefaultPool(*pool, lb.ID, scopedListeners, poolProtocol)
 			} else {
 				err = validateDefaultPool(*pool, lb.ID, listener, poolProtocol)
@@ -422,8 +440,8 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 		}
-		if strictHTTP && !usesDefaultPool(poolProtocol) {
-			if err := graph.validateScopedHTTPPoolChildren(); err != nil {
+		if weighted || strictHTTP && !usesDefaultPool(poolProtocol) {
+			if err := graph.validateCompletePoolChildren(); err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
 		} else if usesDefaultPool(poolProtocol) {
@@ -438,9 +456,12 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		}
 	}
 	if defaultPool {
+		if err := validateTCPWeightedTargetOwnership(frontends, targetReadback, poolOwners); err != nil {
+			return nil, err
+		}
 		return inventory.graphs, nil
 	}
-	var frontends []listeners.Listener
+	frontends = nil
 	if scopedHTTP {
 		frontends = scopedListeners
 	} else if listener != nil {
@@ -492,7 +513,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 func containsHTTPFragmentPool(items []pools.Pool) bool {
 	return slices.ContainsFunc(items, func(pool pools.Pool) bool {
 		role, ok := readRouteResourceRole(pool.Tags, rolePool)
-		return ok && role.backend != ""
+		return ok && role.backend != "" && !strings.HasPrefix(role.backend, tcpWeightedPartPrefix)
 	})
 }
 
@@ -850,7 +871,8 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 	strictChildren := backend != "" || owner.expectsBackendTLS || hasObservedBackendTLS(*graph.pool, graph.backendTLS)
 	opts := pools.ListMembersOpts{ProjectID: p.projectID}
 	switch {
-	case graph.pool.Protocol == cloud.ListenerProtocolTCP && graph.tcpRejection.Present || graph.udpDropPool():
+	case graph.pool.Protocol == cloud.ListenerProtocolTCP &&
+		(graph.tcpRejection.Present || strings.HasPrefix(backend, tcpWeightedPartPrefix)) || graph.udpDropPool():
 		graph.members, graph.memberBackupUnreported, graph.memberBatchUnreported, err = p.octavia.ListMembersForTransportBatch(ctx, graph.pool.ID, opts)
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)

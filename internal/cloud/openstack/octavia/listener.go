@@ -41,6 +41,7 @@ type ListenerInventory struct {
 	TCPTLSTermination        map[string]bool
 	TCPTLSMixedMode          map[string]bool
 	TCPDefaultPoolTLS        map[string]bool
+	TCPDefaultTargets        map[string]TCPDefaultTargetObservation
 	SNICertificatesObserved  map[string]bool
 	Items                    []listeners.Listener
 	DefaultPoolsObserved     bool
@@ -69,13 +70,16 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
-			TCPTLSTermination   json.RawMessage `json:"tcp_tls_termination"`
-			TCPTLSMixedMode     json.RawMessage `json:"tcp_tls_mixed_mode"`
-			TCPDefaultPoolTLS   json.RawMessage `json:"tcp_default_pool_tls"`
-			SNICertificates     *[]string       `json:"sni_container_refs"`
-			RequestFilters      json.RawMessage `json:"request_filter_sections"`
-			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
-			DefaultHTTPResponse *struct {
+			TCPTLSTermination          json.RawMessage `json:"tcp_tls_termination"`
+			TCPTLSMixedMode            json.RawMessage `json:"tcp_tls_mixed_mode"`
+			TCPDefaultPoolTLS          json.RawMessage `json:"tcp_default_pool_tls"`
+			TCPDefaultTargets          json.RawMessage `json:"tcp_default_targets"`
+			TCPDefaultTargetsStatus    json.RawMessage `json:"tcp_default_targets_status"`
+			TCPDefaultTargetsRetryable json.RawMessage `json:"tcp_default_targets_retryable"`
+			SNICertificates            *[]string       `json:"sni_container_refs"`
+			RequestFilters             json.RawMessage `json:"request_filter_sections"`
+			VirtualHosts               json.RawMessage `json:"https_virtual_hosts"`
+			DefaultHTTPResponse        *struct {
 				StatusCode int `json:"status_code"`
 			} `json:"default_http_response"`
 			DefaultPool        json.RawMessage `json:"default_pool_id"`
@@ -86,7 +90,7 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	if err := pages.(listeners.ListenerPage).ExtractInto(&response); err != nil {
 		return ListenerInventory{}, fmt.Errorf("extract listeners: %w", err)
 	}
-	inventory := ListenerInventory{DefaultPoolsObserved: true}
+	inventory := ListenerInventory{DefaultPoolsObserved: true, TCPDefaultTargets: make(map[string]TCPDefaultTargetObservation)}
 	if len(response.Listeners) > 0 {
 		inventory.Items = make([]listeners.Listener, len(response.Listeners))
 		inventory.AdminStatesObserved = make(map[string]bool, len(response.Listeners))
@@ -128,6 +132,10 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			// Only a literal true verifies mixed mode. Preserve listener
 			// identity and admin state so a malformed row can still close.
 			inventory.TCPTLSMixedMode[item.ID] = string(observed.TCPTLSMixedMode) == "true"
+		}
+		if observed.TCPDefaultTargets != nil || observed.TCPDefaultTargetsStatus != nil || observed.TCPDefaultTargetsRetryable != nil {
+			inventory.TCPDefaultTargets[item.ID] = decodeTCPDefaultTargets(
+				observed.TCPDefaultTargets, observed.TCPDefaultTargetsStatus, observed.TCPDefaultTargetsRetryable)
 		}
 		switch string(observed.TCPDefaultPoolTLS) {
 		case "true", "false":

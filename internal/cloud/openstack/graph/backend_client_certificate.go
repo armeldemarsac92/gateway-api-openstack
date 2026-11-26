@@ -151,7 +151,7 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 				blocked = errors.Join(blocked, err)
 				continue
 			}
-			if err := pool.graph.validateScopedHTTPPoolChildren(); err != nil {
+			if err := pool.graph.validateCompletePoolChildren(); err != nil {
 				blocked = errors.Join(blocked, err)
 				continue
 			}

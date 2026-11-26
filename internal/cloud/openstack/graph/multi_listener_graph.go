@@ -174,14 +174,19 @@ func (p *Provider) observeScopedListenerGraph(
 			actual.outcome = outcome
 		}
 	}
-	if actual.outcome.State == cloud.OutcomeProgressing && (parentPending || !canReconcileTCPRejection(desired, actual)) {
+	if actual.outcome.State == cloud.OutcomeProgressing &&
+		(parentPending || !canReconcileTCPRejection(desired, actual) && !hasTCPWeightedReadback(actual)) {
 		return actual, nil
 	}
 	if actual.loadBalancer.Pools == nil {
 		return actual, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 			fmt.Errorf("load balancer %s omitted its scoped pool inventory", actual.loadBalancer.ID))
 	}
-	actual.routes, err = p.observeRouteGraphsWithListeners(ctx, owners, actual.loadBalancer, nil, actual.protocol, managed)
+	if actual.protocol == cloud.ListenerProtocolTCP {
+		actual.routes, err = p.observeTCPRouteGraphs(ctx, &actual, owners)
+	} else {
+		actual.routes, err = p.observeRouteGraphsWithListeners(ctx, owners, actual.loadBalancer, nil, actual.protocol, managed)
+	}
 	if err != nil {
 		return actual, err
 	}
@@ -245,6 +250,19 @@ func (p *Provider) validateScopedDefaultPool(pool pools.Pool, lbID string, manag
 func scopedListenerDeletionPlan(actual observedGatewayGraph) gatewayDeletionPlan {
 	var plan gatewayDeletionPlan
 	for _, listener := range actual.scopedListeners {
+		readback := actual.tcpDefaultTargets[listener.ID]
+		if readback.Invalid || readback.PublicationStatus == "PENDING_UPDATE" {
+			plan.defaultPoolPending = errTCPWeightedReadback.Error()
+			return plan
+		}
+		if len(readback.Targets) != 0 {
+			plan.tcpWeightedWithdraw = weightedTCPMutation(listener.ID, -1, nil, false)
+			return plan
+		}
+		if weightedTCPPoolInventory(actual.routes) && !tcpWeightedDetachmentReadback(actual, listener) {
+			plan.defaultPoolPending = errTCPWeightedReadback.Error()
+			return plan
+		}
 		if listener.DefaultPoolID != "" {
 			// The graph planner detaches known edges before processing this
 			// subtree. One fresh, settled observation follows each detach.
@@ -262,6 +280,7 @@ func scopedListenerDeletionPlan(actual observedGatewayGraph) gatewayDeletionPlan
 		return plan
 	}
 	for _, route := range actual.routes {
+		appendWeightedTCPDeletionSteps(&plan, route)
 		if route.pool == nil {
 			continue
 		}
@@ -312,10 +331,11 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 		return nil
 	}
 	readyListeners := make(map[int]listeners.Listener, len(readyPorts))
-	pending := false
+	weighted := actual.protocol == cloud.ListenerProtocolTCP && hasTCPWeightedReadback(actual)
+	pending := weighted && (actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE" || actual.loadBalancer.ProvisioningStatus == "ERROR")
 	for _, listener := range actual.scopedListeners {
 		switch {
-		case strings.HasPrefix(listener.ProvisioningStatus, "PENDING_"):
+		case strings.HasPrefix(listener.ProvisioningStatus, "PENDING_"), weighted && listener.ProvisioningStatus == "ERROR":
 			pending = true
 		case listener.ProvisioningStatus != "ACTIVE":
 			return nil
@@ -334,6 +354,10 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 	for index, route := range desired.routes {
 		ports := route.spec.ScopedListenerPorts
 		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure || len(ports) == 0 {
+			continue
+		}
+		if len(route.spec.TCPWeightedBackends) != 0 {
+			deferred[index] = p.proveServingTCPWeightedRoute(ctx, desired, actual, route, readyListeners, inventory)
 			continue
 		}
 		poolID := readyListeners[ports[0]].DefaultPoolID
@@ -412,6 +436,21 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 		}
 		node := desired.spec.Routes[index]
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
+		if len(route.spec.TCPWeightedBackends) != 0 || len(observed.tcpParts) != 0 {
+			gateway := result.Gateway.Outcome
+			if allTCPWeightedPortsReady(route, result.Gateway.ScopedListenerReadyPorts) {
+				gateway = cloud.ReadyOutcome()
+			}
+			routeResult = p.weightedTCPRouteResult(route, observed, gateway)
+			if weighted := route.tcpWeightedPlan; weighted.step != nil {
+				backend = append(backend, *weighted.step)
+			}
+			result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: node.Spec.Identity, Result: routeResult})
+			if routeResult.Outcome.State == cloud.OutcomeProgressing {
+				result.Outcome = routeResult.Outcome
+			}
+			continue
+		}
 		switch node.Disposition {
 		case cloud.GraphPreserve:
 			if len(node.RetainListenerPorts) == 0 || observed.pool == nil {
@@ -532,7 +571,7 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 			remove = append(remove, graphMutation{kind: graphDeleteChild, deletion: listenerDeletionStep(listener.ID), message: "Removing an obsolete Octavia listener"})
 		case listener.ProvisioningStatus == "ERROR":
 			failed = listener
-		case ensureGateway && !listener.AdminStateUp && (listener.DefaultPoolID == "" || readyByPool[listener.DefaultPoolID]):
+		case ensureGateway && !listener.AdminStateUp && tcpWeightedListenerCanRestore(desired, actual, *listener) && (listener.DefaultPoolID == "" || readyByPool[listener.DefaultPoolID]):
 			restore = append(restore, graphMutation{kind: graphEnableListener, listenerID: listener.ID, message: "Enabled Octavia listener"})
 		}
 	}
