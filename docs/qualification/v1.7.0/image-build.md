@@ -1,6 +1,10 @@
 # Reproduce the Hibiscus development image
 
-This controller can retire HTTPRoute policies after regional confirmation of the listener closure. [Build record](image.json) · [Redirect case reports](provider/closed-listener-policy-removal/README.md)
+The signed controller preserves weighted forwarding and proportional discard on dedicated IPv4 NodePort listeners when the operator enables the feature. [Build record](image.json) · [Local NodePort traffic](provider/udp-nodeport-packet-drop/README.md)
+
+The shared Istio Pilot supports independently enabled client HTTP and gRPC routes on Services. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-aba071b9416112dd29e5852664913d3470013202/image.json) · [Waypoint, XMesh and registered mesh qualification](provider/mesh-consumer-service-routes/README.md)
+
+This controller can retire HTTPRoute policies after regional confirmation of the listener closure. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0e729b171594b058f09783aede6b7221eb62e85d/image.json) · [Redirect case reports](provider/closed-listener-policy-removal/README.md)
 
 The Experimental XMesh reporter recognizes the producer and consumer ServiceImport pilots. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-c624b69a60e82da95597ad856b63ef3efd5b1044/image.json) · [Namespace-scoped imported Service routing](provider/mesh-consumer-service-imports/README.md)
 

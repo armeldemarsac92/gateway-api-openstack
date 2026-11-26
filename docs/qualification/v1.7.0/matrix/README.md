@@ -23,6 +23,13 @@ On one shared HTTP listener, each local channel withdrew a retiring HTTPRoute an
 
 ## Evidence boundary
 
+The shared Pilot `329c846d3de8` ran in local kind clusters. The registered suite used reconcilers built from signed controller source `aba071b94161` with a recording provider.
+
+- Standard. Go cases recorded 23 passed, 0 failed, 0 skipped, 0 incomplete, 0 unrun. Upstream passed/failed/skipped — MESH-HTTP Core success (7/0/0), MESH-HTTP Extended success (7/0/0), MESH-GRPC Core success (3/0/0), MESH-GRPC Extended no eligible cases. [Upstream YAML](../provider/mesh-consumer-service-routes/mesh-standard-profiles.yaml)
+- Experimental. Go cases recorded 23 passed, 0 failed, 0 skipped, 0 incomplete, 0 unrun. Upstream passed/failed/skipped — MESH-HTTP Core success (7/0/0), MESH-HTTP Extended success (7/0/0), MESH-GRPC Core success (3/0/0), MESH-GRPC Extended no eligible cases. [Upstream YAML](../provider/mesh-consumer-service-routes/mesh-experimental-profiles.yaml)
+
+The profile YAML covers 16 unique cases. The registered run also selects seven cases outside that profile union. [Operator probes, XMesh rollout and fixture scope](../provider/mesh-consumer-service-routes/README.md) · [Per-case results and report comparisons](../provider/mesh-consumer-service-routes/registered-mesh.json)
+
 With the Amphora closed-listener option enabled, the controller `454c1541` and Octavia `460570fb` pair passed 51/63 Standard and 57/64 Experimental GATEWAY-HTTP Extended cases locally. The redirect port-and-scheme case passed on both channels. [Original reports, case changes and runtime settings](../common-gateway/454c1541-460570fb/README.md)
 
 A local Standard run on the same source pair used the ten-minute operator resync default and passed 60 of the same 63 GATEWAY-HTTP Extended cases, with 3 failures and zero skips. The suite and fixture each exited with 1. [Case changes, original report and measurements](../common-gateway/454c1541-460570fb/README.md#standard-http-extended-with-the-operator-resync-default)
@@ -33,7 +40,7 @@ The signed controller `597d921f` and Octavia `300b2638` source pair passed all 4
 
 The same revisions passed 40/40 Experimental GATEWAY-HTTP Core cases and 53/64 Experimental Extended cases. [Experimental reports](../common-gateway/597d921f-300b2638/README.md#experimental-http-with-default-parallelism)
 
-On Standard and Experimental, all 17 Core and 13 Extended gRPC cases passed. TCP passed all 20 Core and 11 Extended cases on each channel. Standard TLS Core passed all 21 cases. In each of the four gRPC and TCP Extended runs, the suite exited with 0 and the fixture exited with 1. The fixture did not record an allocation attempt for the unusable IP in `GatewayStaticAddresses`. [Per-channel results](../common-gateway/597d921f-300b2638/protocols.md)
+The 18 local gRPC, TCP, TLS and UDP selections recorded 264 passed, 0 failed and 0 skipped case entries across both channels. Cases recur across selections. All 18 upstream selections exited successfully. In 8 Extended selections, the fixture did not observe an allocation attempt for the unusable address in `GatewayStaticAddresses`. [Per-channel results](../common-gateway/597d921f-300b2638/protocols.md)
 
 With the newer signed source pair, the isolated redirect-port-and-scheme case passed on both channels with revision-checked cleanup enabled. [Redirect traffic and policy removal](../provider/closed-listener-policy-removal/README.md)
 
@@ -57,7 +64,7 @@ The complete Standard GATEWAY-HTTP Core run on controller `b2d3e2179102` passed 
 
 Controller `04bb56309d8a` passed `GatewaySecretMissingReferenceGrant` on Standard and Experimental with listener isolation enabled. A separate Standard kind run on this image ran four HTTP Core cases. The certificate permission case passed. `HTTPRouteHeaderMatching`, `HTTPRouteMatching` and `HTTPRouteServiceTypes` failed within their upstream deadlines. The other 36 HTTP Core cases were skipped in this run. [Official four-case report](../provider/unified-http-core-04bb56309d8a-standard-targeted.yaml) · [Listener conditions and separate timing observations](../provider/shared-https-secret-grant-evidence/receipt.json)
 
-The original stock HTTP and UDP Core campaigns stopped during HTTPS setup. The two mesh Core campaigns on plain Kubernetes completed with failures. With workloads enrolled in Istio ambient, both mesh Core profiles passed locally. The Hibiscus consumer-route pilot passed all 23 registered mesh cases on each channel. All 14 profile and channel combinations still await a run on a deployed Hibiscus region. [Stock campaigns](../complete-local-profiles.md) · [Waypoint traffic](../provider/ambient-waypoint.md) · [Regional runs](../live-runs.md)
+The original stock HTTP and UDP Core campaigns stopped during HTTPS setup. The two mesh Core campaigns on plain Kubernetes completed with failures. With workloads enrolled in Istio ambient, both mesh Core profiles passed locally. The earlier Hibiscus consumer-route Pilot passed all 23 registered mesh cases on each channel. All 14 profile and channel combinations still await a run on a deployed Hibiscus region. [Stock campaigns](../complete-local-profiles.md) · [Waypoint traffic](../provider/ambient-waypoint.md) · [Regional runs](../live-runs.md)
 
 The API contains contracts beyond the registered cases. The field catalog describes their source declarations. The individual qualification records identify the scopes exercised, the components simulated and the outstanding behavior. [Unflagged contracts](unflagged-contracts.md) · [Stock provider analysis](../provider/provider-feasibility.md) · [Gateway API license](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/LICENSE)
 

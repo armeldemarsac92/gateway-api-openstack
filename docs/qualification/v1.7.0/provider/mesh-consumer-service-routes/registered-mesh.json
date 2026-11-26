@@ -1,0 +1,440 @@
+{
+  "qualificationBinding": {
+    "sourcePackageSHA256": "b388ea7ced2fe3cace48b28197e9ef464cfdbe9ea2454692f2806a813bbd5795",
+    "packageReceiptSHA256": "6eb6494224f9d6f3c43f37cd7a4e08cd22bb6b351b9056a6e898d478eb3c7d12",
+    "packageSignatureSHA256": "290da2a51917506d07ff4529e2598ab9640b61443e1a371e9bbd17a08e1940c6",
+    "pilotSource": "329c846d3de8c2b06e5a238d59bc7aa1ece8d4ca",
+    "pilotTree": "2e647d504d82229533e40bd1d2681d755f2e4bcc",
+    "buildBranch": "hibiscus/build-istio-serviceimport-parents",
+    "buildRun": 45821289725,
+    "manifestDigest": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+    "controllerSource": "aba071b9416112dd29e5852664913d3470013202",
+    "controllerTree": "779ecb381ef208e6ce0cbfa5aeab13d6fc2dd1c9",
+    "renderReceiptSHA256": "ccea98d4093d81575655c07db57f550c128860544796fa51537fb90d65da3589",
+    "profiles": {
+      "standard": {
+        "arguments": [
+          "--grpc-consumer-routes"
+        ],
+        "renderSHA256": "3cd3520829eb3a588f5f671eec0222b300e8cc5b887537cd39c92d065030ebbe",
+        "expectedEnv": {
+          "PILOT_ENABLE_AMBIENT": "true",
+          "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+          "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": null,
+          "ENABLE_MCS_HOST": null
+        }
+      },
+      "experimental": {
+        "arguments": [
+          "--service-import-parents",
+          "--grpc-consumer-routes"
+        ],
+        "renderSHA256": "9ee130c76e73857fa8b420450f247a5021147835c80bc97e21171bcd706c20fc",
+        "expectedEnv": {
+          "PILOT_ENABLE_AMBIENT": "true",
+          "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+          "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": "true",
+          "ENABLE_MCS_HOST": "false"
+        }
+      }
+    }
+  },
+  "controllerSource": "aba071b9416112dd29e5852664913d3470013202",
+  "runnerSHA256": "dec01b399dd32c0dc4c6764a602b3adbf2ab527c2ed85fb46db3eed0af710717",
+  "pilotManifest": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "expectedCases": [
+    "MeshBasic",
+    "MeshConsumerRoute",
+    "MeshFrontend",
+    "MeshFrontendHostname",
+    "MeshGRPCRouteRequestHeaderModifier",
+    "MeshGRPCRouteWeight",
+    "MeshHTTPRoute303Redirect",
+    "MeshHTTPRoute307Redirect",
+    "MeshHTTPRoute308Redirect",
+    "MeshHTTPRouteBackendRequestHeaderModifier",
+    "MeshHTTPRouteMatching",
+    "MeshHTTPRouteNamedRule",
+    "MeshHTTPRouteQueryParamMatching",
+    "MeshHTTPRouteRedirectHostAndStatus",
+    "MeshHTTPRouteRedirectPath",
+    "MeshHTTPRouteRedirectPort",
+    "MeshHTTPRouteRequestHeaderModifier",
+    "MeshHTTPRouteRewritePath",
+    "MeshHTTPRouteSchemeRedirect",
+    "MeshHTTPRouteSimpleSameNamespace",
+    "MeshHTTPRouteWeight",
+    "MeshPorts",
+    "MeshTrafficSplit"
+  ],
+  "caseParallelism": "serial",
+  "resourceDeletionTimeoutSeconds": 120,
+  "suiteProcessTimeoutMinutes": 15,
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "exits": {
+        "install": 0,
+        "pilot-before": 0,
+        "suite": 0,
+        "waypoint": 0,
+        "pilot-after": 0,
+        "cleanup": 0,
+        "workload": 0,
+        "collect": 0,
+        "delete": 0,
+        "guest": 0
+      },
+      "runnerSHA256": "dec01b399dd32c0dc4c6764a602b3adbf2ab527c2ed85fb46db3eed0af710717",
+      "samePilotBeforeAndAfter": true,
+      "importedNodes": {
+        "control-plane": true,
+        "worker": true
+      },
+      "waypoint": [
+        "1",
+        "1",
+        "service-waypoint-d7bbb548c-5vksk",
+        "e298c640-d43c-41bd-8714-7d5c0b9ee936",
+        "docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb"
+      ],
+      "liveBundleMatches": true,
+      "clusterRemoved": true,
+      "evidenceSHA256": {
+        "etcd.log": "f23f0177ae6d4b7017fcaacd265360c0a7aa662f35571247acd86b32f6675ba7",
+        "guest.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "delete.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "delete.log": "21a40a38c9d775e1f1fb8e54f74c5411a44ad501b6d60c799ebd3d3c0597c8e6",
+        "pilot-runtime-after-suite.json": "a26b17e69b083a18f2aaceb9769ebb30fc69a272c22c854670fd721c1abe8ef5",
+        "guest-inotify.log": "80ddd257d9973cc0413cefc6898b175e95fd413d5b4239d3b37b34b8d8e626bf",
+        "pilot-after.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "node-import-worker.log": "c2c3871bce771a475910a922113060447f955932ecef8901c6e06390f97564fc",
+        "pilot-version-after-suite.txt": "4fa2f564fb54fc8ae24f7dc29c9ca0fc18b2508211a9a8b528bd6b27371f40c2",
+        "pilot-after.log": "ec59088ff7b099af27a2a2574fb99b568bb657376a71cdc3b4731f4816c20271",
+        "install.log": "ccd0893025aeae4dbcd744cdcf37aef5950ab0f1ebfbf186b1ee68eb79cdfc9d",
+        "inputs.json": "6f8199e684eb3fdf10e7d02cec3a0bbbf49df1837a0a3fcee944252517507108",
+        "guest-shutdown.log": "92b71638d057c0b81720075667ab72b9c41bc4515ff7a61a681944f1eab5c46c",
+        "workload.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "pilot-runtime-initial.json": "a26b17e69b083a18f2aaceb9769ebb30fc69a272c22c854670fd721c1abe8ef5",
+        "workload.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "pilot-before.log": "52e5e7a18870ee5ce86e9a5e00313b7b4f74c1d4e0dbbb6ddcdd5be103776244",
+        "waypoint.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "collect.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "suite.log": "f95b3418aba6d9e5d2cbed26551865ca32107a94790ac6e836f981296fdfda73",
+        "guest-node-load.log": "cf0894afe0f3fdc8b73564d72cc1e14fdd5d6577ecc94f6bad90c1db5cfd7083",
+        "pilot-version-initial.txt": "4fa2f564fb54fc8ae24f7dc29c9ca0fc18b2508211a9a8b528bd6b27371f40c2",
+        "cleanup.log": "73c4d40923c09634faa01f4b1e719ae74869c9deab539925502899c546840d16",
+        "node-import-control-plane.log": "57569cbafe3b711ec7798431c27c3bcb3718170892d988eae286566eb4cce936",
+        "guest.private.log": "5ddf7738b0657ecec7efdf7d88cdf97a6fd64cb917f6244c116f132046af5faa",
+        "official-inputs-check.log": "aa44c2a6e0f69c809b7614f1445ceef84af83fca7d37465eb9ac8d2748b1cec9",
+        "cleanup.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "install.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "suite.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "pilot-before.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "waypoint.log": "74e9e7dbe668f1f6040d5a45c8cade2ea5eb23e0d88f2da43d67ae7b0429dc45",
+        "crds.log": "5224d97e220a17eba4534c2e08a460f1e353f70e2f8aea1ec05d76c8d0b52dd6",
+        "guest-node-mount.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "operatorInstall": {
+        "arguments": [
+          "--grpc-consumer-routes"
+        ],
+        "renderSHA256": "3cd3520829eb3a588f5f671eec0222b300e8cc5b887537cd39c92d065030ebbe",
+        "expectedEnv": {
+          "PILOT_ENABLE_AMBIENT": "true",
+          "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+          "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": null,
+          "ENABLE_MCS_HOST": null
+        },
+        "installer": "integrations/istio-ambient/install.sh",
+        "installerSHA256": "beb9f24dc6440af1a03840edc64520d846bffc795e8dcfe68e5dcbb0fa7de34d",
+        "chartArchivesSHA256": {
+          "ztunnel-1.31.0.tgz": "f24c1bccc0a92c2ce11bf95c1cf6423834c007c94057a8c7e69ac25f7ae7c8cc",
+          "base-1.31.0.tgz": "c4e5e2f0feee1016a3e6cb342e0d457ca2098d74c7d36b0dae60d8ab5b934909",
+          "cni-1.31.0.tgz": "1530c595ee1861aab69b4df300cb301b9b6fd52cf0b7d09f1ada5edfa50b9865",
+          "istiod-1.31.0.tgz": "df73f8fba27f2ae51c90f9483c5298e164b5241fcd349a04375df32d7f9fe2e7"
+        },
+        "pilotImage": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+        "pilotArchiveSHA256": "d18aa65857462db51e6a495531abe684e5d908f16d0d1cee70e3e5ca3a15700a"
+      },
+      "suite": {
+        "complete": true,
+        "counts": {
+          "PASS": 23
+        },
+        "cases": {
+          "MeshBasic": "PASS",
+          "MeshConsumerRoute": "PASS",
+          "MeshFrontend": "PASS",
+          "MeshFrontendHostname": "PASS",
+          "MeshGRPCRouteRequestHeaderModifier": "PASS",
+          "MeshGRPCRouteWeight": "PASS",
+          "MeshHTTPRoute303Redirect": "PASS",
+          "MeshHTTPRoute307Redirect": "PASS",
+          "MeshHTTPRoute308Redirect": "PASS",
+          "MeshHTTPRouteBackendRequestHeaderModifier": "PASS",
+          "MeshHTTPRouteMatching": "PASS",
+          "MeshHTTPRouteNamedRule": "PASS",
+          "MeshHTTPRouteQueryParamMatching": "PASS",
+          "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+          "MeshHTTPRouteRedirectPath": "PASS",
+          "MeshHTTPRouteRedirectPort": "PASS",
+          "MeshHTTPRouteRequestHeaderModifier": "PASS",
+          "MeshHTTPRouteRewritePath": "PASS",
+          "MeshHTTPRouteSchemeRedirect": "PASS",
+          "MeshHTTPRouteSimpleSameNamespace": "PASS",
+          "MeshHTTPRouteWeight": "PASS",
+          "MeshPorts": "PASS",
+          "MeshTrafficSplit": "PASS"
+        },
+        "parent": [
+          "PASS"
+        ],
+        "timedOut": false,
+        "recordedGatewayGraphOperations": [
+          0
+        ],
+        "upstreamReportMatches": true
+      },
+      "upstreamReportPath": "mesh-standard-profiles.yaml",
+      "goAndFixtureOutcome": "PASS",
+      "upstreamProfiles": {
+        "MESH-HTTP": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            },
+            "eligible": 7,
+            "failedTests": [],
+            "skippedTests": [],
+            "matchesGo": true
+          },
+          "extended": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            },
+            "eligible": 7,
+            "failedTests": [],
+            "skippedTests": [],
+            "matchesGo": true
+          }
+        },
+        "MESH-GRPC": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 3,
+              "Skipped": 0
+            },
+            "eligible": 3,
+            "failedTests": [],
+            "skippedTests": [],
+            "matchesGo": true
+          },
+          "extended": {
+            "result": "no-eligible-cases",
+            "matchesGo": true,
+            "eligible": 0
+          }
+        }
+      },
+      "releaseEligible": true
+    },
+    "experimental": {
+      "channel": "experimental",
+      "exits": {
+        "install": 0,
+        "pilot-before": 0,
+        "suite": 0,
+        "waypoint": 0,
+        "pilot-after": 0,
+        "cleanup": 0,
+        "workload": 0,
+        "collect": 0,
+        "delete": 0,
+        "guest": 0
+      },
+      "runnerSHA256": "dec01b399dd32c0dc4c6764a602b3adbf2ab527c2ed85fb46db3eed0af710717",
+      "samePilotBeforeAndAfter": true,
+      "importedNodes": {
+        "control-plane": true,
+        "worker": true
+      },
+      "waypoint": [
+        "1",
+        "1",
+        "service-waypoint-d7bbb548c-g4hfq",
+        "00f9b796-e8e1-493f-bd5f-11beb92aaf2f",
+        "docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb"
+      ],
+      "liveBundleMatches": true,
+      "clusterRemoved": true,
+      "evidenceSHA256": {
+        "etcd.log": "f23f0177ae6d4b7017fcaacd265360c0a7aa662f35571247acd86b32f6675ba7",
+        "guest.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "delete.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "delete.log": "dfe78ec4dcf3c9fd1336334acc54a1a458a684b7f037110300783a40f8d993b0",
+        "pilot-runtime-after-suite.json": "3409d5329e2114cc51ad438ef5a42ae139444a086699574b0e44f517497b2ec3",
+        "guest-inotify.log": "80ddd257d9973cc0413cefc6898b175e95fd413d5b4239d3b37b34b8d8e626bf",
+        "pilot-after.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "node-import-worker.log": "58f7ea8d7d360aaffad119c20e930bbb4926172de285e7495a62d82a15509b0f",
+        "pilot-version-after-suite.txt": "4fa2f564fb54fc8ae24f7dc29c9ca0fc18b2508211a9a8b528bd6b27371f40c2",
+        "pilot-after.log": "0d2e9a7d274f4d219330a6cc1ddb7a794c8d87cf7de71eedd8a5a6f82587df14",
+        "install.log": "b59bf36163a602156b82a5be74d42de2c6de99f441a3745aa97efeabc524ac23",
+        "inputs.json": "bd99411cc7a66e44a7505d7cc82fdb6357d88a4352788a951bcc42f208640cc3",
+        "guest-shutdown.log": "938e3cffb90913dab77c8ce84d3faa5f60a2b11e64793fa2bf6f05a680c8c1d2",
+        "workload.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "pilot-runtime-initial.json": "3409d5329e2114cc51ad438ef5a42ae139444a086699574b0e44f517497b2ec3",
+        "workload.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "pilot-before.log": "a448fbd546005cb0bd6f947ae0ed5edf68ca27d1a85c4e2e1e7d6147e661d548",
+        "waypoint.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "collect.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "suite.log": "d0c299553f79aab7e399846daaa5be651dbe401928bfd824efb8d0a968e0dcad",
+        "guest-node-load.log": "cf0894afe0f3fdc8b73564d72cc1e14fdd5d6577ecc94f6bad90c1db5cfd7083",
+        "pilot-version-initial.txt": "4fa2f564fb54fc8ae24f7dc29c9ca0fc18b2508211a9a8b528bd6b27371f40c2",
+        "cleanup.log": "1e319aede2e4f1d2a8f4561dce89289531a29abd793eac0cd891addb431e9834",
+        "node-import-control-plane.log": "06d6223f91c3c65edfa52fd9e075394253d6a0bbafc001cf12a1cfcd16f519e4",
+        "guest.private.log": "87ade60b70c586810a988e3a56c99ed12f11da26df4e4b8d1786452838296b89",
+        "official-inputs-check.log": "aa44c2a6e0f69c809b7614f1445ceef84af83fca7d37465eb9ac8d2748b1cec9",
+        "cleanup.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "install.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "suite.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "pilot-before.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "waypoint.log": "1e8977a58e3214c94d58372712a7c5bfc4ad4626c30d13cf729cf823334ffa90",
+        "crds.log": "a7e5319abee5ea20a2b136de798649e0dbd030a231c74750822f9a3595a9ec04",
+        "guest-node-mount.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "operatorInstall": {
+        "arguments": [
+          "--service-import-parents",
+          "--grpc-consumer-routes"
+        ],
+        "renderSHA256": "9ee130c76e73857fa8b420450f247a5021147835c80bc97e21171bcd706c20fc",
+        "expectedEnv": {
+          "PILOT_ENABLE_AMBIENT": "true",
+          "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER": "false",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC": "true",
+          "PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST": null,
+          "PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE": "true",
+          "ENABLE_MCS_HOST": "false"
+        },
+        "installer": "integrations/istio-ambient/install.sh",
+        "installerSHA256": "beb9f24dc6440af1a03840edc64520d846bffc795e8dcfe68e5dcbb0fa7de34d",
+        "chartArchivesSHA256": {
+          "ztunnel-1.31.0.tgz": "f24c1bccc0a92c2ce11bf95c1cf6423834c007c94057a8c7e69ac25f7ae7c8cc",
+          "base-1.31.0.tgz": "c4e5e2f0feee1016a3e6cb342e0d457ca2098d74c7d36b0dae60d8ab5b934909",
+          "cni-1.31.0.tgz": "1530c595ee1861aab69b4df300cb301b9b6fd52cf0b7d09f1ada5edfa50b9865",
+          "istiod-1.31.0.tgz": "df73f8fba27f2ae51c90f9483c5298e164b5241fcd349a04375df32d7f9fe2e7"
+        },
+        "pilotImage": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+        "pilotArchiveSHA256": "d18aa65857462db51e6a495531abe684e5d908f16d0d1cee70e3e5ca3a15700a"
+      },
+      "suite": {
+        "complete": true,
+        "counts": {
+          "PASS": 23
+        },
+        "cases": {
+          "MeshBasic": "PASS",
+          "MeshConsumerRoute": "PASS",
+          "MeshFrontend": "PASS",
+          "MeshFrontendHostname": "PASS",
+          "MeshGRPCRouteRequestHeaderModifier": "PASS",
+          "MeshGRPCRouteWeight": "PASS",
+          "MeshHTTPRoute303Redirect": "PASS",
+          "MeshHTTPRoute307Redirect": "PASS",
+          "MeshHTTPRoute308Redirect": "PASS",
+          "MeshHTTPRouteBackendRequestHeaderModifier": "PASS",
+          "MeshHTTPRouteMatching": "PASS",
+          "MeshHTTPRouteNamedRule": "PASS",
+          "MeshHTTPRouteQueryParamMatching": "PASS",
+          "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+          "MeshHTTPRouteRedirectPath": "PASS",
+          "MeshHTTPRouteRedirectPort": "PASS",
+          "MeshHTTPRouteRequestHeaderModifier": "PASS",
+          "MeshHTTPRouteRewritePath": "PASS",
+          "MeshHTTPRouteSchemeRedirect": "PASS",
+          "MeshHTTPRouteSimpleSameNamespace": "PASS",
+          "MeshHTTPRouteWeight": "PASS",
+          "MeshPorts": "PASS",
+          "MeshTrafficSplit": "PASS"
+        },
+        "parent": [
+          "PASS"
+        ],
+        "timedOut": false,
+        "recordedGatewayGraphOperations": [
+          0
+        ],
+        "upstreamReportMatches": true
+      },
+      "upstreamReportPath": "mesh-experimental-profiles.yaml",
+      "goAndFixtureOutcome": "PASS",
+      "upstreamProfiles": {
+        "MESH-HTTP": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            },
+            "eligible": 7,
+            "failedTests": [],
+            "skippedTests": [],
+            "matchesGo": true
+          },
+          "extended": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            },
+            "eligible": 7,
+            "failedTests": [],
+            "skippedTests": [],
+            "matchesGo": true
+          }
+        },
+        "MESH-GRPC": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 3,
+              "Skipped": 0
+            },
+            "eligible": 3,
+            "failedTests": [],
+            "skippedTests": [],
+            "matchesGo": true
+          },
+          "extended": {
+            "result": "no-eligible-cases",
+            "matchesGo": true,
+            "eligible": 0
+          }
+        }
+      },
+      "releaseEligible": true
+    }
+  },
+  "launchFailures": {},
+  "execution": "This Go test binary from the signed controller source embeds the ingress reconcilers with a recording provider. A real enrolled waypoint served the mesh requests.",
+  "releaseEligible": true
+}

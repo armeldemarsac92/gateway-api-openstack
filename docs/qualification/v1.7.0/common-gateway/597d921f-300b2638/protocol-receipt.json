@@ -945,7 +945,87 @@
       "fixture": "native-haproxy",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 1,
+      "selectionSHA256": "294794e8c03c33e42a741b467ab675ae17b57017bb1977e78ed32b5b145d0f34",
+      "preflightSHA256": "aa81d7eab1bdeccaf525d96e96747a8cc1ed74c72638063d93153379678679c2",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T08:57:19+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-standard-extended-default.yaml",
+      "reportSHA256": "973b5c46b5ecdf8f429958652a4345cb9656783d3a4d99abe3c2fcb9d6105ac4",
+      "fixtureReceiptSHA256": "e7851be816ad919d9a439df07e9fef8d3765f8d302f6605d3b87b756e341a5cd",
+      "upstreamLogSHA256": "b52ab0c33b602e7e466110b783cc88c609692b1416f77767d50eec505243fae6",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 17,
+        "Skipped": 1
+      },
+      "selectedStatistics": {
+        "Passed": 17,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerMixedTerminationNotSupported"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            4148
+          ],
+          "unusableAddress": [
+            4156
+          ],
+          "usableAddress": [
+            4176
+          ],
+          "testPass": [
+            4694
+          ]
+        }
+      }
     },
     "15-tls-t": {
       "profile": "GATEWAY-TLS",
@@ -1007,7 +1087,59 @@
       "fixture": "native-haproxy",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 0,
+      "selectionSHA256": "f04f7915d46d85fd5b162c19fef7b56fe5ddd53853f55abed4ac6a521834f0a0",
+      "preflightSHA256": "ad1ca1b3d1db5e3620cb208a13a307feafacee69ccd0eb68f8083c195db18d70",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T09:34:04+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-standard-extended-terminate-only.yaml",
+      "reportSHA256": "9acbe8220ee3b895e54561c59c23f0072bf366f6ea7e7f6f3eb2a8920ce64d80",
+      "fixtureReceiptSHA256": "c3e851146a137e9456cd01fa0b7e181c884c7d8f08017c17ea58edf06290cde3",
+      "upstreamLogSHA256": "e0add4eb2d164b86d963c3451ab2b74cb87ed8f264077eeb882f6390be8d0e6a",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 2
+      },
+      "selectedStatistics": {
+        "Passed": 1,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerTerminateSupportedKinds",
+          "TLSRouteTerminateSimpleSameNamespace"
+        ]
+      }
     },
     "16-tls-c": {
       "profile": "GATEWAY-TLS",
@@ -1049,7 +1181,31 @@
       "fixture": "native-haproxy",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 0,
+      "selectionSHA256": "e3fcd46500af0649ee2b9969ecc84824beda816a5e2b140213c2fa7dc745c96f",
+      "preflightSHA256": "4b13cee3c19eefaa46e5d81eee4bac1e1fa518afc42fcf4c5c98bc6ab2467b34",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:08:15+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-experimental-core-default.yaml",
+      "reportSHA256": "b8b2909a9ea0773338f0f8d3261ad1ccdaeea8156737314c92510f444de528d8",
+      "fixtureReceiptSHA256": "2923449beaf310b80a373b0823544dd5b9d65aaa4bedd8af7be4eefcb9d7eb26",
+      "upstreamLogSHA256": "467427fe3d18e0b2bba5caf23add65f3d4e200011d9a9ddee679eea2765c2781",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
     },
     "17-tls-e": {
       "profile": "GATEWAY-TLS",
@@ -1124,7 +1280,87 @@
       "fixture": "native-haproxy",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 1,
+      "selectionSHA256": "71b25385e9fb0e59fb7cde54aca754b9a9212da1cca9a7ee62da8fb4b7f79dbd",
+      "preflightSHA256": "48159e9ecd4927eb2db0c93d48c05acfa68a96d49f3be0344505d7d4f99ee42d",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T13:42:24+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-experimental-extended-default.yaml",
+      "reportSHA256": "255737c5bf0ec0b4b06ac7fc3907caafec610c01736f3f667a82d8a027024b6d",
+      "fixtureReceiptSHA256": "bdd24ae58373c97b7901f0ab4ff15908e6606f7915f5ceee3627bd853c2bf97c",
+      "upstreamLogSHA256": "2cabef56bf1b346b6f9a687218a42cbf7c665de189e1504c09d6b2e1881fd440",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 17,
+        "Skipped": 1
+      },
+      "selectedStatistics": {
+        "Passed": 17,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerMixedTerminationNotSupported"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            4304
+          ],
+          "unusableAddress": [
+            4312
+          ],
+          "usableAddress": [
+            4337
+          ],
+          "testPass": [
+            5059
+          ]
+        }
+      }
     },
     "18-tls-t": {
       "profile": "GATEWAY-TLS",
@@ -1190,7 +1426,59 @@
       "fixture": "native-haproxy",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 0,
+      "selectionSHA256": "673778f15ca2712733c6871574965be7e2be3bc4176e34418bfa142b3a163252",
+      "preflightSHA256": "0862af691e2e3ae36ea303f6c4ba3ee31c105e638313330dc50152546926c098",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T13:44:28+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-experimental-extended-terminate-only.yaml",
+      "reportSHA256": "e6520a8c34a8e09b3f0dd8879c1dabe1f1d84beca7f3e7d81c9d2d5af331b4ae",
+      "fixtureReceiptSHA256": "b3f0cc31c8d38f4b28379678c49bf8fd7951d76bec6400debb1986451cdcdb08",
+      "upstreamLogSHA256": "e34711006a054c926c9338e5495d0771a57f41741d65acf50102ad8ae3f883fd",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 2
+      },
+      "selectedStatistics": {
+        "Passed": 1,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerTerminateSupportedKinds",
+          "TLSRouteTerminateSimpleSameNamespace"
+        ]
+      }
     },
     "19-udp-c": {
       "profile": "GATEWAY-UDP",
@@ -1245,7 +1533,31 @@
       "fixture": "native-keepalived-ipvs",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 0,
+      "selectionSHA256": "c053096843f4c613ff5cd4511f68066fb191b16945e203cc0754acd84579a480",
+      "preflightSHA256": "5c18c311d25ba8648c5992e6eb062f15b5eaddcf3421185714d5a322dd6e34cc",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:17:06+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-standard-core-default.yaml",
+      "reportSHA256": "7e37ce8a338d4caaf90baa507d8ef87c4f47413547808e2b7b4c206b0d3bbf0c",
+      "fixtureReceiptSHA256": "a7712e9d8850be86cef58abbff04e963787d0156202a055cfe0ef2030ede7a9b",
+      "upstreamLogSHA256": "702f2d6b4e1ae806d6787f7a7afff2db835a15d0df6f5d05b316cf3c8dd1b72c",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
     },
     "20-udp-e": {
       "profile": "GATEWAY-UDP",
@@ -1304,7 +1616,84 @@
       "fixture": "native-keepalived-ipvs",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 1,
+      "selectionSHA256": "3f9a20f37fc7f1d7a44d60dfe7c064c9e565cba0753b715267e18708e8f1cb78",
+      "preflightSHA256": "b2fd39f17914e03ec4aae75467759446074274ed0ee0f0af47f9345edbfb725c",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:20:08+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-standard-extended-default.yaml",
+      "reportSHA256": "ff031c4bb88aa8e570c500c99b8e6d0ed88c76431f71449f954e73e51463d670",
+      "fixtureReceiptSHA256": "5dc510550e17bf1e66bf1eea3bf1b6fcf3556f72bdc9a49a6531b2ccd226ff64",
+      "upstreamLogSHA256": "aacebd7af091614dcbe9674fe9c116b862edb1c8821fc212d630f62cb617c9f6",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 11,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "UDPRoute",
+          "UDPRouteInvalidBackendRefNonexistent",
+          "UDPRouteInvalidCrossNamespaceBackendRef",
+          "UDPRouteMultipleRoutesAttachment",
+          "UDPRouteNotAllowedByListeners",
+          "UDPRouteParentRefAttachAllListeners",
+          "UDPRouteParentRefPortAndSectionName",
+          "UDPRouteReferenceGrant",
+          "UDPRouteWeightedRouting"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            1667
+          ],
+          "unusableAddress": [
+            1672
+          ],
+          "usableAddress": [
+            1676
+          ],
+          "testPass": [
+            2236
+          ]
+        }
+      }
     },
     "21-udp-c": {
       "profile": "GATEWAY-UDP",
@@ -1359,7 +1748,31 @@
       "fixture": "native-keepalived-ipvs",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 0,
+      "selectionSHA256": "71d1faccf4a8da6c7309bac8f9a1bcaeac44a0a9b4013adf453735077867ca2f",
+      "preflightSHA256": "5202260876bb1f0c4d3528c0785f16aff21814fc904163917130a1211fad918f",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:28:04+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-experimental-core-default.yaml",
+      "reportSHA256": "f768055b57c03a0dd64c8959c0961d0704279eb12437151548e810bebc4fc7f5",
+      "fixtureReceiptSHA256": "8462157151d13ec0aee66479d30a1ba73e5f13230438289ea27aaec6258e1e5b",
+      "upstreamLogSHA256": "e9365baf8bc1128a4192886462ef5c709f67900b40774a5fa203780e29ec9a3f",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
     },
     "22-udp-e": {
       "profile": "GATEWAY-UDP",
@@ -1422,7 +1835,84 @@
       "fixture": "native-keepalived-ipvs",
       "defaultSuiteParallelism": true,
       "caseTimeoutOverrides": {},
-      "state": "pending"
+      "fixtureExit": 1,
+      "selectionSHA256": "ad0ff575dcafdaa8e9b75265f08a19d2c76a8133afa8986583d261b4ef6dcf5c",
+      "preflightSHA256": "c75b10b5a604110b2b02ef19a7b044359f00ab355753ad81eebc1a523195dda3",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:37:10+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-experimental-extended-default.yaml",
+      "reportSHA256": "61713c11530473fecc2a7610dde30ae16e987d8c1dfe3e35b589ea20bcc63f13",
+      "fixtureReceiptSHA256": "f8837eff95f4a4066550b79135ae630424bcae8162f915fb3fcbb3d867fc87b5",
+      "upstreamLogSHA256": "9ebf20b70f82af0dcfe8f9e8b996e96f4c5aa3d0cf9629ad29b72f8d79b1268b",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 11,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "UDPRoute",
+          "UDPRouteInvalidBackendRefNonexistent",
+          "UDPRouteInvalidCrossNamespaceBackendRef",
+          "UDPRouteMultipleRoutesAttachment",
+          "UDPRouteNotAllowedByListeners",
+          "UDPRouteParentRefAttachAllListeners",
+          "UDPRouteParentRefPortAndSectionName",
+          "UDPRouteReferenceGrant",
+          "UDPRouteWeightedRouting"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            2128
+          ],
+          "unusableAddress": [
+            2131
+          ],
+          "usableAddress": [
+            2137
+          ],
+          "testPass": [
+            2442
+          ]
+        }
+      }
     }
   }
 }
