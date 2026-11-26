@@ -1,6 +1,6 @@
 # Reproduce the Hibiscus development image
 
-Producer HTTPRoutes can attach to an enrolled ServiceImport through the opt-in ambient pilot. [Build record](image.json) · [Waypoint responses](provider/ambient-service-import-parents/README.md)
+Producer HTTPRoutes can attach to an enrolled ServiceImport through the opt-in ambient pilot. [Build record](image.json) · [Waypoint responses and port eligibility](provider/ambient-service-import-parents/README.md)
 
 TCPRoute and UDPRoute can forward to ServiceImport endpoints. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-71d946b555e2780793ecdca99592d5da7f5db02a/image.json) · [Connection and datagram counts](provider/transport-service-imports/README.md)
 
