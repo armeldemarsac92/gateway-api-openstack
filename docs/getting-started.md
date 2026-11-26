@@ -247,6 +247,8 @@ With the v1.7.0 Experimental bundle and `--gateway-api-channel=experimental`, an
 
 Check `DefaultGateway=True` on the Gateway and the conditions in `status.parents` on the route. The API can report up to 32 parent entries across all controllers. Each listener counts its admitted routes even when a parent entry cannot fit. Changing a Gateway's scope to `None` withdraws its implicit attachment. Changing the route's setting to `None` withdraws all its implicit attachments. Explicit parents continue to use the listener selection in `spec.parentRefs`.
 
+On two local VIPs, disabling default attachment on one Gateway withdrew its HTTP policy while the other VIP continued serving. Changing listener namespace admission and restoring it moved traffic independently on that Gateway. [Experimental HTTP and TCP results and Standard comparison](qualification/v1.7.0/provider/default-gateways/receipt.json)
+
 ### Serve HTTP on two ports of one Gateway
 
 Use only plain HTTP listeners on a Gateway with several HTTP sections. Give each listener a distinct name. Ensure the frontend network and any referenced security groups admit both ports. The controller manages no rules in referenced groups.
@@ -340,6 +342,8 @@ By default, the controller withdraws forwarding for the whole route if any posit
 To expose more than one TCP port on this Gateway, configure every listener as TCP and give each a distinct name and port. Use one rule per TCPRoute. Standard and Experimental both support several explicit Gateway parents. Each Gateway attaches and programs the route independently on its own VIP. Experimental also supports default attachment. A Gateway-wide parent attaches to every eligible TCP listener. A parent with `sectionName`, `port` or both selects the exact matching listener. Each listener elects the oldest eligible route, breaking equal creation timestamps by namespace and name. A port with an unusable winning backend stays without forwarding until that route recovers or loses the listener election. A route that wins on multiple ports of one Gateway shares its pool across those ports. Verify that your VIP security group allows each port. Complete the controller rollout before adding the second port to an existing Gateway. After updating the Gateway or a route, check `Programmed=True` for the current generation on each Gateway and its selected listeners and check the route’s `<controller-domain>/Programmed` condition for each parent. Test a fresh connection to each port. [Enrollment and rollback](operator-recovery.md#multiport-tcp-upgrades)
 
 ### Forward TCP to an Experimental XBackend
+
+The local TCPRoute trial recorded binary echoes and connection closures during selector and readiness changes. [TCPRoute status and per-origin counts](qualification/v1.7.0/provider/tcproute-xbackend/README.md)
 
 Install the Gateway API v1.7.0 Experimental bundle, include the controller's `config/components/experimental` overlay, and pass `--gateway-api-channel=experimental`. Use a TCP Gateway with [Endpoint member mode and Unmanaged backend security](reference/class-configuration.md#direct-endpoint-members). The Amphora must reach the selected IPv4 Pod addresses on the XBackend port.
 

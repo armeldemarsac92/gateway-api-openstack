@@ -1,0 +1,349 @@
+{
+  "source": "598db990b3ba3ef2851f4e9cb319e12beb432eb2",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "598db990b3ba3ef2851f4e9cb319e12beb432eb2",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:ea16501f654beb2cd0df13125c32bffe78cb3dca32efff690a46f2d7771e52b3",
+    "configDigest": "sha256:76520a889cfc06a01e8afd367e33e16ab536b1e4eb96a2e6a37d1d189931ee64",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "c5f41cb91e613bab4ddc2501f841151dfbcc4b2147feef08427a1fb66ea6ac4b",
+    "managerSHA256": "ba909b92305d94ee69c7a3a7721dd184fff2954c3222dcdae859ec59f2033cf5",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "channel": "standard",
+  "scope": "isolated kind VM, local Octavia WSGI/SQLite, Barbican HTTPS and real HAProxy",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "conformanceExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "releaseBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "octavia": {
+    "filesVerified": 670,
+    "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+    "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+    "version": "19.0.1.dev92"
+  },
+  "octaviaLib": {
+    "filesVerified": 24,
+    "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+    "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+    "version": "3.12.1.dev21"
+  },
+  "haProxy": {
+    "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1"
+  },
+  "fixture": {
+    "amphoraCPUsPerLoadBalancer": 2,
+    "caseTimeoutOverrides": {},
+    "l7Batch": "installed Octavia ApplyL7PolicyActivation task dispatched from captured local API RPC; installed Amphora driver and real HAProxy",
+    "nativeFixtureSHA256": "db9264518869242b123de324971ebaf2bfd7c31016d42cea12e6e844438ce88e",
+    "pendingStatusProjection": "one transaction updates pending rows of the owning LB",
+    "publication": "render and validate real HAProxy; check new PID socket; drain old workers separately"
+  },
+  "coreReports": {
+    "targeted": {
+      "statistics": {
+        "Passed": 1,
+        "Failed": 2,
+        "Skipped": 37
+      },
+      "failedTests": [
+        "HTTPRouteHeaderMatching",
+        "HTTPRouteServiceTypes"
+      ],
+      "sha256": "bfe450071c17210e6b49c6e5db0c06521e0b1ee7c07d81032a352fd5e552e4af",
+      "caseTimeoutOverrides": {}
+    }
+  },
+  "targetedCases": {
+    "HTTPRouteHeaderMatching": {
+      "verdict": "FAIL",
+      "firstRequestAt": "2026-11-25T18:07:07.918634+01:00",
+      "firstRequestDeadline": "2026-11-25T18:07:37.918634+01:00",
+      "firstRoutedPublication": {
+        "at": "2026-11-25T17:07:40.202+00:00",
+        "configSHA256": "cd44d9ecc42e9146c96c651faedfa5e7cc3ce229bdd49bc393aa42eeaf088119",
+        "beforeFirstRequestDeadline": false,
+        "secondsAfterFirstRequest": 32.283
+      },
+      "initialRuleCreates": 7,
+      "groupedSubmissions": 1,
+      "subtests": {},
+      "lastConfigurationAtFirstRequestDeadline": {
+        "at": "2026-11-25T17:06:49.463+00:00",
+        "configSHA256": "51ce415b990d350d8875b9d7419c7f1069d36729d0da857d238503abcccfa2ee",
+        "routePools": 0,
+        "routePolicies": 0
+      }
+    },
+    "HTTPRouteMatching": {
+      "verdict": "PASS",
+      "firstRequestAt": "2026-11-25T18:08:30.672159+01:00",
+      "firstRequestDeadline": "2026-11-25T18:09:00.672159+01:00",
+      "firstRoutedPublication": {
+        "at": "2026-11-25T17:08:58.794+00:00",
+        "configSHA256": "9c6336f9693de670ef6acaf0d0fcb71492765e46107f90b6bba9d1271130aad6",
+        "beforeFirstRequestDeadline": true,
+        "secondsAfterFirstRequest": 28.122
+      },
+      "initialRuleCreates": 4,
+      "groupedSubmissions": 1,
+      "subtests": {
+        "PASS": 9
+      },
+      "lastConfigurationAtFirstRequestDeadline": {
+        "at": "2026-11-25T17:09:00.166+00:00",
+        "configSHA256": "dce683d1ad26d9bdd6e4b7262792e93327c8003a667cd38ef61ba6a8f76e2f5c",
+        "routePools": 2,
+        "routePolicies": 4
+      }
+    },
+    "HTTPRouteServiceTypes": {
+      "verdict": "FAIL",
+      "firstRequestAt": "2026-11-25T18:09:26.739136+01:00",
+      "firstRequestDeadline": "2026-11-25T18:09:56.739136+01:00",
+      "firstRoutedPublication": null,
+      "initialRuleCreates": 0,
+      "groupedSubmissions": 0,
+      "subtests": {
+        "FAIL": 3
+      },
+      "lastConfigurationAtFirstRequestDeadline": {
+        "at": "2026-11-25T17:09:03.332+00:00",
+        "configSHA256": "51ce415b990d350d8875b9d7419c7f1069d36729d0da857d238503abcccfa2ee",
+        "routePools": 0,
+        "routePolicies": 0
+      }
+    }
+  },
+  "confirmedGroups": [
+    {
+      "run": "targeted",
+      "submissionHTTPStatus": 204,
+      "enabledAndActiveReadbacks": 7,
+      "haProxyConfigSHA256": "cd44d9ecc42e9146c96c651faedfa5e7cc3ce229bdd49bc393aa42eeaf088119",
+      "policies": [
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "header-matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "targeted",
+      "submissionHTTPStatus": 204,
+      "enabledAndActiveReadbacks": 4,
+      "haProxyConfigSHA256": "9c6336f9693de670ef6acaf0d0fcb71492765e46107f90b6bba9d1271130aad6",
+      "policies": [
+        {
+          "route": "matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "REGEX",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            },
+            {
+              "type": "HTTP_HEADER_EXACT",
+              "comparison": "EQUAL_TO",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        },
+        {
+          "route": "matching",
+          "rules": [
+            {
+              "type": "PATH",
+              "comparison": "STARTS_WITH",
+              "enabled": true,
+              "invert": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "providerDifferencesFromPriorIsolatedRun": {
+    "haproxy": {
+      "candidate": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+      "isolatedBaseline": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde"
+    }
+  },
+  "targetedProviderOperations": {
+    "activatedConfigurations": 18,
+    "initialRuleCreates": 13,
+    "l7BatchApplied": 2,
+    "mutations": 127,
+    "restOperations": {
+      "DELETE healthmonitors 204": 7,
+      "DELETE l7policies 204": 13,
+      "DELETE members 204": 14,
+      "DELETE pools 204": 7,
+      "DELETE rules 204": 23,
+      "POST healthmonitors 201": 7,
+      "POST l7policies 201": 13,
+      "POST l7policy_activation 204": 2,
+      "POST listeners 201": 4,
+      "POST loadbalancers 201": 4,
+      "POST members 201": 14,
+      "POST pools 201": 7,
+      "PUT l7policies 200": 11,
+      "PUT listeners 200": 1
+    }
+  }
+}
