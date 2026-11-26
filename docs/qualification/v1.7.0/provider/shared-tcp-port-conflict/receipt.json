@@ -1,0 +1,318 @@
+{
+  "channel": "standard",
+  "boundary": "Isolated envtest API/etcd, synthetic EndpointSlice, Octavia REST and SQLite, installed Amphora HTTP handlers and renderer, real HAProxy and TCP sockets. Local adapters for Keystone, Neutron, worker completion, Amphora transport and service control.",
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+    "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+  },
+  "kubernetesVersion": "v1.36.2",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "octavia": {
+    "revision": "0e1cdf4b8599981fe7a617ef22e789cec438966f",
+    "version": "19.0.1.dev111",
+    "sha256": "0b2eaf8fcae2e6ced531259cb70273868bc2b526143939e934cc6814d25763cc",
+    "filesVerified": 676
+  },
+  "octaviaLib": {
+    "revision": "735564bb8701e13495cc79554170ab65ceb1a811",
+    "version": "3.12.1.dev24",
+    "sha256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b",
+    "filesVerified": 24
+  },
+  "schemas": {
+    "TCPRoute": "2580b6c8dd46fff2e35a9d005ebfd007b38d4b9ca538cbb787de8718b7068317"
+  },
+  "predecessor": {
+    "controller": {
+      "sourceRevision": "3713c168078895b2dcb1eae8ad3a1a83b19c785a",
+      "manifestDigest": "sha256:947b9c05e4f98b30adbf3e93eb7d9722d04cd606e1b3f7147f9816e4a8168a8b",
+      "configDigest": "sha256:c14baee648170f4e7e3972701e61094c55f59d1695d78df55ea63464344bdf55",
+      "managerSHA256": "23f6298e9a0dcf049e99ab1e5aa6eaaf432abb062004fa2b3b3e1eb163707cb3",
+      "ociArchiveSHA256": "c2b91b70da52fa2175ad4acd980021088c116d9caaf5a0d6b0ddf19b9bf6b006"
+    },
+    "rawReceiptSHA256": "0dbc1a645259a8b0320f790e6193bcb5145999ec4e5bdd9f75ee0d9e93bccd64",
+    "phases": {
+      "initial": {
+        "gatewayGeneration": 1,
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.30"
+          }
+        ],
+        "listeners": {
+          "control": {
+            "attachedRoutes": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        },
+        "routeGeneration": 1,
+        "routeConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        },
+        "sameRouteUIDGenerationAndSpec": true,
+        "statusAfterSeconds": 6.346,
+        "wireAfterSeconds": 6.512,
+        "loadBalancers": 1,
+        "portListeners": 1,
+        "servingHAProxyFrontends": 1,
+        "vipProbeOutcomes": {
+          "echo": 3
+        },
+        "vipProbePayloadsSeenByService": 3,
+        "directOriginEcho": true
+      },
+      "conflict": {
+        "gatewayGeneration": 2,
+        "gatewayConditions": {
+          "Accepted": "False/ListenersNotValid",
+          "Programmed": "False/Invalid"
+        },
+        "addresses": [],
+        "listeners": {
+          "control": {
+            "attachedRoutes": 0,
+            "conditions": {
+              "Accepted": "False/UnsupportedProtocol",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "False/Invalid"
+            }
+          },
+          "collision": {
+            "attachedRoutes": 0,
+            "conditions": {
+              "Accepted": "False/UnsupportedValue",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "False/Invalid"
+            }
+          }
+        },
+        "routeGeneration": 1,
+        "routeConditions": {
+          "Accepted": "False/UnsupportedValue",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/UnsupportedValue"
+        },
+        "sameRouteUIDGenerationAndSpec": true,
+        "statusAfterSeconds": 0.204,
+        "wireAfterSeconds": 3.963,
+        "loadBalancers": 0,
+        "portListeners": 0,
+        "servingHAProxyFrontends": 0,
+        "vipProbeOutcomes": {
+          "refused": 3
+        },
+        "vipProbePayloadsSeenByService": 0,
+        "directOriginEcho": true,
+        "firstProbeAfterStatus": {
+          "seconds": 0.204,
+          "outcome": "echo",
+          "serviceSawPayload": 1
+        }
+      },
+      "restored": {
+        "gatewayGeneration": 3,
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.31"
+          }
+        ],
+        "listeners": {
+          "control": {
+            "attachedRoutes": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        },
+        "routeGeneration": 1,
+        "routeConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        },
+        "sameRouteUIDGenerationAndSpec": true,
+        "statusAfterSeconds": 4.498,
+        "wireAfterSeconds": 4.578,
+        "loadBalancers": 1,
+        "portListeners": 1,
+        "servingHAProxyFrontends": 1,
+        "vipProbeOutcomes": {
+          "echo": 3
+        },
+        "vipProbePayloadsSeenByService": 3,
+        "directOriginEcho": true
+      }
+    }
+  },
+  "candidate": {
+    "controller": {
+      "sourceRevision": "0cc92b4ab3ea59ec2f9211a4853ca6901b5872f2",
+      "manifestDigest": "sha256:3004d1a2f78d58df2fed23800a7d65f332d3c0bf45fb3e948a2d9c62797a3452",
+      "configDigest": "sha256:10bfb79f72d91ff81b503862b8b52ef8900b79a063aec55403cfd3e4e8f8a5a4",
+      "managerSHA256": "1d8e16eb1ed586e61f382c32395853c163f8efa334d32e3b546e57c08397519c",
+      "ociArchiveSHA256": "4ff76a4bc36d6877f7b8cee2be594ef4f90c2a330423ff5c04494a753d319d47"
+    },
+    "rawReceiptSHA256": "9730c4469a674333e05d465ab6309746e9175ef5631daf4a5e639d835d1bfd92",
+    "phases": {
+      "initial": {
+        "gatewayGeneration": 1,
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.30"
+          }
+        ],
+        "listeners": {
+          "control": {
+            "attachedRoutes": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        },
+        "routeGeneration": 1,
+        "routeConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        },
+        "sameRouteUIDGenerationAndSpec": true,
+        "statusAfterSeconds": 5.613,
+        "wireAfterSeconds": 5.811,
+        "loadBalancers": 1,
+        "portListeners": 1,
+        "servingHAProxyFrontends": 1,
+        "vipProbeOutcomes": {
+          "echo": 3
+        },
+        "vipProbePayloadsSeenByService": 3,
+        "directOriginEcho": true
+      },
+      "conflict": {
+        "gatewayGeneration": 2,
+        "gatewayConditions": {
+          "Accepted": "False/ListenersNotValid",
+          "Programmed": "False/Invalid"
+        },
+        "addresses": [],
+        "listeners": {
+          "control": {
+            "attachedRoutes": 0,
+            "conditions": {
+              "Accepted": "False/ProtocolConflict",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "True/ProtocolConflict",
+              "Programmed": "False/Invalid"
+            }
+          },
+          "collision": {
+            "attachedRoutes": 0,
+            "conditions": {
+              "Accepted": "False/ProtocolConflict",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Programmed": "False/Invalid",
+              "Conflicted": "True/ProtocolConflict"
+            }
+          }
+        },
+        "routeGeneration": 1,
+        "routeConditions": {
+          "Accepted": "False/UnsupportedValue",
+          "ResolvedRefs": "Unknown/Pending",
+          "gateway-api-openstack.github.io/Programmed": "False/UnsupportedValue"
+        },
+        "sameRouteUIDGenerationAndSpec": true,
+        "statusAfterSeconds": 7.116,
+        "wireAfterSeconds": 7.139,
+        "loadBalancers": 1,
+        "portListeners": 0,
+        "servingHAProxyFrontends": 0,
+        "vipProbeOutcomes": {
+          "refused": 3
+        },
+        "vipProbePayloadsSeenByService": 0,
+        "directOriginEcho": true,
+        "firstProbeAfterStatus": {
+          "seconds": 7.116,
+          "outcome": "refused",
+          "serviceSawPayload": 0
+        }
+      },
+      "restored": {
+        "gatewayGeneration": 3,
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.30"
+          }
+        ],
+        "listeners": {
+          "control": {
+            "attachedRoutes": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        },
+        "routeGeneration": 1,
+        "routeConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        },
+        "sameRouteUIDGenerationAndSpec": true,
+        "statusAfterSeconds": 6.45,
+        "wireAfterSeconds": 6.537,
+        "loadBalancers": 1,
+        "portListeners": 1,
+        "servingHAProxyFrontends": 1,
+        "vipProbeOutcomes": {
+          "echo": 3
+        },
+        "vipProbePayloadsSeenByService": 3,
+        "directOriginEcho": true
+      }
+    }
+  }
+}

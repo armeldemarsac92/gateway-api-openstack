@@ -37,6 +37,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
@@ -520,9 +521,12 @@ func (r *Reconciler) gatewayTopology(gateway *gatewayv1.Gateway, listener *gatew
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 		return classconfig.Resolved{}, false, err
 	}
-	if controller.GatewayListenerScope(r.Config, gateway) != r.protocol() &&
-		(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) || len(gateway.Spec.Listeners) > 1) {
-		return classconfig.Resolved{}, false, nil
+	if controller.GatewayListenerScope(r.Config, gateway) != r.protocol() {
+		admitted, err := gatewaycontroller.SupportedListenersForConfig(r.Config, gateway)
+		if err != nil || len(admitted) != 1 || admitted[0] != listener ||
+			gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
+			return classconfig.Resolved{}, false, nil
+		}
 	}
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
 	return topology, err == nil, err

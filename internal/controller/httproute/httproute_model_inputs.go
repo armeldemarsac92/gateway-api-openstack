@@ -392,11 +392,11 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 			return nil, err
 		}
 	}
-	if r.Config.OperatorHTTPS && slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool { return l.Protocol == gatewayv1.HTTPSProtocolType }) {
-		listeners, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
-		if err != nil {
-			return nil, err
-		}
+	listeners, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
+	if err != nil {
+		return nil, err
+	}
+	if len(listeners) != len(gateway.Spec.Listeners) || slices.ContainsFunc(listeners, sets.RejectsGatewayHTTPSSection) {
 		input.Gateway = gateway.DeepCopy()
 		input.Gateway.Spec.Listeners = make([]gatewayv1.Listener, 0, len(listeners))
 		for _, listener := range listeners {

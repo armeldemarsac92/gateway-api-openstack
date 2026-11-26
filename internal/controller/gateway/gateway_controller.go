@@ -224,8 +224,17 @@ func (r *Reconciler) reconcileRejectedGateway(
 	ctx context.Context,
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
-) (ctrl.Result, error) {
+) (result ctrl.Result, retErr error) {
 	r.setGatewayFailure(scope.gateway, decision.validation)
+	if _, conflicts := listenerSectionsWithoutTCPConflicts(r.Config, scope.gateway); len(conflicts) != 0 {
+		attached, err := r.gatewayListenerAttachments(ctx, scope.gateway, nil)
+		if err == nil {
+			setGatewayAttachedRoutes(scope.gateway, attached)
+		} else {
+			// A status-only inventory failure cannot hold up withdrawal.
+			defer func() { retErr = errors.Join(retErr, err) }()
+		}
+	}
 	if BackendClientCertificateRef(scope.gateway) != nil && !r.Config.BackendTLSPolicy {
 		return r.withdrawGatewayCertificates(ctx, scope.gateway)
 	}
@@ -328,7 +337,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 	defer func() {
 		r.reportFrontendCAWithdrawal(scope.gateway, tlsIssues, graphResult.Gateway.ScopedTLSClosedPorts)
 	}()
-	if r.Config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(scope.gateway) &&
+	if r.Config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(r.Config, scope.gateway) &&
 		!errors.Is(err, errGatewayChanged) && !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 		topology, topologyErr := controller.StoredGatewayTopology(r.Config, scope.gateway)
 		listeners, listenerErr := SupportedListenersForConfig(r.Config, scope.gateway)
@@ -496,12 +505,16 @@ func (r *Reconciler) reconcileGatewayGraph(
 			progress = graphResult.Outcome
 		}
 	}
-	if controller.GatewayListenerScope(r.Config, scope.gateway) != "" {
+	if progress.State == cloud.OutcomeReady && controller.GatewayListenerScope(r.Config, scope.gateway) != "" {
 		// A provider result must carry current proof for every desired port
 		// before the aggregate Gateway can be reported as programmed.
-		for _, listener := range scope.gateway.Spec.Listeners {
+		listeners, err := SupportedListenersForConfig(r.Config, scope.gateway)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		for _, listener := range listeners {
 			_, hasIssue := tlsIssues[listener.Name]
-			if !hasIssue && listenerFamily(&listener) == listenerFamily(decision.listener) && progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
+			if !hasIssue && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
 				progress = cloud.ProgressingOutcome("Waiting for listener readiness", time.Second)
 				break
 			}

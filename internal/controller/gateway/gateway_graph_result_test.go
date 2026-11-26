@@ -481,6 +481,50 @@ func TestGatewayRouteFailurePreservesStatusAndRedactsDetails(t *testing.T) {
 	}
 }
 
+func TestScopedTCPConflictKeepsReadyPortAndCountsAcceptedParents(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "main", Port: 80, Protocol: gatewayv1.TCPProtocolType},
+		{Name: "other", Port: 8080, Protocol: gatewayv1.TCPProtocolType},
+		{Name: "http", Port: 8080, Protocol: gatewayv1.HTTPProtocolType},
+	}
+	gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.TCPProtocolType)
+	completeGatewayTopologyFixture(cfg, gateway)
+	controller.SetGatewayListenerScope(cfg, gateway, gatewayv1.TCPProtocolType)
+	whole := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	section := gatewayv1.ParentReference{Name: whole.Name, SectionName: &gateway.Spec.Listeners[1].Name}
+	newRoute := func(name string, ref gatewayv1.ParentReference, accepted metav1.ConditionStatus, reason gatewayv1.RouteConditionReason) *gatewayv1.TCPRoute {
+		route := &gatewayv1.TCPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: name, Generation: 1}}
+		route.Spec.ParentRefs = []gatewayv1.ParentReference{ref}
+		route.Status.Parents = []gatewayv1.RouteParentStatus{{
+			ParentRef: ref, ControllerName: cfg.ControllerName,
+			Conditions: []metav1.Condition{Condition("Accepted", accepted, string(reason), "TCPRoute attachment", route.Generation)},
+		}}
+		return route
+	}
+	attached := newRoute("all-ports", whole, metav1.ConditionTrue, gatewayv1.RouteReasonAccepted)
+	rejected := newRoute("conflicted-port", section, metav1.ConditionFalse, gatewayv1.RouteReasonUnsupportedValue)
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway, attached, rejected).Build()
+	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"})
+	ready.ScopedListenerReadyPorts = []int{80}
+	provider := &recordingProvider{gatewayResult: &ready}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+	key := client.ObjectKeyFromObject(gateway)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.NoError(t, kube.Get(t.Context(), key, gateway))
+	require.Len(t, provider.gatewaySpecs, 1)
+	require.Len(t, provider.gatewaySpecs[0].ScopedListeners, 1)
+	require.Equal(t, 80, provider.gatewaySpecs[0].ScopedListeners[0].Port)
+	require.True(t, meta.IsStatusConditionTrue(gateway.Status.Conditions, "Programmed"))
+	require.Len(t, gateway.Status.Listeners, 3)
+	require.Equal(t, int32(1), gateway.Status.Listeners[0].AttachedRoutes)
+	require.Equal(t, int32(1), gateway.Status.Listeners[1].AttachedRoutes)
+	require.True(t, meta.IsStatusConditionFalse(gateway.Status.Listeners[1].Conditions, "Accepted"))
+}
+
 func TestGatewayTransportRouteFailureRefreshesAttachments(t *testing.T) {
 	for _, scenario := range []struct {
 		name     string

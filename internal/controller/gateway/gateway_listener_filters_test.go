@@ -145,7 +145,7 @@ func TestListenerFiltersRejectUnknownExtensionOnHTTPS(t *testing.T) {
 			Type: gatewayv1.ListenerFilterExtensionRef, ExtensionRef: &gatewayv1.LocalObjectReference{Group: "custom.example", Kind: "Filter", Name: "unknown"},
 		}}},
 	}}}}
-	require.True(t, hasHTTPFamilyListenerFilters(gateway))
+	require.True(t, hasHTTPFamilyListenerFilters(config, gateway))
 	listeners, err := SupportedListenersForConfig(config, gateway)
 	require.NoError(t, err)
 	got, err := r.observeListenerFilters(t.Context(), gateway, listeners, ListenerSetProjection{}, classconfig.Resolved{})

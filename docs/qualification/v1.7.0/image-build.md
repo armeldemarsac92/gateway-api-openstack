@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An Experimental TCPRoute can preserve the configured weights of clear and authenticated backends when a client identity grant changes. [Build record](image.json) · [Connection counts and grant transitions](provider/tcproute-weighted-backend-pools/README.md)
+A Gateway reports the conflicting protocol on each affected listener when a TCP and HTTP listener share a port. [Build record](image.json) · [Listener conditions and TCP traffic](provider/shared-tcp-port-conflict/README.md)
+
+An Experimental TCPRoute can preserve the configured weights of clear and authenticated backends when a client identity grant changes. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-3713c168078895b2dcb1eae8ad3a1a83b19c785a/image.json) · [Connection counts and grant transitions](provider/tcproute-weighted-backend-pools/README.md)
 
 GRPCRoute and TCPRoute can target enrolled external XBackend hostnames. A TCPRoute with a single protected XBackend can also authenticate the origin. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-62dced8cdd6b7cac8a50848373a51562ef1b9b36/image.json) · [TCP and gRPC application traffic](provider/xbackend-grpc-tcp-transports/README.md)
 
