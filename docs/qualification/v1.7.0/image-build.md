@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The signed controller preserves weighted forwarding and proportional discard on dedicated IPv4 NodePort listeners when the operator enables the feature. [Build record](image.json) · [Local NodePort traffic](provider/udp-nodeport-packet-drop/README.md)
+With NodePort discard enabled on a dedicated IPv4 UDP Gateway, the signed controller gives each port won by a weighted UDPRoute its own Amphora pool. [Build record](image.json) · [Multiport NodePort traffic](provider/udp-nodeport-multiple-listeners/README.md)
+
+The signed controller preserves weighted forwarding and proportional discard on dedicated IPv4 NodePort listeners when the operator enables the feature. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-a088a5f949d0f80752d0e5535f376d45c1bc5a7f/image.json) · [Local NodePort traffic](provider/udp-nodeport-packet-drop/README.md)
 
 The shared Istio Pilot supports independently enabled client HTTP and gRPC routes on Services. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-aba071b9416112dd29e5852664913d3470013202/image.json) · [Waypoint, XMesh and registered mesh qualification](provider/mesh-consumer-service-routes/README.md)
 
@@ -140,10 +142,13 @@ The ordinary and no-cache linux/amd64 builds of the gRPC backend TLS revision pr
 
 The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The previous multiport image passed both original GatewayModifyListeners subtests on Standard and Experimental. Separate traffic probes checked the serving ports during listener and certificate changes. [Build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0d89da1a8b42d331d130ab11e86903850de7b685/image.json) · [Listener results](provider/http-distinct-ports.md#adding-and-removing-listeners)
 
-On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
+On a linux/amd64 host, start in the checkout containing the build record you want to reproduce. The commands read the product revision from that record and open a separate worktree for the build. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=6aaf2c448232d92f0e746674d60dd542e238e611
+revision=$(jq -er '.sourceRevision' docs/qualification/v1.7.0/image.json)
+build_dir=$(mktemp -d)
+git worktree add --detach "$build_dir" "$revision"
+cd "$build_dir"
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
