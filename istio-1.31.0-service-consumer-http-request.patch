@@ -2110,7 +2110,7 @@ index 50ce52db0e509999833980bccd1fe0be1b90cae5..6dbdefa6115c589f90970b9aea664f22
  	// ConnectOriginate is the name for the resources associated with the origination of HTTP CONNECT.
  	ConnectOriginate = "connect_originate"
 diff --git a/pilot/pkg/xds/waypoint_test.go b/pilot/pkg/xds/waypoint_test.go
-index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add531f5d0a1 100644
+index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..4e33878eb98120c967f09c052db1be636dfdbb74 100644
 --- a/pilot/pkg/xds/waypoint_test.go
 +++ b/pilot/pkg/xds/waypoint_test.go
 @@ -25,30 +25,42 @@ import (
@@ -2652,7 +2652,21 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  		t.Helper()
  		l := xdstest.ExtractListener("main_internal", listeners)
  		chain := xdstest.ExtractFilterChain(cluster, l)
-@@ -1344,19 +1727,19 @@ spec:
+@@ -1336,7 +1719,12 @@ spec:
+ 		manager := xdstest.ExtractHTTPConnectionManager(t, chain)
+ 		assert.Equal(t, manager.GetCodecType(), hcm.HttpConnectionManager_AUTO)
+ 		assert.Equal(t, manager.GetHttp2ProtocolOptions() != nil, true)
+-		return manager.GetRouteConfig().GetVirtualHosts()[0]
++		hosts := manager.GetRouteConfig().GetVirtualHosts()
++		if len(hosts) == 0 {
++			// The previous RDS configuration can still be visible during restoration.
++			return nil
++		}
++		return hosts[0]
+ 	}
+ 	routeList := func(action *matcher.Matcher_OnMatch) []*route.Route {
+ 		t.Helper()
+@@ -1344,19 +1732,19 @@ spec:
  		assert.NoError(t, action.GetAction().GetTypedConfig().UnmarshalTo(list))
  		return list.Routes
  	}
@@ -2675,7 +2689,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  				return nil
  			}
  			counts := make([]int, len(fields))
-@@ -1379,7 +1762,7 @@ spec:
+@@ -1379,7 +1767,7 @@ spec:
  		res := ads.RequestResponseAck(t, nil)
  		return routeConfig(slices.Map(res.Resources, func(a *anypb.Any) *listenerv3.Listener {
  			return xdstest.UnmarshalAny[listenerv3.Listener](t, a)
@@ -2684,7 +2698,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  	}
  	value := func(rule *route.Route) string {
  		t.Helper()
-@@ -1388,7 +1771,21 @@ spec:
+@@ -1388,7 +1776,21 @@ spec:
  		assert.Equal(t, headers[0].GetHeader().GetKey(), "x-route")
  		return headers[0].GetHeader().GetValue()
  	}
@@ -2707,7 +2721,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  	if !enabled {
  		m := readLDS().GetMatcher()
  		consumer := routeList(m.GetMatcherList().GetMatchers()[0].GetOnMatch())
-@@ -1396,6 +1793,7 @@ spec:
+@@ -1396,6 +1798,7 @@ spec:
  		assert.Equal(t, consumer[0].GetMatch().GetGrpc(), nil)
  		assert.Equal(t, value(consumer[0]), "http-consumer")
  		assert.Equal(t, value(routeList(m.GetOnNoMatch())[0]), "producer")
@@ -2715,7 +2729,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  		return
  	}
  	ctx := context.Background()
-@@ -1442,7 +1840,7 @@ spec:
+@@ -1442,7 +1845,7 @@ spec:
  	warehouseRoutes := d.KubeClient().GatewayAPI().GatewayV1().GRPCRoutes("warehouse")
  	_, err = warehouseRoutes.Create(ctx, warehouse, metav1.CreateOptions{})
  	assert.NoError(t, err)
@@ -2724,7 +2738,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  	m := readLDS().GetMatcher()
  	fields := m.GetMatcherList().GetMatchers()
  	assert.Equal(t, len(fields), 2)
-@@ -1486,7 +1884,7 @@ spec:
+@@ -1486,7 +1889,7 @@ spec:
  	assert.EventuallyEqual(t, func() bool {
  		push := d.PushContext()
  		proxy.SetSidecarScope(push)
@@ -2733,7 +2747,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add5
  	}, true)
  	assert.Equal(t, readLDS(), nil)
  	assert.EventuallyEqual(t, func() int {
-@@ -1495,17 +1893,121 @@ spec:
+@@ -1495,17 +1898,121 @@ spec:
  	wp.Labels[label.IoIstioWaypointFor.Name] = constants.ServiceTraffic
  	_, err = gateways.Update(ctx, wp, metav1.UpdateOptions{})
  	assert.NoError(t, err)
