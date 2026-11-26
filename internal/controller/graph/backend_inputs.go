@@ -49,12 +49,12 @@ func CollectBackendInputs(ctx context.Context, reader client.Reader, gateway *ga
 	if err := collectRouteNamespaces(ctx, reader, &input); err != nil {
 		return model.Input{}, err
 	}
-	return CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, input.Namespaces, false)
+	return CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, input.Namespaces, false, false)
 }
 
 // CollectBackendInputsWithNamespaces reads the already-admitted route dependencies.
-func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, enableServiceImport bool) (model.Input, error) {
-	input := model.Input{Gateway: gateway.DeepCopy(), Routes: make([]gatewayv1.HTTPRoute, 0, len(routes)), Namespaces: namespaces, EnableServiceImport: enableServiceImport}
+func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, enableServiceImport, enableRequestMirror bool) (model.Input, error) {
+	input := model.Input{Gateway: gateway.DeepCopy(), Routes: make([]gatewayv1.HTTPRoute, 0, len(routes)), Namespaces: namespaces, EnableServiceImport: enableServiceImport, HTTPRequestMirror: enableRequestMirror}
 	for i := range routes {
 		input.Routes = append(input.Routes, *routes[i].DeepCopy())
 	}
@@ -78,7 +78,7 @@ func CollectBackendReferenceInputs(ctx context.Context, reader client.Reader, in
 }
 
 func collectBackendReferenceInputs(ctx context.Context, reader client.Reader, input *model.Input, includeEndpointSlices bool) error {
-	references := backendReferences(input.Routes, input.EnableServiceImport)
+	references := backendReferences(input.Routes, input.EnableServiceImport, input.HTTPRequestMirror)
 	grantNamespaces := map[string]struct{}{}
 	for target, sources := range references {
 		for source := range sources {
@@ -319,7 +319,7 @@ type backendReferenceTarget struct {
 	kind gatewayv1.Kind // Only core Service and multicluster.x-k8s.io ServiceImport enter this inventory.
 }
 
-func backendReferences(routes []gatewayv1.HTTPRoute, enableServiceImport bool) map[backendReferenceTarget]map[backendReferenceSource]struct{} {
+func backendReferences(routes []gatewayv1.HTTPRoute, enableServiceImport, enableRequestMirror bool) map[backendReferenceTarget]map[backendReferenceSource]struct{} {
 	references := map[backendReferenceTarget]map[backendReferenceSource]struct{}{}
 	add := func(target backendReferenceTarget, source backendReferenceSource) {
 		if references[target] == nil {
@@ -330,16 +330,11 @@ func backendReferences(routes []gatewayv1.HTTPRoute, enableServiceImport bool) m
 	for _, route := range routes {
 		source := backendReferenceSource{namespace: route.Namespace, kind: model.HTTPProfileRouteKind(&route)}
 		for _, rule := range route.Spec.Rules {
-			for _, reference := range model.HTTPServiceBackendReferences(rule, true) {
+			for _, reference := range model.HTTPBackendReferences(rule, true, enableRequestMirror) {
 				if key, supported := model.BackendServiceReference(route.Namespace, reference); supported {
 					add(backendReferenceTarget{key: key, kind: "Service"}, source)
-				}
-			}
-			if enableServiceImport {
-				for _, reference := range rule.BackendRefs {
-					if key, supported := model.ServiceImportReference(route.Namespace, reference.BackendObjectReference); supported {
-						add(backendReferenceTarget{key: key, kind: model.ServiceImportKind}, source)
-					}
+				} else if key, imported := model.ServiceImportReference(route.Namespace, reference); imported && enableServiceImport {
+					add(backendReferenceTarget{key: key, kind: model.ServiceImportKind}, source)
 				}
 			}
 		}

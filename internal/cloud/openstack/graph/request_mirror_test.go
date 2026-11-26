@@ -293,6 +293,67 @@ func TestGRPCRequestMirrorWithdrawsOnLossOfStrictH2Readback(t *testing.T) {
 	require.ErrorContains(t, err, "using h2c or authenticated HTTP/2")
 }
 
+func TestServiceImportRequestMirrorWithdrawsStaleRoutedMember(t *testing.T) {
+	identity := safetyTestIdentity(t).Value()
+	provider := &Provider{projectID: identity.OpenStackProjectID, backendH2C: true, httpRequestMirror: true}
+	fixture, _ := convergedRoutePlanFixture()
+	spec := cloud.RouteSpec{
+		Identity: identity, GRPC: true, MemberMode: cloud.MemberModeEndpoint, MemberSubnetID: "subnet",
+		HealthMonitor:       fixture.healthMonitor,
+		GatewayRequirements: cloud.GatewayRequirements{Provider: "amphora", VIPSubnetID: "vip-subnet", ListenerPort: 80},
+		HTTPBackends: []cloud.HTTPBackend{
+			{Namespace: "apps", Name: "shared", Port: 80, BackendH2C: true, Matches: []cloud.HTTPPathMatch{{
+				PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo",
+				RequestMirrors: []cloud.HTTPMirrorTarget{{BackendIndex: 1, Numerator: 1, Denominator: 1, Phase: cloud.HTTPMirrorAfterRewrite}},
+			}}},
+			{Namespace: "apps", Name: "shared", Port: 80, Kind: cloud.HTTPBackendKindServiceImport, BackendH2C: true, RoutedExternal: true,
+				Members: []cloud.Member{{Address: "192.0.2.5", Port: 9080, RoutedExternal: true}}},
+		},
+	}
+	route, err := provider.buildDesiredRoute(spec)
+	require.NoError(t, err)
+	require.Len(t, route.httpParts, 2)
+	index := slices.IndexFunc(route.httpParts, func(part desiredRoute) bool { return part.routedExternal })
+	require.NotEqual(t, -1, index)
+	shadow, primary := route.httpParts[index], route.httpParts[1-index]
+	require.Empty(t, shadow.spec.MemberSubnetID)
+	require.True(t, shadow.spec.BackendH2C)
+	require.NotEqual(t, primary.backendKey, shadow.backendKey)
+
+	primaryPolicy := primary.policies[0]
+	require.Equal(t, shadow.backendKey, primaryPolicy.requestMirrors[0].backendKey)
+	copy := primaryPolicy.requestMirrors[0].forPool("shadow-pool")
+	live := observedRoutePolicy{
+		role: primaryPolicy.role, requestMirrorsTagged: true, requestMirrorsReported: true,
+		policy:         l7policies.L7Policy{ID: "primary-policy", AdminStateUp: true, ProvisioningStatus: "ACTIVE", RedirectPoolID: "primary-pool"},
+		requestMirrors: []octavia.HTTPRequestMirror{copy},
+	}
+	shadowReadback := observedRouteGraph{
+		pool: &pools.Pool{ID: copy.PoolID}, backendH2C: true,
+		members: []pools.Member{{ID: "member", Address: "192.0.2.5", ProtocolPort: 9080, AdminStateUp: true}},
+	}
+	actual := observedGatewayGraph{routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{
+		primary.backendKey: {policies: []observedRoutePolicy{live}}, shadow.backendKey: &shadowReadback,
+	}}}}
+	desired := desiredGatewayGraph{routes: []desiredRoute{route},
+		spec: cloud.GatewayGraphSpec{Routes: []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}}}}
+	_, needed := nextRequestMirrorWithdrawal(desired, actual)
+	require.False(t, needed)
+
+	spec.HTTPBackends[1].Members = []cloud.Member{{Address: "192.0.2.6", Port: 9081, RoutedExternal: true}}
+	desired.routes[0], err = provider.buildDesiredRoute(spec)
+	require.NoError(t, err)
+	step, needed := nextRequestMirrorWithdrawal(desired, actual)
+	require.True(t, needed)
+	require.Equal(t, routeMutationSetRequestMirrors, step.route.kind)
+	require.Equal(t, live.policy.ID, step.route.id)
+	require.Empty(t, step.route.requestMirrorsUpdate.Value)
+
+	spec.HTTPBackends[1].RoutedExternal = false
+	_, err = provider.buildDesiredRoute(spec)
+	require.ErrorContains(t, err, "ServiceImport request mirror requires a routed pool")
+}
+
 func TestRequestMirrorConvergesIndependentlyOfRequestHeaders(t *testing.T) {
 	desired, actual := convergedRoutePlanFixture()
 	wanted, observed := &desired.policies[0], &actual.policies[0]

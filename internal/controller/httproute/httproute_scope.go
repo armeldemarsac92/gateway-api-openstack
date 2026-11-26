@@ -79,6 +79,7 @@ type httpRouteScope struct {
 	rejectedSections []model.ListenerSection
 	profileObserved  bool
 	corsFallback     bool
+	serviceImports   *routeServiceImportSnapshot
 	warning          *routeProviderWarning
 	patchCause       error
 	skipPatch        bool
@@ -118,6 +119,7 @@ func (s *httpRouteScope) setStatuses(updates []parentStatusUpdate) {
 		corsFallback:      s.corsFallback,
 		rejectedSections:  s.rejectedSections,
 		gateway:           s.parentGateway,
+		serviceImports:    s.serviceImports,
 	}
 }
 
@@ -137,6 +139,7 @@ func (s *httpRouteScope) setProviderFailureStatuses(
 		corsFallback:        s.corsFallback,
 		rejectedSections:    s.rejectedSections,
 		gateway:             s.parentGateway,
+		serviceImports:      s.serviceImports,
 	}
 }
 
@@ -202,6 +205,13 @@ func (r *Reconciler) patchHTTPRouteStatus(
 		if plan.serviceImports != nil {
 			if err := plan.serviceImports.validate(ctx, r.routePatchReader()); err != nil {
 				return err
+			}
+		}
+		for _, update := range plan.updates {
+			if imports := update.status.serviceImports; imports != nil {
+				if err := imports.validate(ctx, r.routePatchReader()); err != nil {
+					return err
+				}
 			}
 		}
 		if plan.xBackendTransportRevision != nil {

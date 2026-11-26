@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-GRPCRoute can forward protobuf calls to Pods selected by an Experimental XBackend. [Build record](image.json) · [gRPC transport and Pod selection](provider/grpcroute-xbackend/README.md)
+HTTPRoute and GRPCRoute can mirror requests to ServiceImport endpoints. [Build record](image.json) · [Per-origin mirror traffic](provider/service-import-request-mirror/README.md)
+
+GRPCRoute can forward protobuf calls to Pods selected by an Experimental XBackend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-892bc37a0f8892a15b0839a4979e9080bf541f74/image.json) · [gRPC transport and Pod selection](provider/grpcroute-xbackend/README.md)
 
 Gateway routes can forward to IPv4 endpoints of a Headless ServiceImport. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-6a52d5a7d99f166a335775e9ba801cd04163a294/image.json) · [HTTP, gRPC and TLS observations](provider/headless-service-imports/README.md)
 

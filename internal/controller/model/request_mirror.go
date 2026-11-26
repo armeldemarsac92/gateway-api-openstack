@@ -61,16 +61,19 @@ func RequestMirrorReferences(rule gatewayv1.HTTPRouteRule) []gatewayv1.BackendOb
 	return refs
 }
 
-// HTTPServiceBackendReferences includes mirror destinations for dependency
-// observation, without treating them as weighted forwarding targets.
-func HTTPServiceBackendReferences(rule gatewayv1.HTTPRouteRule, includeZeroWeight bool) []gatewayv1.BackendObjectReference {
+// HTTPBackendReferences includes destinations for dependency observation.
+// Mirroring does not add weighted forwarding targets.
+func HTTPBackendReferences(rule gatewayv1.HTTPRouteRule, includeZeroWeight, includeMirrors bool) []gatewayv1.BackendObjectReference {
 	refs := make([]gatewayv1.BackendObjectReference, 0, len(rule.BackendRefs))
 	for _, backend := range rule.BackendRefs {
 		if includeZeroWeight || ptr.Deref(backend.Weight, 1) != 0 {
 			refs = append(refs, backend.BackendObjectReference)
 		}
 	}
-	return append(refs, RequestMirrorReferences(rule)...)
+	if includeMirrors {
+		refs = append(refs, RequestMirrorReferences(rule)...)
+	}
+	return refs
 }
 
 // WithoutRequestMirrorFilters leaves transformations for their established
@@ -150,7 +153,6 @@ func NormalizeRequestMirrors(filters []gatewayv1.HTTPRouteFilter, enabled, forwa
 
 func ResolveRequestMirrorBackends(route *gatewayv1.HTTPRoute, mirrors []RequestMirror, input Input) {
 	input.EnableXBackend = false
-	input.EnableServiceImport = false
 	for i := range mirrors {
 		mirrors[i].Backend = resolveBackend(route, mirrors[i].Backend.Reference, input)
 	}

@@ -85,9 +85,11 @@ func ServiceImportEndpointSliceKey(slice *discoveryv1.EndpointSlice) types.Names
 }
 
 func isMCSEndpointSlice(slice *discoveryv1.EndpointSlice) bool {
-	if slice.Labels[mcs.LabelServiceName] == "" || slice.Labels[mcs.LabelSourceCluster] == "" {
-		return false
-	}
+	return slice.Labels[mcs.LabelServiceName] != "" && slice.Labels[mcs.LabelSourceCluster] != "" &&
+		hasServiceImportProviderManager(slice)
+}
+
+func hasServiceImportProviderManager(slice *discoveryv1.EndpointSlice) bool {
 	switch slice.Labels[discoveryv1.LabelManagedBy] {
 	case "", "endpointslice-controller.k8s.io", "endpointslicemirroring-controller.k8s.io":
 		return false

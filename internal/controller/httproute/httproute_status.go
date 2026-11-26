@@ -54,6 +54,7 @@ type routeReconcileStatus struct {
 	programmed        metav1.ConditionStatus
 	programmedReason  string
 	programmedMessage string
+	serviceImports    *routeServiceImportSnapshot
 }
 
 type parentStatusUpdate struct {
@@ -512,6 +513,11 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 		}
 	}
+	if r.Config.MulticlusterServiceImports {
+		if err := r.resolveServiceImportReferences(ctx, route, gateway, status); err != nil {
+			return err
+		}
+	}
 	if r.Config.HTTPRequestMirror {
 		if err := r.resolveRequestMirrorReferences(ctx, route, rules, grantsByNamespace, status); err != nil {
 			return err
@@ -519,21 +525,8 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	}
 	persistenceCapability := r.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.xBackendH2CDiagnostic(ctx) })
-	serviceImportH2CIssue := sync.OnceValue(func() model.Diagnostic { return r.backendH2CDiagnostic(ctx, "ServiceImports") })
 	for _, backend := range backends {
-		if key, imported := model.ServiceImportReference(route.Namespace, backend); imported && r.Config.MulticlusterServiceImports {
-			observation, err := graph.ObserveServiceImport(ctx, r.routePatchReader(), key)
-			if err != nil {
-				return err
-			}
-			input := model.Input{EnableServiceImport: true, BackendH2C: r.Config.BackendH2C, ServiceImports: []model.ServiceImportObservation{observation},
-				ReferenceGrants: grantsByNamespace[key.Namespace]}
-			rule := gatewayv1.HTTPRouteRule{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: backend}}}}
-			issue, err := r.serviceImportReferenceStatus(ctx, model.ResolveBackends(route, rule, input)[0], gateway, serviceImportH2CIssue)
-			if err != nil {
-				return err
-			}
-			*status = status.withBackendDiagnostic(issue)
+		if _, imported := model.ServiceImportReference(route.Namespace, backend); imported && r.Config.MulticlusterServiceImports {
 			continue
 		}
 		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() {
@@ -613,6 +606,7 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 	input := model.Input{
 		Gateway: gateway, Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C,
 		EnableServiceImport: r.Config.MulticlusterServiceImports, EnableXBackend: r.Config.XBackendEnabled(),
+		HTTPRequestMirror: r.Config.HTTPRequestMirror,
 	}
 	if err := graph.CollectBackendReferenceInputs(ctx, r.APIReader, &input); err != nil {
 		return err
@@ -652,19 +646,36 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 	}) {
 		inputs.xBackendH2CIssue = r.xBackendH2CDiagnostic(ctx)
 	}
+	status.serviceImports = r.snapshotServiceImports(route, input)
 	var diagnostic model.Diagnostic
-	resolveMirrors := func(filters []gatewayv1.HTTPRouteFilter, canForward bool) {
+	serviceImportH2CIssue := sync.OnceValue(func() model.Diagnostic { return r.backendH2CDiagnostic(ctx, "ServiceImports") })
+	resolveMirrors := func(filters []gatewayv1.HTTPRouteFilter, canForward bool) error {
 		// Rule structure was validated before any reference reads.
 		mirrors, _ := model.NormalizeRequestMirrors(filters, r.Config.HTTPRequestMirror, true)
 		model.ResolveRequestMirrorBackends(route, mirrors, input)
 		for _, mirror := range mirrors {
-			issue := inputs.requestMirrorDiagnostic(mirror.Backend, true, canForward)
+			backend := mirror.Backend
+			var issue model.Diagnostic
+			switch {
+			case backend.ServiceImport.Name != "":
+				var err error
+				issue, err = r.serviceImportReferenceStatus(ctx, backend, gateway, serviceImportH2CIssue)
+				if err != nil {
+					return err
+				}
+			case backend.Diagnostic != nil:
+				issue = *backend.Diagnostic
+			default:
+				issue = inputs.requestMirrorTLSIssue(backend, true, canForward)
+			}
 			diagnostic = preferredBackendDiagnostic(diagnostic, issue)
 		}
+		return nil
 	}
-	serviceImportH2CIssue := sync.OnceValue(func() model.Diagnostic { return r.backendH2CDiagnostic(ctx, "ServiceImports") })
 	for _, rule := range route.Spec.Rules {
-		resolveMirrors(rule.Filters, true)
+		if err := resolveMirrors(rule.Filters, true); err != nil {
+			return err
+		}
 		for i, backend := range model.ResolveBackends(route, rule, input) {
 			canForward := backend.Diagnostic == nil && backend.Weight > 0
 			if backend.ServiceImport.Name != "" {
@@ -685,7 +696,9 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 				canForward = canForward && issue.Reason == ""
 			}
 			tls := inputs.backendTLSValidation(backend, true)
-			resolveMirrors(rule.BackendRefs[i].Filters, canForward && (tls == nil || !tls.Denied))
+			if err := resolveMirrors(rule.BackendRefs[i].Filters, canForward && (tls == nil || !tls.Denied)); err != nil {
+				return err
+			}
 		}
 	}
 	status.resolved = metav1.ConditionTrue
@@ -699,10 +712,13 @@ func (r *Reconciler) resolveRequestMirrorReferences(ctx context.Context, route *
 	services := map[types.NamespacedName]*corev1.Service{}
 	for _, rule := range rules {
 		for _, ref := range model.RequestMirrorReferences(rule) {
+			if _, imported := model.ServiceImportReference(route.Namespace, ref); imported && r.Config.MulticlusterServiceImports {
+				continue
+			}
 			key, supported := model.BackendServiceReference(route.Namespace, ref)
 			if !supported {
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonInvalidKind),
-					Message: "RequestMirror backendRef must reference a core Service"})
+					Message: "RequestMirror backendRef must reference a core Service or an enabled ServiceImport"})
 				continue
 			}
 			if key.Namespace != route.Namespace {

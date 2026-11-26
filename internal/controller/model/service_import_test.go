@@ -134,17 +134,28 @@ func TestServiceImportOwnedSliceStaysSeparateFromHomonymousService(t *testing.T)
 		Ports:       []discoveryv1.EndpointPort{{Port: ptr.To(int32(8080))}},
 		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.3.0.21"}}},
 	}
+	unowned := remote.DeepCopy()
+	unowned.OwnerReferences = nil
+	withoutManager := unowned.DeepCopy()
+	withoutManager.Labels[mcs.LabelSourceCluster] = "east"
+	delete(withoutManager.Labels, discoveryv1.LabelManagedBy)
 	ordinary := remote.DeepCopy()
 	ordinary.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(local, corev1.SchemeGroupVersion.WithKind("Service"))}
-	ordinary.Labels = map[string]string{discoveryv1.LabelServiceName: local.Name}
+	ordinary.Labels = map[string]string{
+		discoveryv1.LabelServiceName: local.Name, mcs.LabelServiceName: local.Name, mcs.LabelSourceCluster: "east",
+	}
 	ordinary.Endpoints[0].Addresses = []string{"10.1.0.11"}
 	port := &corev1.ServicePort{Port: 80}
 	require.Equal(t, []Endpoint{{Address: "10.1.0.11", Port: 8080, AddressType: discoveryv1.AddressTypeIPv4, Ready: true, Serving: true}},
-		ResolveServiceEndpoints(local, port, []discoveryv1.EndpointSlice{remote, *ordinary}))
+		ResolveServiceEndpoints(local, port, []discoveryv1.EndpointSlice{remote, *unowned, *withoutManager, *ordinary}))
 
 	remote.Labels[discoveryv1.LabelServiceName] = derived.Name
-	require.Equal(t, []Endpoint{{Address: "10.3.0.21", Port: 8080, AddressType: discoveryv1.AddressTypeIPv4, Ready: true, Serving: true}},
-		ResolveServiceEndpoints(derived, port, []discoveryv1.EndpointSlice{remote}))
+	unowned.Labels[discoveryv1.LabelServiceName] = derived.Name
+	withoutManager.Labels[discoveryv1.LabelServiceName] = derived.Name
+	derivedEndpoint := []Endpoint{{Address: "10.3.0.21", Port: 8080, AddressType: discoveryv1.AddressTypeIPv4, Ready: true, Serving: true}}
+	require.Equal(t, derivedEndpoint, ResolveServiceEndpoints(derived, port, []discoveryv1.EndpointSlice{remote}))
+	require.Equal(t, derivedEndpoint, ResolveServiceEndpoints(derived, port, []discoveryv1.EndpointSlice{*unowned}))
+	require.Equal(t, derivedEndpoint, ResolveServiceEndpoints(derived, port, []discoveryv1.EndpointSlice{*withoutManager}))
 }
 
 func TestServiceImportReadinessUsesCurrentGeneration(t *testing.T) {

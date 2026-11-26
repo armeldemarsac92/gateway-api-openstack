@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"slices"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
@@ -62,8 +63,8 @@ func (r *Reconciler) serviceImportReferenceStatus(ctx context.Context, backend m
 	return serviceImportTransportIssue(backend, mode, issue), nil
 }
 
-// routeServiceImportSnapshot retains the admitted primary imports of one route
-// for the final status check. Core Services and peer routes need no extra reads.
+// routeServiceImportSnapshot retains the admitted imports of one route for
+// the final status check, including imports used only as mirror destinations.
 type routeServiceImportSnapshot struct {
 	route    gatewayv1.HTTPRoute
 	observed []model.ServiceImportObservation
@@ -73,25 +74,17 @@ func (r *Reconciler) snapshotServiceImports(route *gatewayv1.HTTPRoute, input mo
 	if !input.EnableServiceImport {
 		return nil
 	}
-	kind := model.HTTPProfileRouteKind(route)
-	rules, _ := r.projectedHTTPFilterRules(route)
-	filtered := *route
-	filtered.Spec.Rules = nil
-	authorized := make(map[types.NamespacedName]bool)
-	for _, rule := range rules {
-		var imports gatewayv1.HTTPRouteRule
-		for _, ref := range rule.BackendRefs {
-			if key, imported := model.ServiceImportReference(route.Namespace, ref.BackendObjectReference); imported {
-				imports.BackendRefs = append(imports.BackendRefs, ref)
-				authorized[key] = model.ServiceImportReferenceAllowed(kind, route.Namespace, key, input.ReferenceGrants)
-			}
-		}
-		if len(imports.BackendRefs) != 0 {
-			filtered.Spec.Rules = append(filtered.Spec.Rules, imports)
-		}
-	}
+	filtered := r.serviceImportRoute(route)
 	if len(filtered.Spec.Rules) == 0 {
 		return nil
+	}
+	kind := model.HTTPProfileRouteKind(route)
+	authorized := make(map[types.NamespacedName]bool)
+	for _, rule := range filtered.Spec.Rules {
+		for _, ref := range rule.BackendRefs {
+			key, _ := model.ServiceImportReference(route.Namespace, ref.BackendObjectReference)
+			authorized[key] = model.ServiceImportReferenceAllowed(kind, route.Namespace, key, input.ReferenceGrants)
+		}
 	}
 	snapshot := &routeServiceImportSnapshot{route: filtered}
 	for _, observation := range input.ServiceImports {
@@ -100,6 +93,53 @@ func (r *Reconciler) snapshotServiceImports(route *gatewayv1.HTTPRoute, input mo
 		}
 	}
 	return snapshot
+}
+
+// serviceImportRoute projects only the admitted import references so their
+// grants and live state can be observed without rereading unrelated Services.
+func (r *Reconciler) serviceImportRoute(route *gatewayv1.HTTPRoute) gatewayv1.HTTPRoute {
+	rules, _ := r.projectedHTTPFilterRules(route)
+	filtered := *route
+	filtered.Spec.Rules = nil
+	for _, rule := range rules {
+		var imports gatewayv1.HTTPRouteRule
+		for _, ref := range model.HTTPBackendReferences(rule, true, r.Config.HTTPRequestMirror) {
+			if _, imported := model.ServiceImportReference(route.Namespace, ref); imported {
+				imports.BackendRefs = append(imports.BackendRefs, gatewayv1.HTTPBackendRef{
+					BackendRef: gatewayv1.BackendRef{BackendObjectReference: ref},
+				})
+			}
+		}
+		if len(imports.BackendRefs) != 0 {
+			filtered.Spec.Rules = append(filtered.Spec.Rules, imports)
+		}
+	}
+	return filtered
+}
+
+// resolveServiceImportReferences supplies reference status while the HTTP
+// listener is pending, before the full forwarding model can be built.
+func (r *Reconciler) resolveServiceImportReferences(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, status *routeReconcileStatus) error {
+	filtered := r.serviceImportRoute(route)
+	if len(filtered.Spec.Rules) == 0 {
+		return nil
+	}
+	input := model.Input{EnableServiceImport: true, BackendH2C: r.Config.BackendH2C, Routes: []gatewayv1.HTTPRoute{filtered}}
+	if err := graph.CollectBackendReferenceInputs(ctx, r.routePatchReader(), &input); err != nil {
+		return err
+	}
+	status.serviceImports = &routeServiceImportSnapshot{route: filtered, observed: input.ServiceImports}
+	h2cIssue := sync.OnceValue(func() model.Diagnostic { return r.backendH2CDiagnostic(ctx, "ServiceImports") })
+	for _, rule := range filtered.Spec.Rules {
+		for _, backend := range model.ResolveBackends(route, rule, input) {
+			issue, err := r.serviceImportReferenceStatus(ctx, backend, gateway, h2cIssue)
+			if err != nil {
+				return err
+			}
+			*status = status.withBackendDiagnostic(issue)
+		}
+	}
+	return nil
 }
 
 func (s *routeServiceImportSnapshot) retryRead() bool {
