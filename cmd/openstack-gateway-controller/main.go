@@ -139,7 +139,7 @@ func run(ctx context.Context) error {
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
-	flag.BoolVar(&multiclusterServiceImports, "multicluster-service-imports", false, "enable IPv4 ClusterSetIP ServiceImport backends for Gateway HTTPRoute, GRPCRoute and TLSRoute (requires --octavia-fixed-http-responses)")
+	flag.BoolVar(&multiclusterServiceImports, "multicluster-service-imports", false, "enable IPv4 ClusterSetIP and Headless ServiceImport backends for Gateway HTTPRoute, GRPCRoute and TLSRoute (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&istioAmbientXMesh, "istio-ambient-xmesh", false, "publish an Experimental XMesh for the opt-in Hibiscus Istio ambient integration")
 	flag.StringVar(&istioAmbientXMeshName, "istio-ambient-xmesh-name", ambientmesh.DefaultName, "name of the installation XMesh created when ambient XMesh reporting is enabled")
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")

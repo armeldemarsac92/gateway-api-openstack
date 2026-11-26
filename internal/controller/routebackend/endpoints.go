@@ -36,6 +36,19 @@ const (
 	endpointReadyForTraffic
 )
 
+// ServiceImportMembers uses provider-published destinations reachable through
+// Amphora routing, independent of the Neutron subnet for local endpoint members.
+func ServiceImportMembers(destinations []netip.AddrPort) []cloud.Member {
+	if len(destinations) == 0 {
+		return nil
+	}
+	members := make([]cloud.Member, 0, len(destinations))
+	for _, destination := range destinations {
+		members = append(members, cloud.Member{Address: destination.Addr().String(), Port: int(destination.Port()), RoutedExternal: true})
+	}
+	return members
+}
+
 // EndpointMembers resolves conflicting observations conservatively. Removing an
 // unavailable duplicate must be observed before another copy can restore traffic.
 func EndpointMembers(service *corev1.Service, endpoints []model.Endpoint) ([]cloud.Member, *model.Diagnostic) {

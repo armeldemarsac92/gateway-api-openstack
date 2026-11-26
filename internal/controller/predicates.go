@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -200,6 +201,13 @@ func EndpointSlicePredicate() predicate.Predicate {
 		oldSlice, oldOK := oldObject.(*discoveryv1.EndpointSlice)
 		newSlice, newOK := newObject.(*discoveryv1.EndpointSlice)
 		if !oldOK || !newOK {
+			return true
+		}
+		oldImport, newImport := model.ServiceImportEndpointSliceKey(oldSlice), model.ServiceImportEndpointSliceKey(newSlice)
+		if oldImport != newImport || newImport.Name != "" &&
+			(oldSlice.UID != newSlice.UID || oldSlice.Labels[mcs.LabelSourceCluster] != newSlice.Labels[mcs.LabelSourceCluster] ||
+				oldSlice.Labels[discoveryv1.LabelManagedBy] != newSlice.Labels[discoveryv1.LabelManagedBy] ||
+				!equality.Semantic.DeepEqual(oldSlice.OwnerReferences, newSlice.OwnerReferences)) {
 			return true
 		}
 		return oldSlice.AddressType != newSlice.AddressType ||

@@ -176,6 +176,8 @@ func (w *ServiceImportWatch) watchResource(ctx context.Context) error {
 			previous, next := old.(*mcs.ServiceImport), current.(*mcs.ServiceImport)
 			if previous.UID != next.UID || previous.Generation != next.Generation ||
 				previous.DeletionTimestamp.IsZero() != next.DeletionTimestamp.IsZero() ||
+				next.Spec.Type == mcs.Headless && (previous.Status.EndpointSliceObjects != next.Status.EndpointSliceObjects ||
+					!slices.Equal(previous.Status.Clusters, next.Status.Clusters)) ||
 				!equalServiceImportReadiness(previous, next) {
 				notify(next)
 			}

@@ -71,7 +71,8 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 }
 
 // CollectBackendReferenceInputs observes backend objects and their ReferenceGrants
-// for reference resolution independently of EndpointSlices.
+// for reference resolution. Headless ServiceImport observations also carry
+// their MCS-published EndpointSlices for consistency checks.
 func CollectBackendReferenceInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
 	return collectBackendReferenceInputs(ctx, reader, input, false)
 }
@@ -341,6 +342,17 @@ func ObserveServiceImport(ctx context.Context, reader client.Reader, key types.N
 		if backend.DeletionTimestamp.IsZero() && backend.UID != "" {
 			observation.UID, observation.Generation, observation.Spec = backend.UID, backend.Generation, &backend.Spec
 			observation.ReadyIssue = model.ServiceImportReadiness(&backend)
+			if backend.Spec.Type == mcs.Headless && observation.ReadyIssue == nil && backend.Status.EndpointSliceObjects != mcs.EndpointSliceObjectsAbsent {
+				observation.SourceClusters = backend.Status.Clusters
+				err := observeServiceImportEndpointSlices(ctx, reader, &observation)
+				if ctx.Err() != nil {
+					return observation, ctx.Err()
+				}
+				if err != nil {
+					observation.RetryRead = true
+					observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("Waiting for a complete EndpointSlice inventory for ServiceImport %s", key)}
+				}
+			}
 		}
 	case ctx.Err() != nil:
 		return observation, ctx.Err()
@@ -355,6 +367,19 @@ func ObserveServiceImport(ctx context.Context, reader client.Reader, key types.N
 		observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("backend ServiceImport %s could not be read", key)}
 	}
 	return observation, nil
+}
+
+func observeServiceImportEndpointSlices(ctx context.Context, reader client.Reader, observation *model.ServiceImportObservation) error {
+	var endpoints discoveryv1.EndpointSliceList
+	if err := reader.List(ctx, &endpoints, client.InNamespace(observation.Key.Namespace), client.MatchingLabels{mcs.LabelServiceName: observation.Key.Name}); err != nil {
+		return err
+	}
+	if endpoints.Continue != "" {
+		return fmt.Errorf("incomplete EndpointSlice list for ServiceImport %s", observation.Key)
+	}
+	slices.SortFunc(endpoints.Items, func(a, b discoveryv1.EndpointSlice) int { return cmp.Compare(a.Name, b.Name) })
+	observation.EndpointSlices = endpoints.Items
+	return nil
 }
 
 func serviceImportResourceNotFound(err error) bool {

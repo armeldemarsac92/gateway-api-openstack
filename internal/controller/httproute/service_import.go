@@ -120,13 +120,17 @@ func (s *routeServiceImportSnapshot) validate(ctx context.Context, reader client
 }
 
 func (r *Reconciler) enqueueRoutesForServiceImport(ctx context.Context, object client.Object) []reconcile.Request {
+	return r.enqueueRoutesForServiceImportKey(ctx, client.ObjectKeyFromObject(object))
+}
+
+func (r *Reconciler) enqueueRoutesForServiceImportKey(ctx context.Context, key types.NamespacedName) []reconcile.Request {
 	value := controller.ServiceImportIndexAll
-	if object.GetName() != "" {
-		value = controller.ObjectKeyString(client.ObjectKeyFromObject(object))
+	if key.Name != "" {
+		value = controller.ObjectKeyString(key)
 	}
 	routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByServiceImport: value})
 	if err != nil {
-		log.FromContext(ctx).Error(err, "Could not list routes for ServiceImport", "serviceImport", client.ObjectKeyFromObject(object))
+		log.FromContext(ctx).Error(err, "Could not list routes for ServiceImport", "serviceImport", key)
 		return nil
 	}
 	return r.enqueueHTTPRouteConsumers(ctx, routes)

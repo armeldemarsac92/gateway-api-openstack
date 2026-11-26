@@ -141,7 +141,7 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 	} {
 		require.NoError(t, c.Create(ctx, object), "%T %s", object, object.GetName())
 	}
-	assertRoutes := func(reason gatewayv1.RouteConditionReason, vip string, programmed bool) {
+	assertMembers := func(reason gatewayv1.RouteConditionReason, programmed bool, members ...cloud.Member) {
 		t.Helper()
 		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
 			for _, route := range []client.Object{http, grpc} {
@@ -167,12 +167,20 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 				if refs == nil || refs.Status != wantStatus || refs.Reason != string(reason) || refs.ObservedGeneration != route.GetGeneration() ||
 					!meta.IsStatusConditionTrue(parents[0].Conditions, "Accepted") ||
 					!meta.IsStatusConditionPresentAndEqual(parents[0].Conditions, cfg.Domain()+"/Programmed", programmedStatus) ||
-					!serviceImportTestGraph(provider, route, serviceEndpoint, vip) {
+					!serviceImportTestGraph(provider, route, serviceEndpoint, reason == gatewayv1.RouteReasonResolvedRefs, members) {
 					return false, nil
 				}
 			}
 			return true, nil
 		})
+	}
+	assertRoutes := func(reason gatewayv1.RouteConditionReason, vip string, programmed bool) {
+		t.Helper()
+		if vip == "" {
+			assertMembers(reason, programmed)
+			return
+		}
+		assertMembers(reason, programmed, cloud.Member{Address: vip, Port: 80, RoutedExternal: true})
 	}
 
 	// Start with the API unserved, then let the optional watch discover it.
@@ -185,6 +193,70 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 	object := &mcs.ServiceImport{ObjectMeta: metav1.ObjectMeta{Namespace: targets, Name: shared}, Spec: spec}
 	require.NoError(t, c.Create(ctx, object))
 	assertRoutes(gatewayv1.RouteReasonResolvedRefs, initialVIP, true)
+	t.Run("Headless HTTP and gRPC endpoint lifecycle", func(t *testing.T) {
+		const remoteIP = "10.2.0.31"
+		remote := mcsEndpointSlice(targets, shared, "east", "h2c", remoteIP, 9080)
+		require.NoError(t, c.Create(ctx, remote))
+		// Publishing a slice alongside a ClusterSetIP preserves the VIP target.
+		assertRoutes(gatewayv1.RouteReasonResolvedRefs, initialVIP, true)
+		object.Spec.Type = mcs.Headless
+		object.Spec.IPs = nil
+		require.NoError(t, c.Update(ctx, object))
+		member := cloud.Member{Address: remoteIP, Port: 9080, RoutedExternal: true}
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+
+		remote.Labels[mcs.LabelServiceName] = "another"
+		require.NoError(t, c.Update(ctx, remote))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true)
+		remote.Labels[mcs.LabelServiceName] = shared
+		require.NoError(t, c.Update(ctx, remote))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+
+		remote.Labels[discoveryv1.LabelServiceName] = shared
+		remote.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(object, mcs.SchemeGroupVersion.WithKind("ServiceImport"))}
+		delete(remote.Labels, mcs.LabelSourceCluster)
+		require.NoError(t, c.Update(ctx, remote))
+		// Loss of MCS provenance withdraws the imported member. Its ownership
+		// still prevents the homonymous Service from picking up the address.
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true)
+		remote.Labels[mcs.LabelSourceCluster] = "east"
+		delete(remote.Labels, discoveryv1.LabelServiceName)
+		remote.OwnerReferences = nil
+		require.NoError(t, c.Update(ctx, remote))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+
+		object.Status.EndpointSliceObjects = mcs.EndpointSliceObjectsAbsent
+		require.NoError(t, c.Status().Update(ctx, object))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true)
+		object.Status.EndpointSliceObjects = mcs.EndpointSliceObjectsPresent
+		require.NoError(t, c.Status().Update(ctx, object))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+
+		object.Spec.Ports[0].Port = 81
+		require.NoError(t, c.Update(ctx, object))
+		assertMembers(gatewayv1.RouteReasonBackendNotFound, true)
+		object.Spec.Ports = spec.DeepCopy().Ports
+		require.NoError(t, c.Update(ctx, object))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+
+		require.NoError(t, c.Delete(ctx, importGrant))
+		assertMembers(gatewayv1.RouteReasonRefNotPermitted, true)
+		importGrant = &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: targets, Name: "allow-import"}, Spec: importGrant.Spec}
+		require.NoError(t, c.Create(ctx, importGrant))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+		require.NoError(t, c.Delete(ctx, object))
+		assertMembers(gatewayv1.RouteReasonBackendNotFound, true)
+		object = &mcs.ServiceImport{ObjectMeta: metav1.ObjectMeta{Namespace: targets, Name: shared}, Spec: object.Spec}
+		require.NoError(t, c.Create(ctx, object))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
+
+		require.NoError(t, c.Delete(ctx, remote))
+		assertMembers(gatewayv1.RouteReasonResolvedRefs, true)
+
+		object.Spec = *spec.DeepCopy()
+		require.NoError(t, c.Update(ctx, object))
+		assertRoutes(gatewayv1.RouteReasonResolvedRefs, initialVIP, true)
+	})
 
 	ready := mcs.NewServiceImportCondition(mcs.ServiceImportConditionReady, metav1.ConditionFalse, mcs.ServiceImportReasonIPFamilyNotSupported, "fixture: cannot route this address family")
 	ready.ObservedGeneration = object.Generation
@@ -286,7 +358,7 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 	assertRoutes(gatewayv1.RouteReasonBackendNotFound, "", true)
 }
 
-func serviceImportTestGraph(provider *recordingProvider, route client.Object, serviceEndpoint, vip string) bool {
+func serviceImportTestGraph(provider *recordingProvider, route client.Object, serviceEndpoint string, resolved bool, members []cloud.Member) bool {
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	for _, observation := range slices.Backward(provider.graphSpecs) {
@@ -308,7 +380,7 @@ func serviceImportTestGraph(provider *recordingProvider, route client.Object, se
 				service.Members[0].Address != serviceEndpoint || service.Members[0].Port != 8080 {
 				return false
 			}
-			if vip == "" {
+			if !resolved {
 				return targets[1].BackendIndex == nil
 			}
 			if targets[1].BackendIndex == nil {
@@ -318,8 +390,19 @@ func serviceImportTestGraph(provider *recordingProvider, route client.Object, se
 			return imported.Kind == cloud.HTTPBackendKindServiceImport && imported.RoutedExternal && imported.BackendH2C &&
 				imported.Namespace == service.Namespace && imported.Name == service.Name && imported.Port == service.Port &&
 				identity.HTTPBackendPoolKey(imported) != identity.HTTPBackendPoolKey(service) &&
-				len(imported.Members) == 1 && imported.Members[0].Address == vip && imported.Members[0].Port == 80
+				imported.Unavailable == (len(members) == 0) && slices.Equal(imported.Members, members)
 		}
 	}
 	return false
+}
+
+func mcsEndpointSlice(namespace, service, cluster, portName, address string, port int32) *discoveryv1.EndpointSlice {
+	return &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: service + "-" + cluster, Labels: map[string]string{
+			mcs.LabelServiceName: service, mcs.LabelSourceCluster: cluster, discoveryv1.LabelManagedBy: "mcs.example.test",
+		}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To(portName), Port: ptr.To(port)}},
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{address}}},
+	}
 }

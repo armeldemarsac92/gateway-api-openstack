@@ -189,11 +189,18 @@ func (r *Reconciler) enqueueHTTPRoutesForService(ctx context.Context, object cli
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForEndpointSlice(ctx context.Context, object client.Object) []reconcile.Request {
+	var requests []reconcile.Request
+	if r.Config.MulticlusterServiceImports {
+		key := model.ServiceImportEndpointSliceKey(object.(*discoveryv1.EndpointSlice))
+		if key.Name != "" {
+			requests = r.enqueueRoutesForServiceImportKey(ctx, key)
+		}
+	}
 	serviceName := object.GetLabels()[discoveryv1.LabelServiceName]
 	if serviceName == "" {
-		return nil
+		return requests
 	}
-	return r.enqueueHTTPRoutesForServiceKey(ctx, types.NamespacedName{Namespace: object.GetNamespace(), Name: serviceName})
+	return append(requests, r.enqueueHTTPRoutesForServiceKey(ctx, types.NamespacedName{Namespace: object.GetNamespace(), Name: serviceName})...)
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client.Object) []reconcile.Request {
