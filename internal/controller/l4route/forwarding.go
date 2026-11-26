@@ -74,9 +74,27 @@ func forwardingBackendTarget(backends []transportBackend, groups []routebackend.
 		Weight  int32
 		Members []cloud.Member
 	}
+	type weightedImport struct {
+		Key     client.ObjectKey
+		UID     types.UID
+		Port    *corev1.ServicePort
+		Weight  int32
+		Members []cloud.Member
+	}
+	var imports []weightedImport
 	var xBackends []weightedXBackend
 	services := make([]weightedService, 0, len(backends))
 	for i, backend := range backends {
+		if backend.ref.serviceImport {
+			if backend.importUID == "" {
+				return "", fmt.Errorf("cannot identify the forwarding target for ServiceImport %s", backend.ref.key)
+			}
+			imports = append(imports, weightedImport{
+				Key: backend.ref.key, UID: backend.importUID, Port: backend.port,
+				Weight: backend.ref.weight, Members: groups[i].Members,
+			})
+			continue
+		}
 		if backend.xBackend != nil {
 			if backend.xBackend.UID == "" {
 				return "", fmt.Errorf("cannot identify the forwarding target for XBackend %s", backend.ref.key)
@@ -97,6 +115,14 @@ func forwardingBackendTarget(backends []transportBackend, groups []routebackend.
 				Weight: backend.ref.weight, Members: groups[i].Members,
 			})
 		}
+	}
+	if len(imports) != 0 {
+		return hashForwardingTarget("v4", struct {
+			Services  []weightedService
+			XBackends []weightedXBackend
+			Imports   []weightedImport
+			Route     cloud.RouteSpec
+		}{services, xBackends, imports, spec})
 	}
 	if len(xBackends) != 0 {
 		return hashForwardingTarget("v3", struct {
@@ -159,6 +185,9 @@ func (r *Reconciler) checkpointTarget(ctx context.Context, expected *transportRo
 	}
 	if r.needsDurableTarget(current) || binding.Forwarding.Value != "" {
 		binding.Forwarding = controller.RouteGatewayTarget{Value: target, Generation: current.GetGeneration()}
+		if err := plan.serviceImports.validate(ctx, r); err != nil {
+			return err
+		}
 		if err := r.writeForwardingTarget(ctx, current, bindings, binding); err != nil {
 			return err
 		}
@@ -176,7 +205,7 @@ func (r *Reconciler) needsDurableTarget(route *transportRoute) bool {
 	return r.Config.DefaultGatewaysEnabled() || len(route.status.Parents) >= controller.RouteParentStatusLimit
 }
 
-func (r *Reconciler) recordObservedTarget(ctx context.Context, expected *transportRoute, identity cloud.Identity, target controller.RouteGatewayTarget) error {
+func (r *Reconciler) recordObservedTarget(ctx context.Context, expected *transportRoute, identity cloud.Identity, target controller.RouteGatewayTarget, imports serviceImportInputs) error {
 	release, err := graph.Acquire(ctx, r.Coordinator, identity.GatewayUID)
 	if err != nil {
 		return err
@@ -193,6 +222,9 @@ func (r *Reconciler) recordObservedTarget(ctx context.Context, expected *transpo
 	binding := boundGateway(bindings, identity)
 	if binding.Identity != identity || binding.Lifecycle != controller.RouteAttached || binding.Forwarding != target {
 		return controller.ErrGraphInputChanged
+	}
+	if err := imports.validate(ctx, r); err != nil {
+		return err
 	}
 	binding.Forwarding.Observed = true
 	if err := r.writeForwardingTarget(ctx, current, bindings, binding); err != nil {

@@ -1141,6 +1141,13 @@ func (r desiredRoute) h2cTLSConflict(observed observedRouteGraph) bool {
 	return !r.fixedResponse && r.spec.BackendH2C && observed.pool != nil && observed.pool.TLSEnabled
 }
 
+func (r desiredRoute) memberSubnet(member cloud.Member) string {
+	if member.RoutedExternal {
+		return ""
+	}
+	return r.spec.MemberSubnetID
+}
+
 func (r desiredRoute) backendTransportNeedsWithdrawal(observed observedRouteGraph) bool {
 	return !r.fixedResponse && observed.pool != nil &&
 		(r.spec.BackendH2C != observed.backendH2C || r.h2cTLSConflict(observed))
@@ -1345,7 +1352,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 				key := memberKey(member.Address, member.ProtocolPort)
 				wanted, exists := desiredMembers[key]
 				retry := desired.backendKey != "" && member.ProvisioningStatus == "ERROR"
-				if !exists || member.SubnetID != desired.spec.MemberSubnetID {
+				if !exists || member.SubnetID != desired.memberSubnet(wanted) {
 					kind := routeMutationDeleteMember
 					if retry {
 						kind = routeMutationDisableMember
@@ -2042,7 +2049,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Address:      step.member.Address,
 			ProtocolPort: step.member.Port,
 			Name:         resourceName(desired.spec.Identity, desired.httpRole(roleMember, "")),
-			SubnetID:     desired.spec.MemberSubnetID,
+			SubnetID:     desired.memberSubnet(step.member),
 			AdminStateUp: boolPointer(true),
 			Tags:         tags,
 			Weight:       desired.memberWeight(step.member),

@@ -57,6 +57,7 @@ type routeBackendRevisions struct {
 	grants    []objectRevision
 	services  []objectRevision
 	xBackends []xBackendRevision
+	imports   []serviceImportRevision
 }
 
 // routeCandidateRevision excludes status so observing an unbound route's
@@ -319,6 +320,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, topology.Topology.MemberMode, collect)
 	revisions.services = invalid.services
 	revisions.xBackends = invalid.xBackends
+	revisions.imports = invalid.imports
 	if err != nil || invalid.active != nil && !collect {
 		return nil, "", revisions, err
 	}

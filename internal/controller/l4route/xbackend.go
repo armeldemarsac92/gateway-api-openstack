@@ -57,6 +57,18 @@ func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, 
 }
 
 func (r *Reconciler) transportMembers(ctx context.Context, backend transportBackend, topology classconfig.Resolved, addresses []gatewayv1.GatewayStatusAddress, matchVIPFamily bool) ([]cloud.Member, *model.Diagnostic, error) {
+	if backend.ref.serviceImport {
+		if diagnostic := serviceImportModeIssue(topology.Topology.MemberMode); diagnostic != nil {
+			return nil, diagnostic, nil
+		}
+		if len(backend.importMembers) == 0 {
+			return nil, &model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting for eligible IPv4 endpoints in the backend ServiceImport",
+				NoReadyEndpoints: true,
+			}, nil
+		}
+		return backend.importMembers, nil, nil
+	}
 	if backend.xBackend == nil {
 		return routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, addresses, matchVIPFamily)
 	}

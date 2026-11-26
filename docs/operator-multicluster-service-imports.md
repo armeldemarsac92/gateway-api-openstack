@@ -1,6 +1,6 @@
 # Use multicluster ServiceImport backends
 
-A Gateway can route to the IPv4 VIP of a `ClusterSetIP` import or directly to the IPv4 endpoints of a `Headless` import. This opt-in supports primary `backendRefs` on `HTTPRoute`, `GRPCRoute` and `TLSRoute` with Gateway parents in the Standard and Experimental Gateway API v1.7.0 bundles.
+A Gateway can route to the IPv4 VIP of a `ClusterSetIP` import or directly to the IPv4 endpoints of a `Headless` import. This opt-in supports primary `backendRefs` on `HTTPRoute`, `GRPCRoute`, `TLSRoute`, `TCPRoute` and `UDPRoute` with Gateway parents in the Standard and Experimental Gateway API v1.7.0 bundles.
 
 ## Prerequisites and configuration
 
@@ -21,9 +21,9 @@ backendRefs:
     port: 8080
 ```
 
-A cross-namespace import requires a ReferenceGrant in the import’s namespace. Set `from.group` to `gateway.networking.k8s.io`, specify the source namespace and its exact route kind, and set `to.group` and `to.kind` to `multicluster.x-k8s.io` and `ServiceImport`. Set `to.name` to limit authorization to one import. For TLSRoute use `from.kind: TLSRoute`. Experimental inline rule session persistence requires all backendRefs on that rule to be core Services.
+A cross-namespace import requires a ReferenceGrant in the import’s namespace. Set `from.group` to `gateway.networking.k8s.io`, specify the source namespace and its exact route kind, and set `to.group` and `to.kind` to `multicluster.x-k8s.io` and `ServiceImport`. Set `to.name` to limit authorization to one import. For transport routes use `from.kind: TLSRoute`, `TCPRoute` or `UDPRoute` as appropriate. Experimental inline rule session persistence requires all backendRefs on that rule to be core Services.
 
-For Headless imports the Route selects the ServiceImport port number. Each slice matches that port by name and TCP protocol and supplies the actual destination port. Only eligible unicast IPv4 addresses from ready, serving, non-terminating endpoints receive traffic. A homonymous core Service retains its cluster-local endpoints. An explicit `status.endpointSliceObjects: Absent` leaves a Headless backend without members. When this status field is omitted, the controller checks for provider slices. ClusterSetIP imports use their VIP even when the provider publishes slices.
+For Headless imports the Route selects the ServiceImport port number. Each slice matches that port by name and protocol and supplies the actual destination port. UDPRoute requires UDP on both the imported port and the matching slice port. The other routes use TCP. Only eligible unicast IPv4 addresses from ready, serving, non-terminating endpoints receive traffic. A homonymous core Service retains its cluster-local endpoints. An explicit `status.endpointSliceObjects: Absent` leaves a Headless backend without members. When this status field is omitted, the controller checks for provider slices. ClusterSetIP imports use their VIP even when the provider publishes slices.
 
 An HTTP rule can mix Service and ServiceImport references with separate weights. An invalid target retains its share and returns HTTP 500, or `UNAVAILABLE` for gRPC. Check the Route’s `ResolvedRefs` condition for a missing port, missing import, unsupported transport or missing grant. When the MCS API is absent or the feature is disabled, core Service routing can still run.
 
@@ -64,3 +64,11 @@ A TLSRoute can mix Services and ServiceImports in the same weighted rule. An inv
 The local passthrough Gateway kept both target weights through a TLSRoute ReferenceGrant withdrawal and restoration. [SNI pool state, closed connections and origin counts](qualification/v1.7.0/provider/tlsroute-service-imports/README.md)
 
 The local trials recorded HTTP traffic to distinct published ports, an imported gRPC origin, and TLS connection weights after the final imported endpoint disappeared. [Headless ServiceImport traffic](qualification/v1.7.0/provider/headless-service-imports/README.md)
+
+## Forward TCPRoute connections and UDPRoute packets
+
+A local trial exercised a 3:1 rule with a same-named Service and Headless ServiceImport. Removing the import grant left the separate control route reachable through both protocols. [TCP connections and UDP packet counts](qualification/v1.7.0/provider/transport-service-imports/README.md)
+
+Use the same `backendRefs` example under a TCPRoute or UDPRoute rule on a listener with the matching protocol. The import and a homonymous core Service can appear in the same rule with separate weights. For example, an import at weight 3 and a Service at weight 1 give the import three quarters of the traffic.
+
+Enable `--octavia-tcp-connection-rejection` for TCPRoute or `--octavia-udp-packet-drop` for UDPRoute in a region that advertises the corresponding proportional rejection capability. UDP packet discard requires a dedicated IPv4 Endpoint listener and uses EndpointSlice readiness for Headless imports. A missing grant, invalid import or loss of the last eligible Headless endpoint rejects the TCP share or discards the UDP share. When the applicable capability is unavailable, the controller withdraws forwarding for the affected route until it can honor those weights. A zero-weight import is still validated and contributes no traffic.

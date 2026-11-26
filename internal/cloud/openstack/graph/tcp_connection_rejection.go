@@ -124,8 +124,11 @@ func desiredTransportBatch(desired desiredRoute, observed observedRouteGraph, pe
 }
 
 func transportBatchMember(desired desiredRoute, member cloud.Member, existing pools.Member) (pools.BatchUpdateMemberOpts, error) {
+	// Gophercloud serializes a pointer to an empty subnet as an explicit null.
+	// Omitting it would preserve a previous local member's subnet on update.
+	subnet := desired.memberSubnet(member)
 	opts := pools.BatchUpdateMemberOpts{
-		Address: member.Address, ProtocolPort: member.Port, SubnetID: &desired.spec.MemberSubnetID,
+		Address: member.Address, ProtocolPort: member.Port, SubnetID: &subnet,
 		AdminStateUp: new(true), Backup: new(false), Weight: desired.memberWeight(member),
 	}
 	weightTag := desired.nodePortWeightTag()

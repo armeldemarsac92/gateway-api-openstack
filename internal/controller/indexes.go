@@ -85,6 +85,10 @@ const (
 	IndexL4RouteByBackendService = "spec.l4RouteBackendService"
 	// IndexL4RouteByBackendNamespace indexes cross-namespace TCPRoute and UDPRoute Service references.
 	IndexL4RouteByBackendNamespace = "spec.l4RouteBackendNamespace"
+	// IndexL4RouteByServiceImport indexes transport Routes by backend ServiceImport key.
+	IndexL4RouteByServiceImport = "spec.l4RouteBackendServiceImport"
+	// IndexL4RouteByServiceImportNamespace indexes cross-namespace transport Route ServiceImport references.
+	IndexL4RouteByServiceImportNamespace = "spec.l4RouteBackendServiceImportNamespace"
 	// IndexL4RouteByBoundGateway indexes TCPRoutes and UDPRoutes by bound Gateway key.
 	IndexL4RouteByBoundGateway = "metadata.l4RouteBoundGateway"
 	// IndexTLSRouteByGateway indexes declared and controller-owned status parents.
@@ -274,15 +278,25 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				return statusGatewayKeys(config, object.GetNamespace(), statuses)
 			}},
 			controllerFieldIndex{object: route, field: IndexL4RouteByBackendService, extract: func(object client.Object) []string {
-				return l4BackendKeys(object, false)
+				return l4BackendKeys(object, model.BackendServiceReference, false)
 			}},
 			controllerFieldIndex{object: route, field: IndexL4RouteByBackendNamespace, extract: func(object client.Object) []string {
-				return l4BackendKeys(object, true)
+				return l4BackendKeys(object, model.BackendServiceReference, true)
 			}},
 			controllerFieldIndex{object: route, field: IndexL4RouteByBoundGateway, extract: func(object client.Object) []string {
 				return boundGatewayKeys(config, object)
 			}},
 		)
+		if config.MulticlusterServiceImports {
+			indexes = append(indexes,
+				controllerFieldIndex{object: route, field: IndexL4RouteByServiceImport, extract: func(object client.Object) []string {
+					return l4BackendKeys(object, model.ServiceImportReference, false)
+				}},
+				controllerFieldIndex{object: route, field: IndexL4RouteByServiceImportNamespace, extract: func(object client.Object) []string {
+					return l4BackendKeys(object, model.ServiceImportReference, true)
+				}},
+			)
+		}
 	}
 	if config.BackendTLSPolicy {
 		indexes = append(indexes,
@@ -565,12 +579,12 @@ func hasCoreServiceBackend(route *gatewayv1.HTTPRoute) bool {
 	return false
 }
 
-func l4BackendKeys(object client.Object, namespacesOnly bool) []string {
+func l4BackendKeys(object client.Object, reference func(string, gatewayv1.BackendObjectReference) (types.NamespacedName, bool), namespacesOnly bool) []string {
 	namespace := object.GetNamespace()
 	keys := make(map[string]struct{})
 	addBackends := func(backends []gatewayv1.BackendRef) {
 		for _, backend := range backends {
-			key, supported := model.BackendServiceReference(namespace, backend.BackendObjectReference)
+			key, supported := reference(namespace, backend.BackendObjectReference)
 			if !supported || key.Namespace == "" || key.Name == "" {
 				continue
 			}
