@@ -429,6 +429,7 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 		assertMirrors(resolved, resolved, cloud.Member{Address: initialVIP, Port: 80, RoutedExternal: true})
 
 		remote := mcsEndpointSlice(targets, shared, "east", "h2c", "10.2.0.31", 9080)
+		remote.Labels[discoveryv1.LabelServiceName] = shared
 		require.NoError(t, c.Create(ctx, remote))
 		object.Spec.Type, object.Spec.IPs = mcs.Headless, nil
 		require.NoError(t, c.Update(ctx, object))
@@ -443,6 +444,14 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 		assertMirrors(resolved, resolved)
 
 		remote.Endpoints[0].Conditions.Ready = ptr.To(true)
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved, cloud.Member{Address: "10.2.0.32", Port: 9081, RoutedExternal: true})
+
+		manager := remote.Labels[discoveryv1.LabelManagedBy]
+		delete(remote.Labels, discoveryv1.LabelManagedBy)
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved)
+		remote.Labels[discoveryv1.LabelManagedBy] = manager
 		require.NoError(t, c.Update(ctx, remote))
 		assertMirrors(resolved, resolved, cloud.Member{Address: "10.2.0.32", Port: 9081, RoutedExternal: true})
 

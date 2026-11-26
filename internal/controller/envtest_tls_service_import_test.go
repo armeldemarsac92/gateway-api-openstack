@@ -198,6 +198,7 @@ func testTLSRouteServiceImportBackends(t *testing.T, restConfig *rest.Config, c 
 	t.Run("Headless TLS endpoint lifecycle", func(t *testing.T) {
 		const remoteIP = "10.4.0.31"
 		remote := mcsEndpointSlice(targets, shared, "east", "tls", remoteIP, 7443)
+		remote.Labels[discoveryv1.LabelServiceName] = shared
 		remote.Ports = append(remote.Ports, discoveryv1.EndpointPort{Name: ptr.To("other"), Port: ptr.To(int32(10443))})
 		require.NoError(t, c.Create(ctx, remote))
 		object.Spec.Type = mcs.Headless
@@ -215,6 +216,15 @@ func testTLSRouteServiceImportBackends(t *testing.T, restConfig *rest.Config, c 
 		require.NoError(t, c.Update(ctx, remote))
 		assertDestination(weighted, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 7443, true)
 		assertDestination(independent, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 10443, true)
+
+		manager := remote.Labels[discoveryv1.LabelManagedBy]
+		delete(remote.Labels, discoveryv1.LabelManagedBy)
+		require.NoError(t, c.Update(ctx, remote))
+		assertRoute(weighted, gatewayv1.RouteReasonResolvedRefs, "", "", true)
+		assertRoute(independent, gatewayv1.RouteReasonResolvedRefs, "", "", false)
+		remote.Labels[discoveryv1.LabelManagedBy] = manager
+		require.NoError(t, c.Update(ctx, remote))
+		assertDestination(weighted, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 7443, true)
 
 		object.Spec = *spec.DeepCopy()
 		require.NoError(t, c.Update(ctx, object))

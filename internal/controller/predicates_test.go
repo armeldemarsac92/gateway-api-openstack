@@ -377,6 +377,10 @@ func TestEndpointSlicePredicate(t *testing.T) {
 	withoutSource := imported.DeepCopy()
 	delete(withoutSource.Labels, mcs.LabelSourceCluster)
 	testPredicateUpdate(t, pred, imported, withoutSource, true, "ownerless import slice loses its source cluster")
+	withoutManager := imported.DeepCopy()
+	delete(withoutManager.Labels, discoveryv1.LabelManagedBy)
+	testPredicateUpdate(t, pred, imported, withoutManager, true, "ownerless import slice loses its provider manager")
+	testPredicateUpdate(t, pred, withoutManager, imported, true, "ownerless import slice regains its provider manager")
 	ownerChanged := controlled.DeepCopy()
 	ownerChanged.OwnerReferences[0].UID = "current"
 	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service UID changed")

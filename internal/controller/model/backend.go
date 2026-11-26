@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 )
 
 // ResolveBackends resolves each declared backend without redistributing its weight.
@@ -265,10 +266,11 @@ func EndpointSliceOwnerMatchesService(slice *discoveryv1.EndpointSlice, service 
 		return false
 	}
 	owner := endpointSliceServiceOwner(slice)
-	// An ownerless slice with an MCS association and provider manager still
-	// belongs to the import when it loses the source-cluster label.
+	// For an ownerless slice, the MCS name and either provenance label are
+	// enough to exclude it from a homonymous Service, even when the import
+	// requires both labels to use it.
 	if ServiceImportEndpointSliceKey(slice).Name == service.Name &&
-		(isMCSEndpointSlice(slice) || owner == nil && hasServiceImportProviderManager(slice)) {
+		(isMCSEndpointSlice(slice) || owner == nil && (slice.Labels[mcs.LabelSourceCluster] != "" || hasServiceImportProviderManager(slice))) {
 		return false
 	}
 	return service.UID == "" || owner == nil || (owner.UID == service.UID && owner.Name == service.Name)
