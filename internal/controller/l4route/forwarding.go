@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -345,7 +346,12 @@ func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transpor
 	if err != nil || !ready {
 		return false, err
 	}
-	_, target, diagnostic, err := r.buildRouteSpec(ctx, route, parent.gateway, parent.listeners[0], backends, rejectWeight, topology, plan.listenerPorts...)
+	// A manager that cannot verify the installed API version cannot refresh
+	// the destinations of an external hostname.
+	if slices.ContainsFunc(backends, func(backend transportBackend) bool { return backend.externalHostname() != "" }) {
+		return false, nil
+	}
+	_, target, diagnostic, err := r.buildRouteSpec(ctx, route, parent.gateway, parent.listeners[0], backends, rejectWeight, topology, nil, plan.listenerPorts...)
 	if err != nil || diagnostic != nil {
 		return false, err
 	}

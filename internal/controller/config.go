@@ -118,7 +118,7 @@ type Config struct {
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
 	GatewayAPIChannel string
-	// XBackendExternalHostnameClasses opt in to routed ExternalHostname HTTP backends.
+	// XBackendExternalHostnameClasses opt in to routed XBackend ExternalHostname backends.
 	XBackendExternalHostnameClasses []string
 	// XBackendExternalHostnameCIDRs bounds the destinations that Amphora may use.
 	XBackendExternalHostnameCIDRs []netip.Prefix

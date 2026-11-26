@@ -52,6 +52,7 @@ type Reconciler struct {
 	Protocol                        gatewayv1.ProtocolType // TCP (including the zero value) or UDP.
 	TCPConnectionRejectionAvailable func(context.Context) (bool, error)
 	UDPPacketDropAvailable          func(context.Context) (bool, error)
+	externalHostnames               tcpExternalHostnameCache
 }
 
 type routePlan struct {
@@ -65,6 +66,7 @@ type routePlan struct {
 	listenerPorts  []int
 	detach         bool
 	requeue        time.Duration
+	dnsRefreshAt   time.Time
 	readError      error
 	serviceImports serviceImportInputs
 }
@@ -154,6 +156,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			continue
 		}
 		outcome, reconcileErr := r.reconcilePlan(ctx, route, binding, &plan)
+		if !plan.dnsRefreshAt.IsZero() {
+			refreshAfter := max(time.Millisecond, plan.dnsRefreshAt.Sub(r.externalHostnames.time()))
+			outcome = mergeResult(outcome, ctrl.Result{RequeueAfter: refreshAfter})
+		}
 		result = mergeResult(result, outcome)
 		err = errors.Join(err, reconcileErr, plan.readError)
 		if errors.Is(reconcileErr, controller.ErrGraphInputChanged) || errors.Is(reconcileErr, controller.ErrUnsupportedGatewayAPIVersion) {
@@ -371,7 +377,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, topologyMode, collectShare)
+	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, r.tcpXBackendProfile(parent.gateway, topologyMode), collectShare)
 	if err != nil {
 		return routePlan{}, err
 	}
@@ -438,7 +444,9 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.requeue = 5 * time.Second
 		return plan, nil
 	}
-	desired, target, diagnostic, err := r.buildRouteSpec(ctx, route, parent.gateway, parent.listeners[0], backends, rejectWeight, topology, plan.listenerPorts...)
+	var dns tcpExternalHostnameObservations
+	desired, target, diagnostic, err := r.buildRouteSpec(ctx, route, parent.gateway, parent.listeners[0], backends, rejectWeight, topology, &dns, plan.listenerPorts...)
+	plan.dnsRefreshAt = dns.refreshAt
 	if err != nil {
 		if !collectShare {
 			return routePlan{}, err
@@ -523,18 +531,29 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 }
 
 func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []transportBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
-	return r.buildRouteSpec(ctx, route, gateway, listener, backends, 0, topology, listenerPorts...)
+	return r.buildRouteSpec(ctx, route, gateway, listener, backends, 0, topology, &tcpExternalHostnameObservations{}, listenerPorts...)
 }
 
-func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []transportBackend, rejectWeight int, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
+func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []transportBackend, rejectWeight int, topology classconfig.Resolved, dns *tcpExternalHostnameObservations, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
 	udpDrop := r.udpPacketDropEnabled(gateway, topology, listenerPorts)
 	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
 	groups := make([]routebackend.WeightedServiceMembers, 0, len(backends))
 	serving := make([]transportBackend, 0, len(backends))
 	var noEndpoints *model.Diagnostic
+	answers, err := r.observeTCPExternalHostnames(ctx, gateway, route, backends, dns)
+	if err != nil {
+		return cloud.RouteSpec{}, "", nil, err
+	}
 	for _, backend := range backends {
-		members, diagnostic, err := r.transportMembers(ctx, backend, topology, gateway.Status.Addresses, matchVIPFamily)
+		var members []cloud.Member
+		var diagnostic *model.Diagnostic
+		var err error
+		if hostname := backend.externalHostname(); hostname != "" {
+			members = routedTCPMembers(answers[hostname], int(backend.xBackend.Spec.Port.Number))
+		} else {
+			members, diagnostic, err = r.transportMembers(ctx, backend, topology, gateway.Status.Addresses, matchVIPFamily)
+		}
 		if err == nil && (r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
 			diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
 			rejectWeight += int(backend.ref.weight)

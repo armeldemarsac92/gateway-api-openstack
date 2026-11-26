@@ -410,6 +410,23 @@ The controller shares one DNS observation across the mutations of a Gateway grap
 
 ExternalHostname and EndpointSelector support HTTP and HTTP/1.1. For a cleartext HTTP/2 origin, use `protocol: H2C` and `tls.mode: None`, enable `--octavia-backend-h2c` and verify the region advertises `backend_h2c_v1`. Use `protocol: HTTP2` with authenticated TLS for a server negotiating `h2`. [HTTP/2 transport and health probes](../qualification/v1.7.0/provider/xbackend-http2.md) TLS defaults to `None`. Use `ServerOnly` with authenticated Octavia backend TLS and an explicit `validation.hostname`. `ClientAndServer` also requires an operator-enrolled XBackend client certificate. In a local cleartext trial, an unchanged HTTPRoute followed A to B, returned HTTP 503 on NXDOMAIN and served A again after recovery. The sibling Service continued to return HTTP 200. Standard installations omit XBackend. A local Experimental mutual TLS run followed DNS from A to B and back. A served HTTP 200. B presented a certificate from the trusted CA with a different DNS name, and the Gateway returned HTTP 503. The HTTPRoute stayed accepted throughout. Native GRPCRoutes can use the same hostname profile. The upstream API allows session persistence only on EndpointSelector. [GRPCRoute configuration](#forward-a-grpcroute-to-an-xbackend) · [Mutual TLS across a DNS change](../qualification/v1.7.0/provider/xbackend-external-client-tls-evidence/receipt.json) · [DNS traffic and member changes](../qualification/v1.7.0/provider/xbackend-external-hostname-evidence/receipt.json) · [Configure XBackend server authentication](../operator-octavia-backend-tls-policy.md#protect-an-experimental-xbackend) · [Enroll an XBackend client certificate](../operator-octavia-backend-tls-policy.md#present-an-xbackend-client-certificate) · [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go)
 
+### Route TCP to an Experimental XBackend hostname
+
+Use the Experimental bundle, the Amphora Endpoint GatewayClass with Unmanaged backend security, and the [same hostname class, IPv4 CIDR and Service DNS settings](#route-http-to-an-experimental-xbackend-hostname). The operator supplies the network path from Amphora to the external origin. When creating a routed member individually, the controller omits `subnet_id`. The weighted member batch used for TCP connection rejection sends `subnet_id: null` for routed members so Octavia can clear a previous local subnet binding.
+
+In the XBackend example above, set `spec.protocol: TCP` or let the backend inherit TCP from the route. Leave `spec.tls` omitted or set `spec.tls.mode: None`. Amphora forwards the TCP stream without originating TLS. The controller rejects `ServerOnly` and `ClientAndServer` on TCPRoute.
+
+Attach a TCPRoute to a TCP listener on the enabled class and place the following reference in its rule. The XBackend lives in the route's namespace and supplies the port.
+
+```yaml
+backendRefs:
+  - group: gateway.networking.x-k8s.io
+    kind: XBackend
+    name: origin
+```
+
+The controller refreshes DNS for the forwarding route every 24–36 seconds, including when Kubernetes objects are unchanged. When resolution returns no allowed IPv4 destinations, the controller withdraws its routed members and uses the existing TCP behavior for an unavailable backend. An allowed answer restores the members. With [proportional TCP connection rejection](../operator-octavia-tcp-connection-rejection.md) enabled, the unavailable backend's weight goes to rejection. Check `Accepted` on the XBackend's Gateway ancestor and `ResolvedRefs` on the TCPRoute for configuration errors. Use the route's `<controller-domain>/Programmed` condition to follow changes in Octavia.
+
 ## Worker NodePort members
 
 A Node is eligible only when it is ready, schedulable, not being deleted, and has a valid IP address of the configured `nodeAddressType`.

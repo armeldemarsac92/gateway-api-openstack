@@ -43,7 +43,15 @@ func (r *Reconciler) tcpXBackendsEnabled() bool {
 	return r.protocol() == gatewayv1.TCPProtocolType && r.Config.XBackendEnabled()
 }
 
-func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, mode cloud.MemberMode) (*gatewayx.XBackend, *model.Diagnostic, error) {
+func (r *Reconciler) tcpXBackendProfile(gateway *gatewayv1.Gateway, mode cloud.MemberMode) model.XBackendProfile {
+	return model.XBackendProfile{
+		MemberMode:        mode,
+		ExternalHostname:  r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
+		ServiceDNSDomains: r.Config.XBackendServiceDNSDomains,
+	}
+}
+
+func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, profile model.XBackendProfile) (*gatewayx.XBackend, *model.Diagnostic, error) {
 	backend := &gatewayx.XBackend{}
 	err := r.APIReader.Get(ctx, key, backend)
 	switch {
@@ -52,7 +60,7 @@ func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, 
 	case err != nil:
 		return nil, nil, fmt.Errorf("get TCP XBackend %s: %w", key, err)
 	default:
-		return backend, model.ValidateTCPXBackend(backend.Spec, mode), nil
+		return backend, model.ValidateTCPXBackend(backend.Spec, profile), nil
 	}
 }
 

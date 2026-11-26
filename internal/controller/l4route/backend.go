@@ -222,7 +222,7 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 }
 
 // resolveBackends validates authorized references and returns the backends that carry traffic.
-func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode, topologyMode cloud.MemberMode, collect bool) ([]transportBackend, backendRejections, error) {
+func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode cloud.MemberMode, profile model.XBackendProfile, collect bool) ([]transportBackend, backendRejections, error) {
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	readErrors := make(map[client.ObjectKey]error)
 	imports := make(map[client.ObjectKey]serviceImportRevision)
@@ -236,7 +236,7 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 	var rejections backendRejections
 	for _, ref := range refs {
 		if ref.xBackend {
-			backend, diagnostic, err := r.readTCPXBackend(ctx, ref.key, topologyMode)
+			backend, diagnostic, err := r.readTCPXBackend(ctx, ref.key, profile)
 			if err != nil {
 				if rejections.recordReadError(ref.weight, err, collect) {
 					return nil, rejections, err
@@ -271,7 +271,7 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 			}
 			port, destinations, diagnostic := observation.Destinations(ref.port, r.kind(), false)
 			if diagnostic == nil {
-				diagnostic = serviceImportModeIssue(topologyMode)
+				diagnostic = serviceImportModeIssue(profile.MemberMode)
 			}
 			if diagnostic != nil {
 				if rejections.reject(ref.weight, diagnostic, collect) {

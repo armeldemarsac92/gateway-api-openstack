@@ -145,10 +145,11 @@ func (r *Reconciler) ObserveXBackendAncestors(ctx context.Context, backend *gate
 				mode = topology.Topology.MemberMode
 			}
 			status, reason, message := metav1.ConditionTrue, string(gatewayx.BackendReasonAccepted), "XBackend is accepted by the Gateway"
-			if diagnostic := model.ValidateTCPXBackend(backend.Spec, mode); diagnostic != nil {
+			if diagnostic := model.ValidateTCPXBackend(backend.Spec, r.tcpXBackendProfile(parents[0].gateway, mode)); diagnostic != nil {
 				status, reason, message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
-			} else if mode == "" {
-				status, reason, message = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"
+				if reason == string(gatewayv1.RouteReasonPending) {
+					status = metav1.ConditionUnknown
+				}
 			}
 			ancestors[gateway] = controller.Condition(string(gatewayx.BackendConditionAccepted), status, reason, message, backend.Generation)
 		}

@@ -202,6 +202,7 @@ func (r *Reconciler) checkpointDetach(ctx context.Context, expected *transportRo
 	if err := r.Patch(ctx, route.Object, controller.OptimisticMergeFrom(base)); err != nil {
 		return err
 	}
+	r.InvalidateExternalHostnames(identity)
 	*expected = *route
 	return nil
 }

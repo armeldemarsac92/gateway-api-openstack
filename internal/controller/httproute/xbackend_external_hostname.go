@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"net"
 	"net/netip"
 	"slices"
 	"sync"
@@ -28,26 +27,18 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
-
-const (
-	externalHostnameRefresh       = 30 * time.Second
-	externalHostnameLookupTimeout = 2 * time.Second
-	externalHostnameLookupWorkers = 8
-)
-
-type ipLookup func(context.Context, string, string) ([]netip.Addr, error)
 
 // ExternalHostnameCache preserves DNS results across the mutations of a
 // Gateway graph. It holds no mutation authority and is empty on manager startup.
 type ExternalHostnameCache struct {
-	lookup    ipLookup
+	lookup    routebackend.IPLookup
 	now       func() time.Time
 	mu        sync.Mutex
 	windows   map[types.UID]externalHostnameWindow
@@ -99,7 +90,7 @@ func (c *ExternalHostnameCache) window(uid types.UID, gateway externalHostnameGa
 				delete(c.windows, uid)
 			}
 		}
-		c.nextPrune = now.Add(externalHostnameRefresh)
+		c.nextPrune = now.Add(routebackend.ExternalHostnameRefresh)
 	}
 	value := c.windows[uid]
 	if !now.Before(value.expires) || value.gateway != gateway {
@@ -222,7 +213,7 @@ func (r *Reconciler) resolveExternalHostnameMembers(ctx context.Context, inputs 
 		}
 		window.answers[observation.Key] = answer
 	}
-	if err := r.resolveExternalHostnames(ctx, cache, queries); err != nil {
+	if err := routebackend.ResolveExternalHostnames(ctx, cache.lookup, queries, r.Config.XBackendExternalHostnameCIDRs); err != nil {
 		return time.Time{}, err
 	}
 	for key, answer := range window.answers {
@@ -240,7 +231,7 @@ func (r *Reconciler) resolveExternalHostnameMembers(ctx context.Context, inputs 
 		}
 	}
 	if window.expires.IsZero() {
-		window.expires = cache.time().Add(controller.OpenStackResyncAfter(externalHostnameRefresh, gateway.UID))
+		window.expires = cache.time().Add(controller.OpenStackResyncAfter(routebackend.ExternalHostnameRefresh, gateway.UID))
 	}
 	cache.store(gateway.UID, window)
 	return window.expires, nil
@@ -251,48 +242,4 @@ func sameExternalHostnameQuestion(a, b externalHostnameAnswer) bool {
 		maps.EqualFunc(a.consumers, b.consumers, func(a, b externalHostnameConsumer) bool {
 			return a.generation == b.generation && a.namespaceUID == b.namespaceUID && slices.Equal(a.sections, b.sections)
 		})
-}
-
-func (r *Reconciler) resolveExternalHostnames(ctx context.Context, cache *ExternalHostnameCache, queries map[string]*[]netip.Addr) error {
-	lookup := cache.lookup
-	if lookup == nil {
-		lookup = net.DefaultResolver.LookupNetIP
-	}
-	var workers sync.WaitGroup
-	slots := make(chan struct{}, externalHostnameLookupWorkers)
-	for hostname, answer := range queries {
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			workers.Wait()
-			return ctx.Err()
-		}
-		workers.Go(func() {
-			defer func() { <-slots }()
-			*answer = r.lookupExternalHostname(ctx, lookup, hostname)
-		})
-	}
-	workers.Wait()
-	return ctx.Err()
-}
-
-func (r *Reconciler) lookupExternalHostname(ctx context.Context, lookup ipLookup, hostname string) []netip.Addr {
-	query, cancel := context.WithTimeout(ctx, externalHostnameLookupTimeout)
-	defer cancel()
-	addresses, err := lookup(query, "ip4", hostname)
-	if err != nil {
-		log.FromContext(ctx).V(2).Info("ExternalHostname lookup returned no usable addresses", "hostname", hostname, "error", err)
-		return nil
-	}
-	usable := make([]netip.Addr, 0, len(addresses))
-	for _, address := range addresses {
-		// The Go resolver may represent A answers as IPv4-mapped IPv6.
-		address = address.Unmap()
-		if address.Is4() && address.IsGlobalUnicast() && !address.IsLoopback() &&
-			slices.ContainsFunc(r.Config.XBackendExternalHostnameCIDRs, func(prefix netip.Prefix) bool { return prefix.Contains(address) }) {
-			usable = append(usable, address)
-		}
-	}
-	slices.SortFunc(usable, netip.Addr.Compare)
-	return slices.Compact(usable)
 }

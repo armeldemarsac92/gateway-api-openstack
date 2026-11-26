@@ -50,6 +50,7 @@ import (
 	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
@@ -174,7 +175,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend and Service policy session cookies or HTTP headers with optional absolute timeout")
 	flag.BoolVar(&routeSessionPersistence, "experimental-route-session-persistence", false, "use regional Octavia capabilities for Experimental HTTPRoute and GRPCRoute rule session persistence")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
-	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
+	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed XBackend ExternalHostname backends (repeatable)", func(class string) error {
 		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
 		return nil
 	})
@@ -475,7 +476,10 @@ func run(ctx context.Context) error {
 		routeReconciler.ExternalHostnames = &httproute.ExternalHostnameCache{}
 		gatewayReconciler.GraphRefresh = &graph.GatewayRefreshQueue{}
 		writer.GatewayRefresh = gatewayReconciler.GraphRefresh
-		writer.InvalidateExternalHostnames = routeReconciler.ExternalHostnames.Invalidate
+		writer.InvalidateExternalHostnames = func(identity cloud.Identity) {
+			routeReconciler.ExternalHostnames.Invalidate(identity)
+			tcpReconciler.InvalidateExternalHostnames(identity)
+		}
 	}
 	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	importWatch, err := controller.SetupServiceImportWatch(manager, controllerConfig.MulticlusterServiceImports)

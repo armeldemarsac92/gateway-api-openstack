@@ -273,14 +273,8 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 			return diagnostic
 		}
 	case gatewayx.BackendTypeExternalHostname:
-		if !profile.ExternalHostname {
-			return backendDiagnostic(unsupported, "XBackend ExternalHostname requires operator opt-in for this GatewayClass")
-		}
-		if spec.EndpointSelector != nil || spec.ExternalHostname == nil {
-			return backendDiagnostic(unsupported, "XBackend ExternalHostname requires externalHostname")
-		}
-		if !validExternalHostname(string(spec.ExternalHostname.Hostname), profile.ServiceDNSDomains) {
-			return backendDiagnostic(unsupported, "XBackend ExternalHostname must be a DNS hostname outside the Kubernetes Service domains")
+		if diagnostic := validateXBackendExternalHostname(spec, profile); diagnostic != nil {
+			return diagnostic
 		}
 	default:
 		return backendDiagnostic(unsupported, "XBackend type is unsupported")
@@ -341,13 +335,11 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 }
 
 // ValidateTCPXBackend checks the backend in a raw Gateway TCPRoute context.
-func ValidateTCPXBackend(spec gatewayx.BackendSpec, mode cloud.MemberMode) *Diagnostic {
+func ValidateTCPXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
 	const unsupported = gatewayv1.RouteReasonUnsupportedValue
 	switch {
-	case mode != "" && mode != cloud.MemberModeEndpoint:
+	case profile.MemberMode != "" && profile.MemberMode != cloud.MemberModeEndpoint:
 		return backendDiagnostic(unsupported, "TCP XBackend requires Endpoint member mode with Unmanaged backend security")
-	case spec.Type != gatewayx.BackendTypeEndpointSelector:
-		return backendDiagnostic(unsupported, "TCP XBackend requires type EndpointSelector")
 	case spec.Port.Number < 1 || spec.Port.Number > 65535:
 		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
 	case ptr.Deref(spec.Protocol, gatewayx.BackendProtocolTCP) != gatewayx.BackendProtocolTCP:
@@ -357,7 +349,32 @@ func ValidateTCPXBackend(spec gatewayx.BackendSpec, mode cloud.MemberMode) *Diag
 	case spec.SessionPersistence != nil:
 		return backendDiagnostic(unsupported, "HTTP Cookie and Header session persistence is unsupported on TCP XBackend")
 	}
-	return validateXBackendEndpointSelector(spec)
+	var diagnostic *Diagnostic
+	switch spec.Type {
+	case gatewayx.BackendTypeEndpointSelector:
+		diagnostic = validateXBackendEndpointSelector(spec)
+	case gatewayx.BackendTypeExternalHostname:
+		diagnostic = validateXBackendExternalHostname(spec, profile)
+	default:
+		return backendDiagnostic(unsupported, "TCP XBackend requires type EndpointSelector or ExternalHostname")
+	}
+	if diagnostic == nil && profile.MemberMode == "" {
+		return backendDiagnostic(gatewayv1.RouteReasonPending, "Gateway member mode is pending")
+	}
+	return diagnostic
+}
+
+func validateXBackendExternalHostname(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
+	const unsupported = gatewayv1.RouteReasonUnsupportedValue
+	switch {
+	case !profile.ExternalHostname:
+		return backendDiagnostic(unsupported, "XBackend ExternalHostname requires operator opt-in for this GatewayClass")
+	case spec.EndpointSelector != nil || spec.ExternalHostname == nil:
+		return backendDiagnostic(unsupported, "XBackend ExternalHostname requires externalHostname")
+	case !validExternalHostname(string(spec.ExternalHostname.Hostname), profile.ServiceDNSDomains):
+		return backendDiagnostic(unsupported, "XBackend ExternalHostname must be a DNS hostname outside the Kubernetes Service domains")
+	}
+	return nil
 }
 
 func validateXBackendEndpointSelector(spec gatewayx.BackendSpec) *Diagnostic {
