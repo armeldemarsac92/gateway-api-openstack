@@ -370,6 +370,13 @@ func TestEndpointSlicePredicate(t *testing.T) {
 	importOwned := base.DeepCopy()
 	importOwned.OwnerReferences = []metav1.OwnerReference{{APIVersion: mcs.SchemeGroupVersion.String(), Kind: "ServiceImport", Name: "backend", UID: "import"}}
 	testPredicateUpdate(t, pred, base, importOwned, true, "explicit ServiceImport owner excludes the slice from the local Service")
+	imported := base.DeepCopy()
+	imported.Labels[mcs.LabelServiceName] = "backend"
+	imported.Labels[discoveryv1.LabelManagedBy] = "mcs.example.test"
+	imported.Labels[mcs.LabelSourceCluster] = "east"
+	withoutSource := imported.DeepCopy()
+	delete(withoutSource.Labels, mcs.LabelSourceCluster)
+	testPredicateUpdate(t, pred, imported, withoutSource, true, "ownerless import slice loses its source cluster")
 	ownerChanged := controlled.DeepCopy()
 	ownerChanged.OwnerReferences[0].UID = "current"
 	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service UID changed")

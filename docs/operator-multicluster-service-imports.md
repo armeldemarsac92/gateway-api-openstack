@@ -29,6 +29,28 @@ An HTTP rule can mix Service and ServiceImport references with separate weights.
 
 A valid Headless reference with no eligible members keeps `ResolvedRefs=True`. Its share uses the existing unavailable backend behavior, including HTTP 503 or gRPC `UNAVAILABLE`. TLSRoute rejects that share under the same regional capability requirements as an invalid backend. IPv6 endpoint forwarding and MCS providers that expose Headless endpoints through another mechanism are outside this profile.
 
+## Mirror HTTPRoute and GRPCRoute requests
+
+Enable `--octavia-http-request-mirror` alongside `--multicluster-service-imports`. A mirror in a `backendRefs[].filters` list also requires `--octavia-weighted-http-targets`. Use a region that advertises the [HTTP request mirroring capabilities](qualification/v1.7.0/provider/http-request-mirror.md) or [gRPC request mirroring capabilities](getting-started.md#grpc-request-mirroring) for the route protocol. The same IPv4 Endpoint and unmanaged backend security prerequisites apply.
+
+Add a `RequestMirror` filter under a rule or under a selected backendRef. This example sends a copy of 10% of the matching requests to the import’s TCP port.
+
+```yaml
+filters:
+  - type: RequestMirror
+    requestMirror:
+      percent: 10
+      backendRef:
+        group: multicluster.x-k8s.io
+        kind: ServiceImport
+        name: catalog-shadow
+        port: 8080
+```
+
+Each selected filter occurrence sends one copy. With a Headless import, Octavia selects one eligible endpoint from the pool. With a ClusterSetIP import, Octavia sends the copy to the VIP and the MCS provider selects the endpoint. A GRPCRoute mirror requires an h2c import port and regional h2c support. An HTTPRoute mirror uses cleartext HTTP/1.1 or h2c according to the imported port’s appProtocol. The ServiceImport profile uses cleartext transport. BackendTLSPolicy applies to core Service destinations.
+
+A cross-namespace mirror needs a grant for the import and the exact route kind. A single ReferenceGrant can authorize an import and a homonymous core Service with two `spec.to` entries, one for each target kind. A missing or invalid import or a revoked grant removes the affected copies while the primary continues. Check `ResolvedRefs` for the reference error. An eligible Headless import without available endpoints, a zero sampling ratio or a zero-weight parent backendRef produces no copies. The controller still checks these references and reports their resolution status.
+
 ## Forward TLSRoute connections
 
 Enable the [passthrough](operator-octavia-tls-sni-passthrough.md) or [termination](qualification/v1.7.0/provider/tlsroute-termination.md) profile for the listener. Both sections of an eligible mixed listener can use ServiceImports. Passthrough sends the client TLS stream to the imported TCP port. Termination sends the decrypted stream to the imported TCP port. Service BackendTLSPolicies apply only to core Service references.

@@ -261,11 +261,16 @@ func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 // EndpointSliceOwnerMatchesService keeps an imported slice for a homonymous
 // ServiceImport separate and checks the UID of any controlling core Service.
 func EndpointSliceOwnerMatchesService(slice *discoveryv1.EndpointSlice, service *corev1.Service) bool {
-	if hasServiceImportOwner(slice, service.Name) ||
-		ServiceImportEndpointSliceKey(slice).Name == service.Name && isMCSEndpointSlice(slice) {
+	if hasServiceImportOwner(slice, service.Name) {
 		return false
 	}
 	owner := endpointSliceServiceOwner(slice)
+	// An ownerless slice with an MCS association and provider manager still
+	// belongs to the import when it loses the source-cluster label.
+	if ServiceImportEndpointSliceKey(slice).Name == service.Name &&
+		(isMCSEndpointSlice(slice) || owner == nil && hasServiceImportProviderManager(slice)) {
+		return false
+	}
 	return service.UID == "" || owner == nil || (owner.UID == service.UID && owner.Name == service.Name)
 }
 

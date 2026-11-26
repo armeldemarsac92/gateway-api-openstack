@@ -243,10 +243,10 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 	if config.MulticlusterServiceImports {
 		indexes = append(indexes,
 			controllerFieldIndex{object: &gatewayv1.HTTPRoute{}, field: IndexHTTPRouteByServiceImport, extract: func(object client.Object) []string {
-				return serviceImportBackendKeys(object.(*gatewayv1.HTTPRoute), false)
+				return serviceImportBackendKeys(object.(*gatewayv1.HTTPRoute), false, config.HTTPRequestMirror)
 			}},
 			controllerFieldIndex{object: &gatewayv1.HTTPRoute{}, field: IndexHTTPRouteByServiceImportNamespace, extract: func(object client.Object) []string {
-				return serviceImportBackendKeys(object.(*gatewayv1.HTTPRoute), true)
+				return serviceImportBackendKeys(object.(*gatewayv1.HTTPRoute), true, config.HTTPRequestMirror)
 			}},
 		)
 	}
@@ -489,7 +489,7 @@ func statusGatewayKeys(config Config, routeNamespace string, parents []gatewayv1
 func backendServiceKeys(route *gatewayv1.HTTPRoute) []string {
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range append(model.HTTPServiceBackendReferences(rule, true), model.HTTPRouteExternalAuthReferences(rule)...) {
+		for _, backend := range append(model.HTTPBackendReferences(rule, true, true), model.HTTPRouteExternalAuthReferences(rule)...) {
 			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" {
 				keys[ObjectKeyString(key)] = struct{}{}
@@ -499,11 +499,11 @@ func backendServiceKeys(route *gatewayv1.HTTPRoute) []string {
 	return sortedIndexKeys(keys)
 }
 
-func serviceImportBackendKeys(route *gatewayv1.HTTPRoute, namespacesOnly bool) []string {
+func serviceImportBackendKeys(route *gatewayv1.HTTPRoute, namespacesOnly, includeMirrors bool) []string {
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			key, imported := model.ServiceImportReference(route.Namespace, backend.BackendObjectReference)
+		for _, backend := range model.HTTPBackendReferences(rule, true, includeMirrors) {
+			key, imported := model.ServiceImportReference(route.Namespace, backend)
 			if !imported || key.Namespace == "" || key.Name == "" {
 				continue
 			}
@@ -541,7 +541,7 @@ func backendNamespaceKeys(object client.Object) []string {
 	}
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range append(model.HTTPServiceBackendReferences(rule, true), model.HTTPRouteExternalAuthReferences(rule)...) {
+		for _, backend := range append(model.HTTPBackendReferences(rule, true, true), model.HTTPRouteExternalAuthReferences(rule)...) {
 			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" && key.Namespace != route.Namespace {
 				keys[key.Namespace] = struct{}{}
@@ -558,7 +558,7 @@ func isCoreServiceBackend(backend gatewayv1.BackendObjectReference) bool {
 
 func hasCoreServiceBackend(route *gatewayv1.HTTPRoute) bool {
 	for _, rule := range route.Spec.Rules {
-		if slices.ContainsFunc(model.HTTPServiceBackendReferences(rule, true), isCoreServiceBackend) {
+		if slices.ContainsFunc(model.HTTPBackendReferences(rule, true, true), isCoreServiceBackend) {
 			return true
 		}
 	}

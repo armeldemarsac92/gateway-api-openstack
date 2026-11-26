@@ -91,11 +91,15 @@ func (p *Provider) compileHTTPMirrors(spec cloud.RouteSpec, mirrors []cloud.HTTP
 			return nil, errors.New("invalid HTTP request mirror destination, ratio or phase")
 		}
 		backend := spec.HTTPBackends[mirror.BackendIndex]
-		if backend.InvalidReference || backend.Kind != "" || backend.BackendTLS != nil && backend.BackendTLS.Denied {
-			return nil, errors.New("HTTP request mirror must reference an authorized Service backend")
+		if backend.InvalidReference || backend.Kind != "" && backend.Kind != cloud.HTTPBackendKindServiceImport ||
+			backend.BackendTLS != nil && backend.BackendTLS.Denied {
+			return nil, errors.New("HTTP request mirror must reference an authorized Service or ServiceImport backend")
+		}
+		if backend.Kind == cloud.HTTPBackendKindServiceImport && (!backend.RoutedExternal || backend.Unavailable || len(backend.Members) == 0) {
+			return nil, errors.New("ServiceImport request mirror requires a routed pool with eligible members")
 		}
 		if spec.GRPC && !backend.BackendH2C && backend.BackendTLS == nil {
-			return nil, errors.New("gRPC request mirror requires a Service backend using h2c or authenticated HTTP/2")
+			return nil, errors.New("gRPC request mirror requires a backend using h2c or authenticated HTTP/2")
 		}
 		result = append(result, desiredHTTPMirror{backendKey: scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend)),
 			numerator: mirror.Numerator, denominator: mirror.Denominator, phase: mirror.Phase})

@@ -741,7 +741,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, inputs.grpcXBackendTransportDiagnostic(backend))
 				}
 				for _, mirror := range backend.RequestMirrors {
-					issue := inputs.requestMirrorDiagnostic(mirror.Backend, spec.GRPC, false)
+					issue := inputs.requestMirrorDiagnostic(mirror.Backend, spec, false)
 					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, issue)
 				}
 				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{})
@@ -874,11 +874,12 @@ func (r *Reconciler) lowerRequestMirrors(ctx context.Context, reader client.Read
 	var diagnostic model.Diagnostic
 	for _, mirror := range mirrors {
 		backend := mirror.Backend
-		if issue := inputs.requestMirrorDiagnostic(backend, spec.GRPC, groups != nil); issue.Reason != "" {
+		if issue := inputs.requestMirrorDiagnostic(backend, spec, groups != nil); issue.Reason != "" {
 			diagnostic = preferredBackendDiagnostic(diagnostic, issue)
 			continue
 		}
-		if groups == nil {
+		if groups == nil || backend.ServiceImport.Name != "" &&
+			(mirror.Numerator == 0 || len(backend.ServiceImportDestinations) == 0) {
 			continue
 		}
 		index, issue, err := r.lowerHTTPBackend(ctx, reader, spec, inputs, backend, nodeAddressType, httpBackendMirror, groups)
@@ -894,10 +895,17 @@ func (r *Reconciler) lowerRequestMirrors(ctx context.Context, reader client.Read
 	return targets, diagnostic, nil
 }
 
-func (inputs *routeModelInputs) requestMirrorDiagnostic(backend model.BackendGroup, requireH2, canForward bool) model.Diagnostic {
+func (inputs *routeModelInputs) requestMirrorDiagnostic(backend model.BackendGroup, spec *cloud.RouteSpec, canForward bool) model.Diagnostic {
 	if backend.Diagnostic != nil {
 		return *backend.Diagnostic
 	}
+	if backend.ServiceImport.Name != "" {
+		return serviceImportTransportIssue(backend, spec.MemberMode, inputs.serviceImportH2CIssue)
+	}
+	return inputs.requestMirrorTLSIssue(backend, spec.GRPC, canForward)
+}
+
+func (inputs *routeModelInputs) requestMirrorTLSIssue(backend model.BackendGroup, requireH2, canForward bool) model.Diagnostic {
 	if canForward {
 		if tls := inputs.backendTLSValidation(backend, requireH2); tls != nil && tls.Denied {
 			return model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "RequestMirror backend TLS validation is unavailable"}

@@ -352,7 +352,7 @@ func TestControllerEnvtest(t *testing.T) {
 	t.Run("ServiceImport backend lifecycle", func(t *testing.T) {
 		importsConfig := config
 		importsConfig.ControllerName = "serviceimport.example.com/gateway-api-openstack"
-		importsConfig.MulticlusterServiceImports = true
+		importsConfig.MulticlusterServiceImports, importsConfig.HTTPRequestMirror = true, true
 		importsConfig.FixedHTTPResponses, importsConfig.WeightedHTTPTargets, importsConfig.BackendH2C = true, true, true
 		importsConfig.OpenStackResyncInterval = 5 * time.Minute
 		importsConfig.RouteSessionPersistence = importsConfig.GatewayAPIChannel == "experimental"

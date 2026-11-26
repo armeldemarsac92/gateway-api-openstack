@@ -306,9 +306,14 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 		// Reuse one capability check for all imported ports in this graph.
 		for _, route := range inputs.logical.Routes {
 			usesH2C := slices.ContainsFunc(route.Rules, func(rule model.Rule) bool {
-				return slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool {
+				usesImportedH2C := func(backend model.BackendGroup) bool {
 					return backend.ServiceImport.Name != "" && backend.UsesH2C()
-				})
+				}
+				mirrorUsesImportedH2C := func(mirror model.RequestMirror) bool { return usesImportedH2C(mirror.Backend) }
+				return slices.ContainsFunc(rule.RequestMirrors, mirrorUsesImportedH2C) ||
+					slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool {
+						return usesImportedH2C(backend) || slices.ContainsFunc(backend.RequestMirrors, mirrorUsesImportedH2C)
+					})
 			})
 			if usesH2C {
 				inputs.serviceImportH2CIssue = r.backendH2CDiagnostic(ctx, "ServiceImports")
@@ -353,7 +358,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 			originalRulePositions[routes[i].UID] = positions
 		}
 	}
-	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces, r.Config.MulticlusterServiceImports)
+	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces, r.Config.MulticlusterServiceImports, r.Config.HTTPRequestMirror)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +369,6 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.HTTPRequestRedirect = r.Config.HTTPRequestRedirect
 	input.HTTPRequestURLRewrite = r.Config.HTTPRequestURLRewrite
 	input.HTTPRequestPolicy = r.Config.HTTPRequestPolicy
-	input.HTTPRequestMirror = r.Config.HTTPRequestMirror
 	input.CheckRouteExternalAuth = r.routeExternalAuthRulesEnabled()
 	input.RouteExternalAuth = r.Config.RouteExternalAuthEnabled()
 	input.RouteExternalAuthGRPC = r.Config.RouteExternalAuthGRPCEnabled()
@@ -457,7 +461,7 @@ func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackend
 }
 
 func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader client.Reader) error {
-	current, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, inputs.input.Gateway, inputs.input.Routes, inputs.input.Namespaces, inputs.input.EnableServiceImport)
+	current, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, inputs.input.Gateway, inputs.input.Routes, inputs.input.Namespaces, inputs.input.EnableServiceImport, inputs.input.HTTPRequestMirror)
 	if err != nil {
 		return err
 	}
@@ -470,20 +474,17 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	for _, route := range inputs.input.Routes {
 		kind := model.HTTPProfileRouteKind(&route)
 		for _, rule := range route.Spec.Rules {
-			if inputs.input.EnableServiceImport {
-				for _, ref := range rule.BackendRefs {
-					key, imported := model.ServiceImportReference(route.Namespace, ref.BackendObjectReference)
-					if imported && model.ServiceImportReferenceAllowed(kind, route.Namespace, key, inputs.input.ReferenceGrants) !=
+			for _, ref := range model.HTTPBackendReferences(rule, true, inputs.input.HTTPRequestMirror) {
+				if key, supported := model.BackendServiceReference(route.Namespace, ref); supported {
+					if model.BackendReferenceAllowedFor(kind, route.Namespace, key, inputs.input.ReferenceGrants) !=
+						model.BackendReferenceAllowedFor(kind, route.Namespace, key, current.ReferenceGrants) {
+						return errHTTPRouteChanged
+					}
+				} else if key, imported := model.ServiceImportReference(route.Namespace, ref); imported && inputs.input.EnableServiceImport {
+					if model.ServiceImportReferenceAllowed(kind, route.Namespace, key, inputs.input.ReferenceGrants) !=
 						model.ServiceImportReferenceAllowed(kind, route.Namespace, key, current.ReferenceGrants) {
 						return errHTTPRouteChanged
 					}
-				}
-			}
-			for _, ref := range model.HTTPServiceBackendReferences(rule, true) {
-				key, supported := model.BackendServiceReference(route.Namespace, ref)
-				if supported && model.BackendReferenceAllowedFor(kind, route.Namespace, key, inputs.input.ReferenceGrants) !=
-					model.BackendReferenceAllowedFor(kind, route.Namespace, key, current.ReferenceGrants) {
-					return errHTTPRouteChanged
 				}
 			}
 		}
