@@ -993,6 +993,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			Members:               members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendH2CPending: h2cPending, BackendTLS: tls,
 			XBackendClientCertificateReference: clientCertificate,
+			XBackendTCPHealthMonitor:           backend.XBackendTCPHealthMonitor,
 		})
 	}
 	if !invalid && (tls == nil || !tls.Denied) && backend.Weight > 0 && backend.RouteSessionPersistence != nil {
