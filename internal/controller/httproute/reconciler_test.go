@@ -233,6 +233,27 @@ func TestHTTPRouteReconcileBuildsNodePortMembers(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteWholeGatewayCompilesOnlyAdmittedHTTPPorts(t *testing.T) {
+	cfg := testConfig()
+	_, gateway := providerRouteParentObjects(cfg)
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners,
+		gatewayv1.Listener{Name: "http-conflict", Protocol: gatewayv1.HTTPProtocolType, Port: 8080},
+		gatewayv1.Listener{Name: "tcp-conflict", Protocol: gatewayv1.TCPProtocolType, Port: 8080})
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := mapperTestHTTPRoute(gateway.Namespace, "whole-gateway", parent, "backend")
+	route.UID = "whole-gateway-route"
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()
+	r := &Reconciler{Config: cfg}
+	spec, err := r.buildRouteModelWithReader(t.Context(), kube, route, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.AdditionalHTTPPorts) != 0 {
+		t.Fatalf("conflicted port reached the route model: %#v", spec.AdditionalHTTPPorts)
+	}
+}
+
 func TestHTTPRouteProgramsOnlyHTTPListenerOnMixedGateway(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		name := "implicit parent"

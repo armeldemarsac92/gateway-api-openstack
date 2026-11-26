@@ -54,9 +54,10 @@ func listenerHasRequestFilters(listener *gatewayv1.Listener) bool {
 	return listener.Filters != nil && len(listener.Filters.Requests) != 0
 }
 
-func hasHTTPFamilyListenerFilters(gateway *gatewayv1.Gateway) bool {
-	return slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
-		return listenerFamily(&listener) == gatewayv1.HTTPProtocolType && listenerHasRequestFilters(&listener)
+func hasHTTPFamilyListenerFilters(config controller.Config, gateway *gatewayv1.Gateway) bool {
+	listeners, _ := listenerSectionsWithoutTCPConflicts(config, gateway)
+	return slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
+		return listenerFamily(listener) == gatewayv1.HTTPProtocolType && listenerHasRequestFilters(listener)
 	})
 }
 

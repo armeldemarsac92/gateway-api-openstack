@@ -782,8 +782,129 @@ func TestGatewayKeepsHTTPWhenMixedWithTCP(t *testing.T) {
 	tcpStatus := gateway.Status.Listeners[1]
 	accepted = meta.FindStatusCondition(tcpStatus.Conditions, string(gatewayv1.ListenerConditionAccepted))
 	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.ListenerReasonUnsupportedProtocol) ||
-		len(tcpStatus.SupportedKinds) != 0 {
+		len(tcpStatus.SupportedKinds) != 0 ||
+		!meta.IsStatusConditionFalse(tcpStatus.Conditions, string(gatewayv1.ListenerConditionConflicted)) {
 		t.Fatalf("TCP listener status = %#v", tcpStatus)
+	}
+}
+
+func TestGatewaySamePortTCPProtocolConflict(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		config   Config
+		listener gatewayv1.Listener
+	}{
+		{name: "HTTP", listener: gatewayv1.Listener{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+		{name: "HTTPS", config: Config{OperatorHTTPS: true}, listener: testHTTPSListener("https", 80)},
+		{name: "TLS passthrough", config: Config{TLSSNIPassthrough: true}, listener: gatewayv1.Listener{
+			Name: "tls", Protocol: gatewayv1.TLSProtocolType, Port: 80, TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)},
+		}},
+		{name: "TLS termination", config: Config{TCPTLSTermination: true}, listener: gatewayv1.Listener{
+			Name: "tls", Protocol: gatewayv1.TLSProtocolType, Port: 80, TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModeTerminate)},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+				test.listener, {Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 80},
+			}}}
+			r := &Reconciler{Config: test.config}
+			listeners, err := SupportedListenersForConfig(r.Config, gateway)
+			if err == nil {
+				t.Fatalf("admitted listeners = %#v, want rejection", listeners)
+			}
+			r.setGatewayFailure(gateway, err)
+			accepted := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+			if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.GatewayReasonListenersNotValid) {
+				t.Fatalf("Gateway Accepted = %#v", accepted)
+			}
+			assertTCPProtocolConflict(t, gateway.Status.Listeners[0])
+			assertTCPProtocolConflict(t, gateway.Status.Listeners[1])
+		})
+	}
+}
+
+func TestGatewaySamePortTCPDoesNotConflictWithUnsupportedProtocolOrUDP(t *testing.T) {
+	for _, peer := range []gatewayv1.Listener{
+		{Name: "udp", Protocol: gatewayv1.UDPProtocolType, Port: 80},
+		testHTTPSListener("disabled-https", 80),
+		{Name: "disabled-tls", Protocol: gatewayv1.TLSProtocolType, Port: 80, TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)}},
+	} {
+		t.Run(string(peer.Name), func(t *testing.T) {
+			gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+				{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 80}, peer,
+			}}}
+			r := &Reconciler{}
+			_, err := SupportedListeners(gateway)
+			if err == nil {
+				t.Fatal("unsupported protocol mix was admitted")
+			}
+			r.setGatewayFailure(gateway, err)
+			for _, listener := range gateway.Status.Listeners {
+				if !meta.IsStatusConditionFalse(listener.Conditions, string(gatewayv1.ListenerConditionConflicted)) {
+					t.Fatalf("listener %q is not conflicted: %#v", listener.Name, listener.Conditions)
+				}
+			}
+		})
+	}
+}
+
+func TestGatewayTCPProtocolConflictWithdrawsOnlyServingListener(t *testing.T) {
+	cfg := testConfig()
+	gw := programmedTestGateway(cfg)
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class).WithObjects(gw, class).Build()
+	provider := &recordingProvider{}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
+	reconcile := func() {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), request.NamespacedName, gw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcile()
+	if len(provider.gatewaySpecs) != 1 || !meta.IsStatusConditionTrue(gw.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) {
+		t.Fatalf("initial Gateway was not programmed: %#v", gw.Status)
+	}
+	gw.Spec.Listeners = append(gw.Spec.Listeners, gatewayv1.Listener{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 80})
+	gw.Generation++
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	assertTCPProtocolConflict(t, gw.Status.Listeners[0])
+	assertTCPProtocolConflict(t, gw.Status.Listeners[1])
+	if len(provider.deletedGateways) != 0 {
+		t.Fatal("deleted the Gateway before publishing the new listener status")
+	}
+	reconcile()
+	if len(provider.gatewaySpecs) != 1 || len(provider.deletedGateways) != 1 || provider.deletedGateways[0].GatewayUID != string(gw.UID) {
+		t.Fatalf("Gateway ensures = %d, deletes = %#v", len(provider.gatewaySpecs), provider.deletedGateways)
+	}
+	gw.Spec.Listeners = gw.Spec.Listeners[:1]
+	gw.Generation++
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if len(provider.gatewaySpecs) != 2 || len(gw.Status.Listeners) != 1 ||
+		!meta.IsStatusConditionTrue(gw.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(gw.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionConflicted)) {
+		t.Fatalf("Gateway did not recover its listener: %#v", gw.Status)
+	}
+}
+
+func assertTCPProtocolConflict(t *testing.T, listener gatewayv1.ListenerStatus) {
+	t.Helper()
+	conditions := listener.Conditions
+	conflict := meta.FindStatusCondition(conditions, string(gatewayv1.ListenerConditionConflicted))
+	if conflict == nil || conflict.Status != metav1.ConditionTrue || conflict.Reason != string(gatewayv1.ListenerReasonProtocolConflict) ||
+		!meta.IsStatusConditionFalse(conditions, string(gatewayv1.ListenerConditionAccepted)) ||
+		!meta.IsStatusConditionFalse(conditions, string(gatewayv1.ListenerConditionProgrammed)) || listener.AttachedRoutes != 0 {
+		t.Fatalf("listener %q = %#v", listener.Name, listener)
 	}
 }
 

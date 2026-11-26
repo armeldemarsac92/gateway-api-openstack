@@ -90,11 +90,23 @@ func ObserveListenerSets(ctx context.Context, reader client.Reader, config contr
 	httpFamily := validationErr == nil && len(listeners) != 0 && !slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
 		return listenerFamily(listener) != gatewayv1.HTTPProtocolType
 	})
-	plainHTTP := httpFamily && !hasHTTPS(gateway) && len(listeners) == len(gateway.Spec.Listeners)
+	sections, conflicts := listenerSectionsWithoutTCPConflicts(config, gateway)
+	plainHTTP := httpFamily && len(listeners) == len(sections) && !slices.ContainsFunc(sections, func(listener *gatewayv1.Listener) bool {
+		return listener.Protocol == gatewayv1.HTTPSProtocolType
+	})
 	isolatedHTTPS := httpFamily && config.OperatorHTTPS && config.HTTPSListenerIsolation
 	winners := make(map[gatewayv1.PortNumber][]*gatewayv1.Listener)
 	for _, listener := range listeners {
 		winners[listener.Port] = append(winners[listener.Port], listener)
+	}
+	// Delegated sections cannot take a port reserved by a TCP conflict.
+	if len(conflicts) != 0 {
+		for i := range gateway.Spec.Listeners {
+			listener := &gateway.Spec.Listeners[i]
+			if listener.Protocol == gatewayv1.TCPProtocolType && tcpListenerProtocolConflict(config, gateway.Spec.Listeners, *listener) {
+				winners[listener.Port] = append(winners[listener.Port], listener)
+			}
+		}
 	}
 	projection := ListenerSetProjection{}
 	namespaces := make(map[string]*corev1.Namespace)

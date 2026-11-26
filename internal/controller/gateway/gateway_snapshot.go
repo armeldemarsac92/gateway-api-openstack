@@ -234,7 +234,7 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 		}
 		return gatewayPhaseDecision{phase: gatewayPhaseIgnore}
 	}
-	if scope.gatewayClass != nil && !controller.GatewayClassSupportsInstalledVersion(scope.gatewayClass) && (!hasListenerRequestFilters(gateway) || r.Config.GatewayListenerFiltersEnabled()) {
+	if scope.gatewayClass != nil && !controller.GatewayClassSupportsInstalledVersion(scope.gatewayClass) && (!hasListenerRequestFilters(r.Config, gateway) || r.Config.GatewayListenerFiltersEnabled()) {
 		return gatewayPhaseDecision{phase: gatewayPhaseUnsupportedVersion}
 	}
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
@@ -302,7 +302,8 @@ func (r *Reconciler) gatewayNeedsListenerScope(gateway *gatewayv1.Gateway) bool 
 }
 
 func (r *Reconciler) requestsListenerScope(gateway *gatewayv1.Gateway) bool {
-	return hasMultipleTransportListeners(gateway) || RequiresHTTPListenerScope(r.Config, gateway)
+	sections, _ := listenerSectionsWithoutTCPConflicts(r.Config, gateway)
+	return hasMultipleTransportListeners(sections) || RequiresHTTPListenerScope(r.Config, gateway)
 }
 
 func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {
@@ -385,7 +386,7 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	}
 	// A bound listener cannot continue serving without its requested filters. The
 	// live identity and resource-version checks above still apply during bundle skew.
-	if hasListenerRequestFilters(&gateway) && !r.Config.GatewayListenerFiltersEnabled() {
+	if hasListenerRequestFilters(r.Config, &gateway) && !r.Config.GatewayListenerFiltersEnabled() {
 		snapshot.disposition = gatewayCleanupRebuild
 		return snapshot, nil
 	}

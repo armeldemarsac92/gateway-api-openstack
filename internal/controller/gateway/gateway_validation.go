@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,15 +41,60 @@ type gatewayValidationError struct {
 	programmedReason gatewayv1.GatewayConditionReason
 }
 
-func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
-	multipleTransport := hasMultipleTransportListeners(gateway)
-	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
-		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(gateway.Spec.Listeners) == 1) || multipleTransport
+func hasListenerRequestFilters(config controller.Config, gateway *gatewayv1.Gateway) bool {
+	sections, _ := listenerSectionsWithoutTCPConflicts(config, gateway)
+	multipleTransport := hasMultipleTransportListeners(sections)
+	return slices.ContainsFunc(sections, func(l *gatewayv1.Listener) bool {
+		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(sections) == 1) || multipleTransport
 		return supportedProtocol && l.Filters != nil && len(l.Filters.Requests) != 0
 	})
 }
 
 func (e *gatewayValidationError) Error() string { return e.message }
+
+func listenerProtocolSharesTCP(config controller.Config, listener gatewayv1.Listener) bool {
+	switch listener.Protocol {
+	case gatewayv1.HTTPProtocolType:
+		return true
+	case gatewayv1.HTTPSProtocolType:
+		return config.OperatorHTTPS
+	case gatewayv1.TLSProtocolType:
+		return tlsListenerModeEnabled(config, &listener)
+	default:
+		return false
+	}
+}
+
+func tcpListenerProtocolConflict(config controller.Config, listeners []gatewayv1.Listener, listener gatewayv1.Listener) bool {
+	if listener.Protocol == gatewayv1.TCPProtocolType {
+		return slices.ContainsFunc(listeners, func(peer gatewayv1.Listener) bool {
+			return peer.Port == listener.Port && listenerProtocolSharesTCP(config, peer)
+		})
+	}
+	return listenerProtocolSharesTCP(config, listener) && slices.ContainsFunc(listeners, func(peer gatewayv1.Listener) bool {
+		return peer.Port == listener.Port && peer.Protocol == gatewayv1.TCPProtocolType
+	})
+}
+
+// Keep pointers to the live Gateway's sections so route selectors and policy
+// observations use the same listeners as the graph.
+func listenerSectionsWithoutTCPConflicts(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, []string) {
+	listeners := make([]*gatewayv1.Listener, 0, len(gateway.Spec.Listeners))
+	var conflicts []string
+	for i := range gateway.Spec.Listeners {
+		listener := &gateway.Spec.Listeners[i]
+		if tcpListenerProtocolConflict(config, gateway.Spec.Listeners, *listener) {
+			conflicts = append(conflicts, string(listener.Name))
+		} else {
+			listeners = append(listeners, listener)
+		}
+	}
+	return listeners, conflicts
+}
+
+func gatewayTCPProtocolConflictMessage(conflicts []string) string {
+	return "TCP listeners share ports with HTTP, HTTPS or TLS listeners. Conflicted sections are " + strings.Join(conflicts, ", ")
+}
 
 func (r *Reconciler) getGatewayClass(ctx context.Context, gateway *gatewayv1.Gateway) (*gatewayv1.GatewayClass, bool, error) {
 	var gatewayClass gatewayv1.GatewayClass
@@ -109,33 +155,42 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}
+	sections, conflicts := listenerSectionsWithoutTCPConflicts(config, gateway)
+	if len(sections) == 0 && len(conflicts) != 0 {
+		return nil, fmt.Errorf("%s", gatewayTCPProtocolConflictMessage(conflicts))
+	}
 	var listeners []*gatewayv1.Listener
 	switch {
-	case config.TLSRoutesEnabled() && hasTLSListener(gateway):
+	case config.TLSRoutesEnabled() && slices.ContainsFunc(sections, func(section *gatewayv1.Listener) bool {
+		return section.Protocol == gatewayv1.TLSProtocolType
+	}):
 		var err error
-		listeners, err = supportedTLSListeners(config, gateway)
+		listeners, err = supportedTLSListeners(config, gateway, sections)
 		if err != nil {
 			return nil, err
 		}
-	case len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TLSProtocolType:
+	case len(sections) == 1 && sections[0].Protocol == gatewayv1.TLSProtocolType:
 		return nil, fmt.Errorf("TLSRoute requires explicit controller opt-in")
 	case usesHTTPSProfile(config, gateway):
 		listeners := httpsProfileListeners(config, gateway)
 		if len(listeners) == 0 {
 			return nil, fmt.Errorf("a listener with a valid HTTP or HTTPS port is required")
 		}
-		return listeners, nil
-	case hasMultipleTransportListeners(gateway):
-		for i := range gateway.Spec.Listeners {
-			listeners = append(listeners, &gateway.Spec.Listeners[i])
+		if len(conflicts) != 0 && !slices.ContainsFunc(sections, func(listener *gatewayv1.Listener) bool {
+			return listenerFamily(listener) == gatewayv1.HTTPProtocolType && httpsProfileIssue(config, gateway, listener) == nil
+		}) {
+			return nil, fmt.Errorf("%s", gatewayTCPProtocolConflictMessage(conflicts))
 		}
+		return listeners, nil
+	case hasMultipleTransportListeners(sections):
+		listeners = sections
 		slices.SortFunc(listeners, func(left, right *gatewayv1.Listener) int {
 			return cmp.Compare(left.Port, right.Port)
 		})
-	case len(gateway.Spec.Listeners) == 1 && isL4Listener(gateway.Spec.Listeners[0].Protocol):
-		listeners = append(listeners, &gateway.Spec.Listeners[0])
+	case len(sections) == 1 && isL4Listener(sections[0].Protocol):
+		listeners = sections
 	default:
-		http, err := HTTPListeners(config, gateway)
+		http, err := httpListeners(config, gateway, sections)
 		if err != nil {
 			return nil, err
 		}
@@ -174,16 +229,15 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 }
 
 // supportedTLSListeners keeps the native TLS SNI graph dedicated to one port.
-func supportedTLSListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
-	first := &gateway.Spec.Listeners[0]
+func supportedTLSListeners(config controller.Config, gateway *gatewayv1.Gateway, sections []*gatewayv1.Listener) ([]*gatewayv1.Listener, error) {
+	first := sections[0]
 	mixed := mixedTLSBinding(config, gateway, first.Port)
-	if len(gateway.Spec.Listeners) != 1 && !mixed {
+	if len(sections) != 1 && !mixed {
 		return nil, fmt.Errorf("TLSRoute requires a dedicated Gateway with one listener or an enabled same-port mixed TLS listener")
 	}
 	var listeners []*gatewayv1.Listener
 	hosts := make(map[string]bool)
-	for i := range gateway.Spec.Listeners {
-		listener := &gateway.Spec.Listeners[i]
+	for _, listener := range sections {
 		if listener.Protocol != gatewayv1.TLSProtocolType || listener.Port < 1 || listener.Port > 65535 ||
 			listener.Port != first.Port || !tlsListenerModeEnabled(config, listener) || len(listener.TLS.Options) != 0 {
 			return nil, fmt.Errorf("TLSRoute requires enabled TLS modes on one valid port and no TLS options")
@@ -223,16 +277,16 @@ func supportedTLSListeners(config controller.Config, gateway *gatewayv1.Gateway)
 }
 
 // hasMultipleTransportListeners describes the Gateway shape eligible for enrollment.
-func hasMultipleTransportListeners(gateway *gatewayv1.Gateway) bool {
-	if len(gateway.Spec.Listeners) < 2 {
+func hasMultipleTransportListeners(listeners []*gatewayv1.Listener) bool {
+	if len(listeners) < 2 {
 		return false
 	}
-	protocol := gateway.Spec.Listeners[0].Protocol
+	protocol := listeners[0].Protocol
 	if !isL4Listener(protocol) {
 		return false
 	}
-	ports := make(map[gatewayv1.PortNumber]struct{}, len(gateway.Spec.Listeners))
-	for _, listener := range gateway.Spec.Listeners {
+	ports := make(map[gatewayv1.PortNumber]struct{}, len(listeners))
+	for _, listener := range listeners {
 		if listener.Protocol != protocol || listener.Port < 1 || listener.Port > 65535 {
 			return false
 		}
@@ -352,11 +406,15 @@ func retainsLongHTTPListenerHostnames(config controller.Config, gateway *gateway
 // HTTPListeners selects the HTTP sections of the stock profile. Multiple
 // sections on each port must have pairwise distinct, encodable hostnames.
 func HTTPListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
+	listeners, _ := listenerSectionsWithoutTCPConflicts(config, gateway)
+	return httpListeners(config, gateway, listeners)
+}
+
+func httpListeners(config controller.Config, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener) ([]*gatewayv1.Listener, error) {
 	var http []*gatewayv1.Listener
-	ports := make(map[gatewayv1.PortNumber]int, len(gateway.Spec.Listeners))
+	ports := make(map[gatewayv1.PortNumber]int, len(listeners))
 	duplicatePort := false
-	for i := range gateway.Spec.Listeners {
-		listener := &gateway.Spec.Listeners[i]
+	for _, listener := range listeners {
 		duplicatePort = duplicatePort || ports[listener.Port] != 0
 		ports[listener.Port]++
 		if listener.Protocol == gatewayv1.HTTPProtocolType {
@@ -372,7 +430,7 @@ func HTTPListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gat
 		}
 		return http, nil
 	}
-	if len(http) != len(gateway.Spec.Listeners) {
+	if len(http) != len(listeners) {
 		return nil, fmt.Errorf("multiple HTTP sections require a Gateway with only plain HTTP listeners")
 	}
 	allowLongHostnames := config.LongHTTPHostnames || retainsLongHTTPListenerHostnames(config, gateway)
