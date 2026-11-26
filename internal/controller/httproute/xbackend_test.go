@@ -103,12 +103,12 @@ func addExternalHostnameRule(t *testing.T, f *routeModelInputFixture, route *gat
 	return backend
 }
 
-func TestXBackendExternalHostnameH2CRequiresProviderSupport(t *testing.T) {
+func TestXBackendExternalHostnameGRPCRequiresH2CProviderSupport(t *testing.T) {
 	f := newExternalHostnameFixture(t)
 	r := f.reconciler
 	r.Config.BackendH2C = true
-	backend := addExternalHostnameRule(t, f, f.route, "h2c-origin")
-	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+	backend := addExternalHostnameRule(t, f, f.route, "grpc-origin")
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolGRPC)
 	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeNone}
 	require.NoError(t, f.client.Update(t.Context(), backend))
 	require.NoError(t, f.client.Update(t.Context(), f.route))
@@ -144,6 +144,8 @@ func TestXBackendExternalHostnameH2CRequiresProviderSupport(t *testing.T) {
 			require.Equal(t, tc.available || tc.err != nil, origin.BackendH2C)
 			require.Equal(t, tc.err != nil, origin.BackendH2CPending)
 			require.Nil(t, origin.BackendTLS)
+			require.True(t, origin.XBackendTCPHealthMonitor)
+			require.False(t, targets[0].XBackendTCPHealthMonitor)
 			require.Equal(t, tc.available || tc.err != nil, origin.RoutedExternal)
 			if tc.available || tc.err != nil {
 				require.Equal(t, []cloud.Member{{Address: "198.51.100.15", Port: int(backend.Spec.Port.Number)}}, origin.Members)
@@ -446,6 +448,74 @@ func TestXBackendExternalHostnameReferencesUseActualGatewayMode(t *testing.T) {
 	if err := f.reconciler.resolveRouteReferences(t.Context(), f.route, gateway, &status); err != nil ||
 		status.resolved != metav1.ConditionFalse || status.resolvedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
 		t.Fatalf("NodePort topology must reject the reference before its listener is ready, got %+v and %v", status, err)
+	}
+}
+
+func TestXBackendApplicationHeaderPersistence(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	r := f.reconciler
+	r.Config.XBackendSessionPersistence, r.Config.BackendH2C, r.Config.BackendTLSPolicy = true, true, true
+	r.XBackendHeaderAvailable = func(context.Context) (bool, error) { return true, nil }
+	r.BackendH2CAvailable = func(context.Context) (bool, error) { return true, nil }
+	r.BackendTLSSystemCAAvailable = func(context.Context, bool, bool, bool) (bool, error) { return true, nil }
+	backend := &gatewayx.XBackend{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.route.Namespace, Name: f.service.Name, UID: "app-protocol", Generation: 1},
+		Spec: gatewayx.BackendSpec{
+			Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 8080},
+			EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+				MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "direct"},
+			}},
+			SessionPersistence: &gatewayv1.SessionPersistence{
+				Type: ptr.To(gatewayv1.HeaderBasedSessionPersistence), Header: &gatewayv1.HeaderConfig{},
+			},
+		},
+	}
+	f.create(t, backend)
+	ref := &f.route.Spec.Rules[0].BackendRefs[0]
+	ref.Group, ref.Kind, ref.Port = ptr.To(gatewayv1.Group(gatewayx.GroupName)), ptr.To(gatewayv1.Kind(model.XBackendKind)), nil
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	for _, test := range []struct {
+		name     string
+		protocol gatewayx.BackendProtocol
+		tls      *gatewayx.BackendTLS
+		blocked  gatewayv1.HeaderName
+	}{
+		{name: "MCP", protocol: gatewayx.BackendProtocolMCP, blocked: "mCp-SeSsIoN-iD"},
+		{name: "gRPC over h2c", protocol: gatewayx.BackendProtocolGRPC, blocked: "X-Session-BIN"},
+		{name: "gRPC over TLS", protocol: gatewayx.BackendProtocolGRPC, blocked: "x-session-bin", tls: &gatewayx.BackendTLS{
+			Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "backend.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem),
+			},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend.Spec.Protocol, backend.Spec.TLS = ptr.To(test.protocol), test.tls
+			for _, header := range []gatewayv1.HeaderName{test.blocked, "X-Backend-Affinity"} {
+				backend.Spec.SessionPersistence.Header.Name = header
+				require.NoError(t, f.client.Update(t.Context(), backend))
+
+				status := programmedRouteStatus()
+				require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &status))
+				ancestors, err := (&xBackendStatusReconciler{routes: r}).observeAncestors(t.Context(), client.ObjectKeyFromObject(backend), backend)
+				require.NoError(t, err)
+				ancestor := ancestors[client.ObjectKeyFromObject(f.gateway)]
+				backends := f.observe(t).Nodes[0].Spec.HTTPBackends
+				require.Len(t, backends, 1)
+				if header == test.blocked {
+					require.Equal(t, metav1.ConditionFalse, status.resolved)
+					require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), status.resolvedReason)
+					require.Equal(t, metav1.ConditionFalse, ancestor.Status)
+					require.Equal(t, status.resolvedReason, ancestor.Reason)
+					require.Equal(t, status.resolvedMessage, ancestor.Message)
+					require.Nil(t, backends[0].SessionHeader)
+				} else {
+					require.Equal(t, metav1.ConditionTrue, status.resolved)
+					require.Equal(t, metav1.ConditionTrue, ancestor.Status)
+					require.Equal(t, &cloud.HTTPSessionHeaderPersistence{Name: "x-backend-affinity"}, backends[0].SessionHeader)
+				}
+			}
+		})
 	}
 }
 
@@ -911,6 +981,7 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	}
 	backend := addExternalHostnameRule(t, f, f.route, f.service.Name)
 	const identityName = "identity.remote.example.test"
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolWSS)
 	backend.Spec.Port.Number = gatewayx.PortNumber(f.service.Spec.Ports[0].Port)
 	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{
 		Hostname: identityName, CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "external-ca"}},
@@ -961,6 +1032,8 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	require.Equal(t, "service.example.test", service.BackendTLS.Hostname)
 	require.Equal(t, string(serviceCA.UID), service.BackendTLS.CAConfigMapUID)
 	require.Equal(t, identityName, external.BackendTLS.Hostname)
+	require.False(t, external.BackendTLS.RequireH2)
+	require.True(t, external.XBackendTCPHealthMonitor)
 	require.Equal(t, string(ca.UID), external.BackendTLS.CAConfigMapUID)
 	require.Equal(t, []cloud.BackendTLSSubjectAltName{{Type: "URI", URI: "spiffe://example.test/backend"}}, external.BackendTLS.SubjectAltNames)
 	require.Equal(t, []cloud.Member{{Address: "198.51.100.15", Port: int(backend.Spec.Port.Number)}}, external.Members)
@@ -1022,7 +1095,7 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	// Changing only the XBackend selects the h2 capability and forces a new
 	// observation even when the HTTPRoute and pool identity are unchanged.
 	requireHTTP2 = true
-	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolGRPC)
 	require.NoError(t, f.client.Update(t.Context(), backend))
 	require.ErrorIs(t, before.Validate(t.Context()), errHTTPRouteChanged)
 	targets = f.observe(t).Nodes[0].Spec.HTTPBackends
@@ -1032,9 +1105,12 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	checkStatus(metav1.ConditionFalse, "UnsupportedProvider")
 
 	h2Available = true
-	targets = f.observe(t).Nodes[0].Spec.HTTPBackends
+	routeSpec := f.observe(t).Nodes[0].Spec
+	targets = routeSpec.HTTPBackends
 	require.Equal(t, identity.HTTPBackendPoolKey(external), identity.HTTPBackendPoolKey(targets[1]))
 	require.True(t, targets[1].BackendTLS.RequireH2)
+	require.False(t, targets[1].BackendH2C)
+	require.False(t, routeSpec.GRPC)
 	require.Equal(t, identityName, targets[1].BackendTLS.Hostname)
 	require.Equal(t, external.Members, targets[1].Members)
 	checkStatus(metav1.ConditionTrue, string(gatewayv1.RouteReasonResolvedRefs))

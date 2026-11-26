@@ -189,6 +189,47 @@ func TestXBackendExternalHostnameProfile(t *testing.T) {
 	}
 }
 
+func TestXBackendApplicationProtocolValidation(t *testing.T) {
+	tls := &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{
+		Hostname: "backend.example.test",
+	}}
+	for _, test := range []struct {
+		name     string
+		protocol gatewayx.BackendProtocol
+		tls      *gatewayx.BackendTLS
+		h2c      bool
+		reason   gatewayv1.RouteConditionReason
+	}{
+		{name: "gRPC without h2c opt-in", protocol: gatewayx.BackendProtocolGRPC, reason: gatewayv1.RouteReasonUnsupportedProtocol},
+		{name: "gRPC cleartext", protocol: gatewayx.BackendProtocolGRPC, h2c: true},
+		{name: "gRPC with server TLS and no h2c opt-in", protocol: gatewayx.BackendProtocolGRPC, tls: tls},
+		{name: "WSS without TLS", protocol: gatewayx.BackendProtocolWSS, reason: gatewayv1.RouteReasonUnsupportedProtocol},
+		{name: "WSS with server TLS", protocol: gatewayx.BackendProtocolWSS, tls: tls},
+		{name: "MCP cleartext", protocol: gatewayx.BackendProtocolMCP},
+		{name: "MCP with server TLS", protocol: gatewayx.BackendProtocolMCP, tls: tls},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spec := gatewayx.BackendSpec{
+				Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 8080},
+				EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+					MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "origin"},
+				}},
+				Protocol: ptr.To(test.protocol), TLS: test.tls,
+			}
+			profile := XBackendProfile{MemberMode: cloud.MemberModeEndpoint, ServerTLS: true, H2C: test.h2c}
+			diagnostic := ValidateXBackend(spec, profile)
+			if test.reason != "" {
+				require.NotNil(t, diagnostic)
+				require.Equal(t, string(test.reason), diagnostic.Reason)
+				return
+			}
+			require.Nil(t, diagnostic)
+			require.Equal(t, test.protocol == gatewayx.BackendProtocolGRPC && test.tls == nil, XBackendUsesH2C(spec))
+			require.Equal(t, test.protocol == gatewayx.BackendProtocolGRPC && test.tls != nil, XBackendRequiresH2(spec))
+		})
+	}
+}
+
 func TestXBackendHeaderPersistenceValidation(t *testing.T) {
 	spec := gatewayx.BackendSpec{
 		Type: gatewayx.BackendTypeEndpointSelector,

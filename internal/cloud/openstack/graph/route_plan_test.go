@@ -710,20 +710,36 @@ func TestGRPCPoliciesRequireNativeContentType(t *testing.T) {
 	}
 }
 
-func TestGRPCRouteTCPMonitorReplacesOwnedHTTPMonitor(t *testing.T) {
-	desired, actual := convergedRoutePlanFixture()
-	desired.spec.GRPC = true
-	plan, _, err := buildRouteEnsurePlan(desired, actual)
-	want := []routeMutation{{kind: routeMutationDeleteMonitor, id: "monitor-1", parentID: "pool-1"}}
-	if err != nil || !reflect.DeepEqual(plan, want) {
-		t.Fatalf("existing gRPC monitor: plan %#v, error %v, want %#v", plan, err, want)
-	}
+func TestApplicationBackendReplacesOwnedHTTPOrTCPMonitor(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		grpc     bool
+		xBackend bool
+		from, to string
+	}{
+		{name: "GRPCRoute", grpc: true, from: monitors.TypeHTTP, to: monitors.TypeTCP},
+		{name: "XBackend application protocol", xBackend: true, from: monitors.TypeHTTP, to: monitors.TypeTCP},
+		{name: "XBackend returning to HTTP", xBackend: true, from: monitors.TypeTCP, to: monitors.TypeHTTP},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			desired, actual := convergedRoutePlanFixture()
+			desired.spec.GRPC, desired.xBackend = test.grpc, test.xBackend
+			desired.xBackendTCPHealthMonitor = test.xBackend && test.to == monitors.TypeTCP
+			actual.monitor.Type = test.from
 
-	actual.monitor = nil
-	plan, _, err = buildRouteEnsurePlan(desired, actual)
-	want = []routeMutation{{kind: routeMutationCreateMonitor, parentID: "pool-1"}}
-	if err != nil || !reflect.DeepEqual(plan, want) || desired.monitorType() != monitors.TypeTCP {
-		t.Fatalf("replacement gRPC monitor: plan %#v, error %v, type %q, want a TCP monitor creation", plan, err, desired.monitorType())
+			plan, _, err := buildRouteEnsurePlan(desired, actual)
+			want := []routeMutation{{kind: routeMutationDeleteMonitor, id: "monitor-1", parentID: "pool-1"}}
+			if err != nil || !reflect.DeepEqual(plan, want) {
+				t.Fatalf("existing monitor: plan %#v, error %v, want %#v", plan, err, want)
+			}
+
+			actual.monitor = nil
+			plan, _, err = buildRouteEnsurePlan(desired, actual)
+			want = []routeMutation{{kind: routeMutationCreateMonitor, parentID: "pool-1"}}
+			if err != nil || !reflect.DeepEqual(plan, want) || desired.monitorType() != test.to {
+				t.Fatalf("replacement monitor: plan %#v, error %v, type %q, want a %s monitor", plan, err, desired.monitorType(), test.to)
+			}
+		})
 	}
 }
 

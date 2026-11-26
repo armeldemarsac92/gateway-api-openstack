@@ -69,7 +69,7 @@ Gateway `spec.infrastructure.parametersRef` is not supported.
 | `healthMonitor.maxRetries` | `3` | Successful checks required for recovery, from 1 through 10. |
 | `healthMonitor.maxRetriesDown` | `3` | Failed checks required to mark a member down, from 1 through 10. |
 
-HTTP listeners use an HTTP monitor that sends `GET` to `healthMonitor.path` and accepts status codes `200-399`. TCP and UDP listeners use Octavia's `TCP` and `UDP-CONNECT` monitors respectively. Octavia records the configured delay, timeout and both retry counts. For UDP, Hibiscus enforces an operator-configurable minimum delay that defaults to 3 seconds. The stock Amphora LVS template renders the failure threshold as `retry` and omits the separate recovery threshold. The HTTP path applies only to HTTP monitors. [Stock configuration and packet check](../qualification/v1.7.0/provider/stock-udp.md)
+HTTP listeners use an HTTP monitor by default. It sends `GET` to `healthMonitor.path` and accepts status codes `200-399`. TCP and UDP listeners use Octavia's `TCP` and `UDP-CONNECT` monitors respectively. Octavia records the configured delay, timeout and both retry counts. For UDP, Hibiscus enforces an operator-configurable minimum delay that defaults to 3 seconds. The stock Amphora LVS template renders the failure threshold as `retry` and omits the separate recovery threshold. The HTTP path applies only to HTTP monitors. [Stock configuration and packet check](../qualification/v1.7.0/provider/stock-udp.md)
 Class configuration always supplies a monitor configuration. The controller omits the monitor for UDP pools enrolled in the [proportional packet discard extension](../operator-octavia-udp-packet-drop.md). The controller allocates new Floating IPs when requested.
 
 Each subnet, external network, or security group reference must contain exactly one selector:
@@ -254,6 +254,30 @@ spec:
 ```
 
 The backend supplies the port, so omit `backendRefs[].port`. The controller selects ready, nonterminating Pods with routable IPv4 addresses. Pods using the host network are ineligible for this endpoint profile. Changes to the selector, Pod labels, readiness and Pod addresses update pool membership. The Route and XBackend must share a namespace. Use the HTTPRoute parent conditions and the XBackend's `status.ancestors` to check the current generation for your Gateway. [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go) · [Namespace contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-4894/index.md#route-attachment-and-consumer-overrides)
+
+#### Select an application protocol for an HTTPRoute
+
+Set `spec.protocol` on an Experimental `EndpointSelector` or operator-authorized `ExternalHostname` XBackend. The HTTPRoute matches the request and forwards it to the selected backend.
+
+| Protocol | Connection from Amphora to the backend |
+| --- | --- |
+| `GRPC` | With `tls.mode: None` or omitted TLS, use h2c. Enable `--octavia-backend-h2c` and verify regional `backend_h2c_v1` support. With `ServerOnly` or `ClientAndServer`, require `h2` ALPN on authenticated TLS. |
+| `WSS` | Use the RFC 6455 HTTP/1.1 Upgrade handshake over authenticated TLS. The pool offers only `http/1.1` in ALPN. Set `tls.mode: ServerOnly` or `ClientAndServer`. |
+| `MCP` | Use Streamable HTTP over HTTP/1.1. Use `tls.mode: None` for a cleartext origin, or configure `ServerOnly` or `ClientAndServer` for an authenticated origin. |
+
+Authenticated modes require `--octavia-backend-tls-policy`, Octavia API microversion 2.24 or newer and regional `backend_tls_hostname_v1`. Authenticated gRPC also requires `backend_tls_h2_alpn_v1`. For mutual TLS, enroll the XBackend client certificate. The client-facing listener must support the client protocol, including HTTP/2 for native gRPC and HTTP/1.1 Upgrade for WebSocket. [Backend TLS configuration](../operator-octavia-backend-tls-policy.md#protect-an-experimental-xbackend) · [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)
+
+For MCP, route the endpoint's POST, GET and DELETE requests as needed by the server. The HTTP pool forwards the endpoint's HTTP traffic, including SSE and headers such as `Origin`, `MCP-Session-Id`, `MCP-Protocol-Version` and `Last-Event-ID`. Keep these headers intact when applying route filters. For header affinity on an MCP backend, use a dedicated name such as `X-Backend-Affinity`. The controller rejects `MCP-Session-Id` regardless of case. For gRPC over h2c or TLS, use a custom ASCII metadata key without the `-bin` suffix. The MCP server handles JSON-RPC, authentication, Origin validation and session semantics. Existing Amphora connection timeouts apply to WebSocket and SSE streams. [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http)
+
+These XBackend pools use Octavia TCP health monitors with the class timing and retry settings, because a plain HTTP GET can legitimately fail on an otherwise healthy protocol endpoint. These probes measure connection establishment. Controller tests cover reference resolution, transport capability checks and Octavia pool settings. Earlier local traffic trials observed ALPN `http/1.1` and required `h2` for these underlying TLS pool configurations. The local Experimental Gateway reached gRPC over h2c and authenticated TLS, completed a secure WebSocket echo, and carried MCP JSON and event-stream responses. [Application and pool observations](../qualification/v1.7.0/provider/xbackend-application-protocols/README.md) [HTTP/1.1 TLS pool receipt](../qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json) · [HTTP/2 transport observations](../qualification/v1.7.0/provider/xbackend-http2.md)
+
+#### Roll back to a controller before XBackend application protocol support
+
+Keep the current controller running while you migrate the XBackends. The earlier controller treats a TCP monitor on an HTTP pool as an ownership conflict and can pause reconciliation for the Gateway.
+
+1. Change each XBackend using `GRPC`, `WSS` or `MCP` to a previously supported protocol. Use `H2C` for cleartext gRPC, `HTTP2` for authenticated gRPC, and `HTTP11` for WebSocket and MCP, with the existing TLS settings. Ensure the origin returns 200–399 to an ordinary GET at the GatewayClass health monitor path over the selected transport. If the origin cannot serve that check, move its traffic and wait for the affected pools to be removed.
+2. Wait for `Accepted=True` on each affected XBackend ancestor and for `ResolvedRefs=True` and `Programmed=True` on each affected HTTPRoute parent for the new configuration. In Octavia, verify that every remaining affected pool is active and has an active `HTTP` health monitor. Check that the expected members are healthy.
+3. Deploy the earlier controller after those checks succeed.
 
 #### Keep a session on one selected endpoint
 

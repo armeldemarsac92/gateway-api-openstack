@@ -98,6 +98,7 @@ func testXBackendEndpointSelector(t *testing.T, c client.Client, cfg controller.
 	}()
 	wantMembers := []cloud.Member{{Address: "10.1.2.8", Port: 8087}}
 	var expectedTLS *cloud.BackendTLSValidation
+	wantTCPMonitor := false
 	waitForBackend := func(members []cloud.Member, reason gatewayv1.RouteConditionReason) {
 		t.Helper()
 		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
@@ -120,7 +121,8 @@ func testXBackendEndpointSelector(t *testing.T, c client.Client, cfg controller.
 						matchesTLS := target.BackendTLS == nil && expectedTLS == nil ||
 							target.BackendTLS != nil && expectedTLS != nil && target.BackendTLS.Denied == expectedTLS.Denied &&
 								target.BackendTLS.Hostname == expectedTLS.Hostname && target.BackendTLS.CAConfigMapUID == expectedTLS.CAConfigMapUID
-						return target.Kind == cloud.HTTPBackendKindXBackend && slices.Equal(target.Members, members) && matchesTLS, nil
+						matchesMonitor := reason != gatewayv1.RouteReasonResolvedRefs || target.XBackendTCPHealthMonitor == wantTCPMonitor
+						return target.Kind == cloud.HTTPBackendKindXBackend && slices.Equal(target.Members, members) && matchesTLS && matchesMonitor, nil
 					}
 				}
 			}
@@ -168,7 +170,8 @@ func testXBackendEndpointSelector(t *testing.T, c client.Client, cfg controller.
 	}
 	waitForBackend(nil, gatewayv1.RouteReasonUnsupportedProtocol)
 	waitForAccepted(metav1.ConditionFalse, "UnsupportedProtocol")
-	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP11)
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolMCP)
+	wantTCPMonitor = true
 	if err := c.Update(ctx, backend); err != nil {
 		t.Fatal(err)
 	}

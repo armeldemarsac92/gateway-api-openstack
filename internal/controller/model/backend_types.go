@@ -76,14 +76,15 @@ type BackendGroup struct {
 
 	RouteSessionPersistence *RouteSessionPersistence
 
-	XBackendRoutedExternal bool
-	XBackendCookieName     string
-	XBackendCookiePath     *string
-	XBackendCookieDeadline *cloud.HTTPSessionCookieDeadline
-	XBackendSessionHeader  *cloud.HTTPSessionHeaderPersistence
-	XBackendTLSRequired    bool
-	XBackendRequiresH2     bool
-	XBackendTLS            *backendtls.Validation `json:"-"`
+	XBackendRoutedExternal   bool
+	XBackendCookieName       string
+	XBackendCookiePath       *string
+	XBackendCookieDeadline   *cloud.HTTPSessionCookieDeadline
+	XBackendSessionHeader    *cloud.HTTPSessionHeaderPersistence
+	XBackendTLSRequired      bool
+	XBackendRequiresH2       bool
+	XBackendTCPHealthMonitor bool
+	XBackendTLS              *backendtls.Validation `json:"-"`
 
 	XBackendClientCertificateReference string `json:"-"`
 

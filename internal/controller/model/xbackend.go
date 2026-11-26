@@ -77,12 +77,16 @@ func XBackendRequiresTLS(spec gatewayx.BackendSpec) bool {
 	return spec.TLS != nil && spec.TLS.Mode != gatewayx.BackendTLSModeNone
 }
 
+// gRPC uses HTTP/2 on both transports. TLS mode determines whether the pool
+// speaks h2c or requires h2 during the authenticated TLS handshake.
 func XBackendUsesH2C(spec gatewayx.BackendSpec) bool {
-	return ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolH2C
+	protocol := ptr.Deref(spec.Protocol, "")
+	return protocol == gatewayx.BackendProtocolH2C || protocol == gatewayx.BackendProtocolGRPC && !XBackendRequiresTLS(spec)
 }
 
 func XBackendRequiresH2(spec gatewayx.BackendSpec) bool {
-	return ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolHTTP2
+	protocol := ptr.Deref(spec.Protocol, "")
+	return protocol == gatewayx.BackendProtocolHTTP2 || protocol == gatewayx.BackendProtocolGRPC && XBackendRequiresTLS(spec)
 }
 
 func XBackendReference(namespace string, reference gatewayv1.BackendObjectReference) (types.NamespacedName, bool) {
@@ -165,6 +169,11 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 	group.State = BackendResolved
 	group.XBackendUsesH2C = XBackendUsesH2C(*spec)
 	group.XBackendRequiresH2 = XBackendRequiresH2(*spec)
+	// These application protocols need not serve an ordinary HTTP GET.
+	switch ptr.Deref(spec.Protocol, "") {
+	case gatewayx.BackendProtocolGRPC, gatewayx.BackendProtocolWSS, gatewayx.BackendProtocolMCP:
+		group.XBackendTCPHealthMonitor = true
+	}
 	group.Endpoints = backend.Endpoints
 	return group
 }
@@ -245,7 +254,7 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	}
 	protocol := ptr.Deref(spec.Protocol, "")
 	if persistence := spec.SessionPersistence; persistence != nil {
-		if diagnostic := validateXBackendSessionPersistence(spec.Type, *persistence, profile); diagnostic != nil {
+		if diagnostic := validateXBackendSessionPersistence(spec.Type, protocol, *persistence, profile); diagnostic != nil {
 			return diagnostic
 		}
 	}
@@ -268,32 +277,37 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 			if tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)) {
 				return backendDiagnostic(unsupported, "Authenticated XBackends require validation.hostname to be a precise DNS hostname")
 			}
+			// The authenticated HTTP/1.1 pool forwards RFC 6455 upgrades and
+			// MCP Streamable HTTP. gRPC instead requires the h2 ALPN path.
 			switch protocol {
-			case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolHTTP2:
+			case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolHTTP2,
+				gatewayx.BackendProtocolGRPC, gatewayx.BackendProtocolWSS, gatewayx.BackendProtocolMCP:
 				return nil
 			case gatewayx.BackendProtocolH2C:
 				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend H2C requires TLS mode None")
 			default:
-				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "Authenticated XBackends support HTTP, HTTP11 and HTTP2")
+				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported with authenticated TLS", protocol))
 			}
 		default:
 			return backendDiagnostic(unsupported, fmt.Sprintf("XBackend TLS mode %q is unsupported", tls.Mode))
 		}
 	}
 	switch protocol {
-	case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11:
+	case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolMCP:
 		return nil
-	case gatewayx.BackendProtocolH2C:
+	case gatewayx.BackendProtocolH2C, gatewayx.BackendProtocolGRPC:
 		if profile.H2C {
 			return nil
 		}
 	case gatewayx.BackendProtocolHTTP2:
 		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend HTTP2 requires authenticated TLS. Use H2C for cleartext HTTP/2")
+	case gatewayx.BackendProtocolWSS:
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend WSS requires ServerOnly or ClientAndServer TLS")
 	}
 	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported by the configured HTTP backend profile", protocol))
 }
 
-func validateXBackendSessionPersistence(kind gatewayx.BackendType, persistence gatewayv1.SessionPersistence, profile XBackendProfile) *Diagnostic {
+func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gatewayx.BackendProtocol, persistence gatewayv1.SessionPersistence, profile XBackendProfile) *Diagnostic {
 	const unsupported = gatewayv1.RouteReasonUnsupportedValue
 	switch {
 	case !profile.SessionPersistence:
@@ -301,7 +315,22 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, persistence g
 	case kind != gatewayx.BackendTypeEndpointSelector:
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires EndpointSelector")
 	}
-	return validateSessionPersistence(persistence, "XBackend")
+	if diagnostic := validateSessionPersistence(persistence, "XBackend"); diagnostic != nil || !IsHeaderSessionPersistence(persistence) {
+		return diagnostic
+	}
+	name := string(persistence.Header.Name)
+	switch protocol {
+	case gatewayx.BackendProtocolMCP:
+		if strings.EqualFold(name, "MCP-Session-Id") {
+			return backendDiagnostic(unsupported, "XBackend MCP requires an affinity header distinct from MCP-Session-Id")
+		}
+	case gatewayx.BackendProtocolGRPC:
+		header := cloud.HTTPSessionHeaderPersistence{Name: name}
+		if !header.ValidForGRPC() {
+			return backendDiagnostic(unsupported, "XBackend GRPC Header sessionPersistence requires a custom ASCII metadata key without the -bin suffix")
+		}
+	}
+	return nil
 }
 
 func validateSessionPersistence(persistence gatewayv1.SessionPersistence, subject string) *Diagnostic {

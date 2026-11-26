@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An IPv4 Endpoint Gateway can route HTTP and gRPC to a ClusterSetIP published by its MCS provider. [Build record](image.json) · [ServiceImport traffic](provider/multicluster-service-imports/README.md)
+HTTPRoute supports gRPC, secure WebSocket and MCP on an Experimental XBackend. [Build record](image.json) · [Application traffic](provider/xbackend-application-protocols/README.md)
+
+An IPv4 Endpoint Gateway can route HTTP and gRPC to a ClusterSetIP published by its MCS provider. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d78443bee9c3e028b1a61ea006719e1b26a9f3e6/image.json) · [ServiceImport traffic](provider/multicluster-service-imports/README.md)
 
 An enrolled Amphora region can route exact HTTPRoute and GRPCRoute matches on 256-byte header names. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-1052c31a4db1137bb2e09d4cdbb2595c00c77ef1/image.json) · [Gateway traffic](provider/exact-http-header-name-256/README.md)
 

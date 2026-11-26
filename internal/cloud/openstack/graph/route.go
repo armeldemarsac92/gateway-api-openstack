@@ -119,6 +119,7 @@ type desiredRoute struct {
 	xBackendH2CPending          bool
 	xBackend                    bool
 	xBackendPlaintext           bool
+	xBackendTCPHealthMonitor    bool
 	inlineSessionPersistence    bool
 	sessionHeader               *cloud.HTTPSessionHeaderPersistence
 	sessionHeaderCapability     xBackendCookieCapability
@@ -156,7 +157,7 @@ func (r desiredRoute) monitorType() string {
 	if r.protocol() == cloud.ListenerProtocolUDP {
 		return monitors.TypeUDPConnect
 	}
-	if r.spec.GRPC {
+	if r.spec.GRPC || r.xBackendTCPHealthMonitor {
 		return monitors.TypeTCP
 	}
 	return r.protocol()
@@ -442,6 +443,9 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
+		if backend.XBackendTCPHealthMonitor && !xBackend {
+			return invalid(errors.New("a TCP monitor on an HTTP backend requires an XBackend"))
+		}
 		if backend.BackendH2CPending && (!xBackend || !backend.BackendH2C || spec.GRPC || backend.BackendTLS != nil) {
 			return invalid(errors.New("pending h2c requires a cleartext HTTP XBackend pool"))
 		}
@@ -504,6 +508,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.fixedResponse = fixedResponse
 		part.inlineSessionPersistence = backend.SessionPersistenceRule != ""
 		part.xBackend = xBackend
+		part.xBackendTCPHealthMonitor = backend.XBackendTCPHealthMonitor
 		part.xBackendH2CPending = backend.BackendH2CPending
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
