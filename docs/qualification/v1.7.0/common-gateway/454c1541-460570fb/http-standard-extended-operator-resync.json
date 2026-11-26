@@ -1,0 +1,154 @@
+{
+  "scope": {
+    "environment": "local kind and Octavia fixture",
+    "gatewayAPI": "v1.7.0",
+    "channel": "standard",
+    "profile": "GATEWAY-HTTP",
+    "subset": "Extended",
+    "sameSelectedCaseCount": 63
+  },
+  "sources": {
+    "controllerCommit": "454c154167a521956cd043967cf6d27e8755b292",
+    "octaviaCommit": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+    "gatewayAPICommit": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "controllerAndOctaviaCommitSignaturesVerifiedByGitHub": true,
+    "locallyBuiltControllerImageManifestDigest": "sha256:aa63196f0ecf38d26dcfcd28b4e298177b009e8cd0684475e99b42a7ace82e19",
+    "controllerImageOCISignatureVerified": false,
+    "runningManagerSHA256": "f512ae1e303ba15e1fc2df9c16842c2cbb74b2ccf696d5570feaf218bdbcee58",
+    "octaviaWheelSHA256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5",
+    "upstreamConformanceExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e"
+  },
+  "operatorSetting": {
+    "removedFlag": "--openstack-resync-interval=2s",
+    "environmentOverride": "GATEWAY_OPENSTACK_RESYNC_INTERVAL",
+    "environmentOverridePresent": false,
+    "referenceResyncIntervalSeconds": 2,
+    "candidateSourceDefaultResyncIntervalSeconds": 600
+  },
+  "reference": {
+    "report": "http-standard-extended.yaml",
+    "reportDate": "2026-11-26T08:52:01+01:00",
+    "reportDateUTC": "2026-11-26T07:52:01Z",
+    "suiteExit": 1,
+    "fixtureExit": 1,
+    "statistics": {
+      "Failed": 12,
+      "Passed": 51,
+      "Skipped": 0
+    },
+    "failedTests": [
+      "BackendTLSPolicy",
+      "BackendTLSPolicyInvalidKind",
+      "BackendTLSPolicySANValidation",
+      "GatewayFrontendClientCertificateValidation",
+      "GatewayFrontendClientCertificateValidationInsecureFallback",
+      "GatewayHTTPListenerIsolation",
+      "GatewayInvalidFrontendClientCertificateValidation",
+      "GatewayInvalidTLSBackendConfiguration",
+      "GatewayStaticAddresses",
+      "GatewayTLSBackendClientCertificate",
+      "ListenerSetAllowedRoutesNamespaces",
+      "ListenerSetHTTPRouting"
+    ],
+    "observedSelectedGoTrailers": {
+      "PASS": 51,
+      "FAIL": 10,
+      "SKIP": 0
+    },
+    "selectedCasesWithoutFinalGoTrailer": [
+      "GatewayInvalidTLSBackendConfiguration",
+      "ListenerSetHTTPRouting"
+    ],
+    "outOfSelectionGoSkipTrailers": 107,
+    "goTestConformanceDurationSeconds": 623.55,
+    "fixtureMeasuredUpstreamSuiteDurationSeconds": 2292.4,
+    "extendedActivity": {
+      "octaviaRequestsByMethod": {
+        "DELETE": 409,
+        "GET": 47991,
+        "POST": 811,
+        "PUT": 400
+      },
+      "firstOctaviaRequestAt": "2026-11-26T07:13:50.143343+00:00",
+      "lastOctaviaRequestStartedAt": "2026-11-26T07:52:02.823382+00:00",
+      "octaviaRequestSpanSeconds": 2292.688919721,
+      "nativeMutations": 1619,
+      "nativeReloads": 412
+    },
+    "originalSHA256": {
+      "inputs.json": "7192dc3444ab4d42b3f913a0cec206ace2a248807934c0e69d808cee45f0d9c5",
+      "outcomes.json": "5950117180ebc40cb0c369b597f534c3aa2a4e06d97f5314bb1c1bee3daedeee",
+      "02-http-e/selection.json": "b3f9f3568f67008af4b47cbc8d3c0e9760d5b4194d94002aab12d1164b96a814",
+      "02-http-e/standard/receipt.json": "d18b39d41bcb4726d0ceb868470e4664f1bc13a1168c5a6d5157e9b199261428",
+      "02-http-e/standard/extended-report.yaml": "93f53588e8346ebadeabfd6dc8871575404961a0cc0cd58b319f55f8e036db4f",
+      "02-http-e/standard/extended.log": "d3f39642ef67769116466a50c248a6687dfcfe69750aa9e08b203f1e28a44baf",
+      "02-http-e/standard/regional-requests.json": "3cda88b69143f356dab3c98b1c8980bc6c6c4848d6c46796990dcb0fb8f2b371",
+      "02-http-e/standard/native-mutations.json": "7cd752a4f1bb3c7b6066c25393f25537af664bdcb5dcb46c7d830ce098d4ce39",
+      "02-http-e/standard/native-reloads.json": "6cbf677a5e95f3cfdd2e0c253b2eaf0e9974f15b3bf2ed92ffaf5645fbe416b6"
+    }
+  },
+  "candidate": {
+    "report": "http-standard-extended-operator-resync.yaml",
+    "reportDate": "2026-11-26T09:57:42+01:00",
+    "reportDateUTC": "2026-11-26T08:57:42Z",
+    "suiteExit": 1,
+    "fixtureExit": 1,
+    "statistics": {
+      "Failed": 3,
+      "Passed": 60,
+      "Skipped": 0
+    },
+    "failedTests": [
+      "BackendTLSPolicy",
+      "BackendTLSPolicyInvalidKind",
+      "BackendTLSPolicySANValidation"
+    ],
+    "observedSelectedGoTrailers": {
+      "PASS": 60,
+      "FAIL": 3,
+      "SKIP": 0
+    },
+    "selectedCasesWithoutFinalGoTrailer": [],
+    "outOfSelectionGoSkipTrailers": 107,
+    "goTestConformanceDurationSeconds": 566.56,
+    "fixtureMeasuredUpstreamSuiteDurationSeconds": 1001.56,
+    "extendedActivity": {
+      "octaviaRequestsByMethod": {
+        "DELETE": 432,
+        "GET": 30827,
+        "POST": 851,
+        "PUT": 424
+      },
+      "firstOctaviaRequestAt": "2026-11-26T08:41:01.835949+00:00",
+      "lastOctaviaRequestStartedAt": "2026-11-26T08:57:43.838433+00:00",
+      "octaviaRequestSpanSeconds": 1002.012806386,
+      "nativeMutations": 1706,
+      "nativeReloads": 437
+    },
+    "originalSHA256": {
+      "inputs.json": "7192dc3444ab4d42b3f913a0cec206ace2a248807934c0e69d808cee45f0d9c5",
+      "outcomes.json": "ebd88cca18d45c01a850f1a86eee726a22916f66d2b349d2fb47307a84580e2e",
+      "02-http-e/selection.json": "f9bb1d13e6e17edbffe198d84623dc73e188cc4a4a48f057acc0f8a35c71293a",
+      "02-http-e/standard/receipt.json": "3b518c71a6ae76a3d1be6987c69e2bf5ea4cb0f3c9522e86740dc0b3b7ac7041",
+      "02-http-e/standard/extended-report.yaml": "206c1569ff40a079228fe3cb9a70ae04cca1cf1b0de808b130a8e01458222376",
+      "02-http-e/standard/extended.log": "d15569932cc4a24c0bab40ea5aa917f7015e2ed323b9b3176f6f03379171045d",
+      "02-http-e/comparison.json": "8593b287765da0906ac463626eed7f92eeb0d8da2b2140e0dffb6667227bb3f8",
+      "02-http-e/operator-resync-preflight.json": "3d1c34ec076214cc4d87e4189d90ac34c054e0fa48eb1067f563ededee9a1674",
+      "02-http-e/standard/regional-requests.json": "331de3efb79776b91c9f804b6e70caa72108958b0aec70d40c25d7f18b57d4be",
+      "02-http-e/standard/native-mutations.json": "7ccb1c06dc8c276bde46ae0566a6e8860dcb31326c9fc2f3b785fa5a048538ef",
+      "02-http-e/standard/native-reloads.json": "2c69e17d238f4ff28f58399861934d743b6db2e03bfbb5e8114aee465622b1a1"
+    }
+  },
+  "failToPass": [
+    "GatewayFrontendClientCertificateValidation",
+    "GatewayFrontendClientCertificateValidationInsecureFallback",
+    "GatewayHTTPListenerIsolation",
+    "GatewayInvalidFrontendClientCertificateValidation",
+    "GatewayInvalidTLSBackendConfiguration",
+    "GatewayStaticAddresses",
+    "GatewayTLSBackendClientCertificate",
+    "ListenerSetAllowedRoutesNamespaces",
+    "ListenerSetHTTPRouting"
+  ],
+  "passToFail": []
+}
