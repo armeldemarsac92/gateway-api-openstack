@@ -1,0 +1,1857 @@
+{
+  "controller": {
+    "sourceRevision": "a088a5f949d0f80752d0e5535f376d45c1bc5a7f",
+    "tree": "8aed61968281f8dd57e6b943878cf501841f10e9",
+    "manifestDigest": "sha256:87d6cb49cca21cf1f6c10b42075b801004dda36a09a194aa9cb0f6ac729a6a5f",
+    "configDigest": "sha256:a3a11ab40acd87a882b2080338ace09aea26ac99c862b9a1f2442da26381d1f0",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "986d11b0cde59afaec2d4f20c42daf7cbf0a4fa4cc96e6723f3e134b253dcb5e",
+    "managerSHA256": "97695519956678d089480285d8204a069b7dec4a1d471ce273592be5b9022f36",
+    "ociSignatureVerified": true,
+    "nodePortFlagPresent": true,
+    "normalAndNoCacheBuildsMatch": true,
+    "normalBuildReceiptSHA256": "6412b184f92c91770d9f38a07eccc61696d726c44ac1ef8d89de97dcc319d0aa",
+    "reproducibilityReceiptSHA256": "dcfabd1f4b5dee60b8cb2f52d82d36f1812dabdd9eb8c0d4b5aae6ba726be5ec",
+    "normalManifestDigest": "sha256:87d6cb49cca21cf1f6c10b42075b801004dda36a09a194aa9cb0f6ac729a6a5f",
+    "noCacheManifestDigest": "sha256:87d6cb49cca21cf1f6c10b42075b801004dda36a09a194aa9cb0f6ac729a6a5f"
+  },
+  "inputsSHA256": {
+    "outcomes": "3833d85cd286dc114e3c43b22bd446927a60cb3038b9f95aa2a2e2fc030097e9",
+    "extraction": "a6a1c177c63ea227ab81b32d6113e3cbaa69ebd5f1dcf074c4e9bac5d8890a9c",
+    "preflight": "e537bc711761cfba8ba01a75720fafe134bd5c9b1b6745f182dc68d0eccf52fc"
+  },
+  "channels": {
+    "experimental": {
+      "receiptSHA256": "daa9dcda2c4a8ef980aabdb7136e6b4deffc2bf5880b7fba0a0826f59fbe0b4f",
+      "launcherExit": 0,
+      "passed": true,
+      "grantTransitionsPassed": true,
+      "weightPrecisionPassed": true,
+      "startedAt": "2026-11-26T15:01:52.750+00:00",
+      "finishedAt": "2026-11-26T15:03:09.520+00:00",
+      "kubernetes": "v1.36.4",
+      "gatewayAPI": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "channel": "experimental",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "wheels": {
+        "octavia": {
+          "wheel": "octavia-19.0.1.dev112-py3-none-any.whl",
+          "version": "19.0.1.dev112",
+          "revision": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+          "sha256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5",
+          "filesVerified": 677,
+          "sourceTree": "7f59e419dbf2a222c0288305e729561bc82d4ed7"
+        },
+        "octaviaLib": {
+          "wheel": "octavia_lib-3.12.1.dev24-py3-none-any.whl",
+          "version": "3.12.1.dev24",
+          "revision": "735564bb8701e13495cc79554170ab65ceb1a811",
+          "sha256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b",
+          "filesVerified": 24,
+          "sourceTree": "c6cde475604b5299c1a832d9b850dab2477beb35"
+        }
+      },
+      "nodePorts": {
+        "workerUID": "dc2a06a0-6d26-44e8-936d-7422e8e5cb16",
+        "memberCIDR": "10.89.0.0/24",
+        "services": {
+          "primary": {
+            "address": "10.89.0.3",
+            "port": 30416,
+            "serviceUID": "efd74ca7-11c5-4366-8ba7-d90e1f2ea226"
+          },
+          "foreign": {
+            "address": "10.89.0.3",
+            "port": 30680,
+            "serviceUID": "3af1fe75-f650-437b-99de-35a66bfc229e"
+          },
+          "control": {
+            "address": "10.89.0.3",
+            "port": 30257,
+            "serviceUID": "8582b971-db20-4c6f-a918-617c6425a79b"
+          }
+        }
+      },
+      "pods": {
+        "primary": {
+          "uid": "ae4aa320-3703-4f3f-a8dc-56d37fc7db05",
+          "address": "198.18.1.2",
+          "ready": true
+        },
+        "foreign": {
+          "uid": "76b0a694-a0d5-4174-980d-14dedb62218c",
+          "address": "198.18.1.3",
+          "ready": true
+        },
+        "control": {
+          "uid": "c694bc58-dda8-4097-83ea-032385f69b85",
+          "address": "198.18.1.4",
+          "ready": true
+        }
+      },
+      "directNodePorts": {
+        "control": "control",
+        "foreign": "foreign",
+        "primary": "primary"
+      },
+      "referenceGrants": {
+        "initial": "3f9edc26-bdad-4712-b5ad-2846753da407",
+        "restored": "a159604e-2e07-4a9a-90a7-2e88839343f3"
+      },
+      "operatorFlag": "--octavia-udp-nodeport-packet-drop",
+      "scheduler": "wrr",
+      "phases": {
+        "baseline": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "0ffc7517-b174-440f-a749-b56741fdae54",
+              "generation": 1,
+              "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 3
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "811c68c1-bbed-422d-acef-69739457f1dd",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "aa8df807-c14d-4bf9-bb94-243e8e9d0eba",
+                "poolID": "ac46df05-486d-424d-aa14-37069a989a99",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "primary": {
+                    "memberID": "db9dd241-35bc-43fa-87a1-1d8e95d01c20",
+                    "address": "10.89.0.3",
+                    "port": 30416,
+                    "weight": 3,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 3
+                  },
+                  "foreign": {
+                    "memberID": "c7dc2ee0-d03d-41dc-8402-b1886ad7f236",
+                    "address": "10.89.0.3",
+                    "port": 30680,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "73c89149-eb42-4f10-a296-5d9bd47b6e38",
+                "poolID": "e25ca399-7c04-4a51-bcd0-e2d408b79246",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "adf80197-0ac7-4c76-9cc1-7cd913618f9a",
+                    "address": "10.89.0.3",
+                    "port": 30257,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "a852c13c-16ad-497e-a53b-b010039fa97a",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "foreign": 16,
+              "primary": 48
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 16,
+                "ingress_control": 16,
+                "ingress_target": 64,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 48,
+                "weightedDrop": 0
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 16,
+                "primary": 48
+              }
+            },
+            "podMarkers": {
+              "primary": 48,
+              "foreign": 16,
+              "control": 16
+            },
+            "packetsSHA256": "e9d4388d3d993a449c77e05e54ab9712381d757e4e9af294bad82a9ceba91645"
+          }
+        },
+        "withdrawal": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "0ffc7517-b174-440f-a749-b56741fdae54",
+              "generation": 1,
+              "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 3
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "811c68c1-bbed-422d-acef-69739457f1dd",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "False",
+                  "reason": "RefNotPermitted",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "aa8df807-c14d-4bf9-bb94-243e8e9d0eba",
+                "poolID": "ac46df05-486d-424d-aa14-37069a989a99",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 4,
+                  "numerator": 1
+                },
+                "members": {
+                  "primary": {
+                    "memberID": "db9dd241-35bc-43fa-87a1-1d8e95d01c20",
+                    "address": "10.89.0.3",
+                    "port": 30416,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "73c89149-eb42-4f10-a296-5d9bd47b6e38",
+                "poolID": "e25ca399-7c04-4a51-bcd0-e2d408b79246",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "adf80197-0ac7-4c76-9cc1-7cd913618f9a",
+                    "address": "10.89.0.3",
+                    "port": 30257,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "a852c13c-16ad-497e-a53b-b010039fa97a",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "primary": 48,
+              "timeout": 16
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 0,
+                "ingress_control": 16,
+                "ingress_target": 64,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 48,
+                "weightedDrop": 16
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 0,
+                "primary": 48
+              }
+            },
+            "podMarkers": {
+              "primary": 48,
+              "foreign": 0,
+              "control": 16
+            },
+            "packetsSHA256": "863a884fe3a78243d01e1e7eb516d4e29f5e015bed6ab2546b93424a23edd505",
+            "directForeignNodePort": "foreign"
+          },
+          "transition": {
+            "transitionSHA256": "8909a9196947e25fcb12166ff08423668ba7fbce5f1dff592fa0c3229a08b73d",
+            "mutationToConvergedReadbackNs": 7791191284,
+            "guestElapsedAtBoundaryMs": 7792,
+            "firstPostSequence": 44,
+            "lastPostSequence": 59,
+            "programmingPairs": 44,
+            "programmingOutcomes": {
+              "target": {
+                "foreign": 3,
+                "primary": 13,
+                "timeout": 28
+              },
+              "control": {
+                "control": 44
+              }
+            },
+            "postConvergencePairs": 16,
+            "postConvergenceOutcomes": {
+              "target": {
+                "primary": 12,
+                "timeout": 4
+              },
+              "control": {
+                "control": 16
+              }
+            },
+            "postConvergencePodMarkers": {
+              "primary": 12,
+              "foreign": 0,
+              "control": 16
+            }
+          }
+        },
+        "restored": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "0ffc7517-b174-440f-a749-b56741fdae54",
+              "generation": 1,
+              "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 3
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "811c68c1-bbed-422d-acef-69739457f1dd",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "aa8df807-c14d-4bf9-bb94-243e8e9d0eba",
+                "poolID": "ac46df05-486d-424d-aa14-37069a989a99",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "primary": {
+                    "memberID": "db9dd241-35bc-43fa-87a1-1d8e95d01c20",
+                    "address": "10.89.0.3",
+                    "port": 30416,
+                    "weight": 3,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 3
+                  },
+                  "foreign": {
+                    "memberID": "a1dbec7a-98af-4dfd-b38e-800c31d9d74d",
+                    "address": "10.89.0.3",
+                    "port": 30680,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "73c89149-eb42-4f10-a296-5d9bd47b6e38",
+                "poolID": "e25ca399-7c04-4a51-bcd0-e2d408b79246",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "adf80197-0ac7-4c76-9cc1-7cd913618f9a",
+                    "address": "10.89.0.3",
+                    "port": 30257,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "a852c13c-16ad-497e-a53b-b010039fa97a",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "foreign": 16,
+              "primary": 48
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 16,
+                "ingress_control": 16,
+                "ingress_target": 64,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 48,
+                "weightedDrop": 0
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 16,
+                "primary": 48
+              }
+            },
+            "podMarkers": {
+              "primary": 48,
+              "foreign": 16,
+              "control": 16
+            },
+            "packetsSHA256": "0fc599ee27d33c0db669d0f4bcbcfa94a98e4a7fb207e9b1fb737d085ef343de"
+          },
+          "transition": {
+            "transitionSHA256": "36c4716f94f2e182525ca055e13e1475de44d5fdb7551814755f19269faa539e",
+            "mutationToConvergedReadbackNs": 9286980646,
+            "guestElapsedAtBoundaryMs": 9288,
+            "firstPostSequence": 59,
+            "lastPostSequence": 74,
+            "programmingPairs": 59,
+            "programmingOutcomes": {
+              "target": {
+                "primary": 24,
+                "timeout": 28,
+                "foreign": 7
+              },
+              "control": {
+                "control": 59
+              }
+            },
+            "postConvergencePairs": 16,
+            "postConvergenceOutcomes": {
+              "target": {
+                "primary": 12,
+                "foreign": 4
+              },
+              "control": {
+                "control": 16
+              }
+            },
+            "postConvergencePodMarkers": {
+              "primary": 12,
+              "foreign": 4,
+              "control": 16
+            }
+          }
+        },
+        "weight-precision": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "0ffc7517-b174-440f-a749-b56741fdae54",
+              "generation": 2,
+              "specSHA256": "a2455e59b45450738fd110e26f63146d60a6e8e4254ae5811c11a021ea30ceee",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 257
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "811c68c1-bbed-422d-acef-69739457f1dd",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 2
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 2
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 2
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "aa8df807-c14d-4bf9-bb94-243e8e9d0eba",
+                "poolID": "d223c9d9-218c-4c70-aa82-de8b654a3399",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "primary": {
+                    "memberID": "fc9ad738-35a6-48d8-9477-a6c3eb36c9a2",
+                    "address": "10.89.0.3",
+                    "port": 30416,
+                    "weight": 256,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 256
+                  },
+                  "foreign": {
+                    "memberID": "4ef63404-deef-4dac-b217-fe222987bc4d",
+                    "address": "10.89.0.3",
+                    "port": 30680,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "73c89149-eb42-4f10-a296-5d9bd47b6e38",
+                "poolID": "e25ca399-7c04-4a51-bcd0-e2d408b79246",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "adf80197-0ac7-4c76-9cc1-7cd913618f9a",
+                    "address": "10.89.0.3",
+                    "port": 30257,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "a852c13c-16ad-497e-a53b-b010039fa97a",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "foreign": 2,
+              "primary": 512
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 2,
+                "ingress_control": 16,
+                "ingress_target": 514,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 512,
+                "weightedDrop": 0
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 2,
+                "primary": 512
+              }
+            },
+            "podMarkers": {
+              "primary": 512,
+              "foreign": 2,
+              "control": 16
+            },
+            "packetsSHA256": "c4d1ec8bedca2be1ae4fbac8e797ae8c6da7c676b8cd8cd3f2b26cdfcccccbe1",
+            "freshIPv4Tuples": {
+              "sourceAddress": "192.0.2.10",
+              "destinationAddress": "192.0.2.30",
+              "target": {
+                "count": 514,
+                "sourcePorts": [
+                  45000,
+                  45513
+                ],
+                "destinationPort": 9310
+              },
+              "control": {
+                "count": 16,
+                "sourcePorts": [
+                  45514,
+                  45529
+                ],
+                "destinationPort": 9311
+              }
+            }
+          }
+        }
+      }
+    },
+    "standard": {
+      "receiptSHA256": "b7a9c23a37b6fe14d480f244720043ebec7ffbb5a04ea7251c2995efacd6d8da",
+      "launcherExit": 0,
+      "passed": true,
+      "grantTransitionsPassed": true,
+      "weightPrecisionPassed": true,
+      "startedAt": "2026-11-26T14:58:53.616+00:00",
+      "finishedAt": "2026-11-26T15:00:14.366+00:00",
+      "kubernetes": "v1.36.4",
+      "gatewayAPI": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "channel": "standard",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "wheels": {
+        "octavia": {
+          "wheel": "octavia-19.0.1.dev112-py3-none-any.whl",
+          "version": "19.0.1.dev112",
+          "revision": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+          "sha256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5",
+          "filesVerified": 677,
+          "sourceTree": "7f59e419dbf2a222c0288305e729561bc82d4ed7"
+        },
+        "octaviaLib": {
+          "wheel": "octavia_lib-3.12.1.dev24-py3-none-any.whl",
+          "version": "3.12.1.dev24",
+          "revision": "735564bb8701e13495cc79554170ab65ceb1a811",
+          "sha256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b",
+          "filesVerified": 24,
+          "sourceTree": "c6cde475604b5299c1a832d9b850dab2477beb35"
+        }
+      },
+      "nodePorts": {
+        "workerUID": "523f0cfb-4c36-4361-906e-d05320077e56",
+        "memberCIDR": "10.89.0.0/24",
+        "services": {
+          "primary": {
+            "address": "10.89.0.2",
+            "port": 32567,
+            "serviceUID": "9051985a-b6ea-4d03-9aea-23d91f9c1edf"
+          },
+          "foreign": {
+            "address": "10.89.0.2",
+            "port": 31724,
+            "serviceUID": "c58c09d5-bb0a-4d57-a813-58d9cb2e7639"
+          },
+          "control": {
+            "address": "10.89.0.2",
+            "port": 31769,
+            "serviceUID": "a545d02a-f505-4f1f-aa3e-cfd4678aff95"
+          }
+        }
+      },
+      "pods": {
+        "primary": {
+          "uid": "d7def1af-696c-4286-8992-06a88a2cdfdb",
+          "address": "198.18.1.2",
+          "ready": true
+        },
+        "foreign": {
+          "uid": "f6ad33f8-c72e-4480-9ccd-cc30a497b95e",
+          "address": "198.18.1.3",
+          "ready": true
+        },
+        "control": {
+          "uid": "68f2fb5b-4759-4093-9ae4-e823bdaf04fe",
+          "address": "198.18.1.4",
+          "ready": true
+        }
+      },
+      "directNodePorts": {
+        "control": "control",
+        "foreign": "foreign",
+        "primary": "primary"
+      },
+      "referenceGrants": {
+        "initial": "db906dd5-4325-47d0-8996-fa4d1714cc70",
+        "restored": "b61cab70-4215-4f85-8907-905cb7b52f11"
+      },
+      "operatorFlag": "--octavia-udp-nodeport-packet-drop",
+      "scheduler": "wrr",
+      "phases": {
+        "baseline": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "a8eb8592-72bf-4f05-896e-44b61485bb98",
+              "generation": 1,
+              "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 3
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "8d20d900-ae39-4ee7-8926-85f2eb460670",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "f048d77c-3b42-40f3-8562-d48fac79bcdf",
+                "poolID": "3e17d53d-85d7-49cb-935c-64011834a161",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "foreign": {
+                    "memberID": "b6d6f53d-9d59-45c1-99f8-bc5be33a08ce",
+                    "address": "10.89.0.2",
+                    "port": 31724,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  },
+                  "primary": {
+                    "memberID": "2a4ffcf0-b760-4639-9ec8-eb7cc64365c5",
+                    "address": "10.89.0.2",
+                    "port": 32567,
+                    "weight": 3,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 3
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "99a49671-d5f3-409f-ba7e-dee0729e6ffa",
+                "poolID": "e4d979ce-5d51-4160-b8ba-0a56a572e9ba",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "7afb5483-7fb2-4a1f-b5c2-2f9571507e45",
+                    "address": "10.89.0.2",
+                    "port": 31769,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "b4417c51-83b8-48b9-b91c-d72798964b84",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "foreign": 16,
+              "primary": 48
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 16,
+                "ingress_control": 16,
+                "ingress_target": 64,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 48,
+                "weightedDrop": 0
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 16,
+                "primary": 48
+              }
+            },
+            "podMarkers": {
+              "primary": 48,
+              "foreign": 16,
+              "control": 16
+            },
+            "packetsSHA256": "0118b96409782fbb99498610ee8c7db853941770154e217c330d6af2f93f5248"
+          }
+        },
+        "withdrawal": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "a8eb8592-72bf-4f05-896e-44b61485bb98",
+              "generation": 1,
+              "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 3
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "8d20d900-ae39-4ee7-8926-85f2eb460670",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "False",
+                  "reason": "RefNotPermitted",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "f048d77c-3b42-40f3-8562-d48fac79bcdf",
+                "poolID": "3e17d53d-85d7-49cb-935c-64011834a161",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 4,
+                  "numerator": 1
+                },
+                "members": {
+                  "primary": {
+                    "memberID": "2a4ffcf0-b760-4639-9ec8-eb7cc64365c5",
+                    "address": "10.89.0.2",
+                    "port": 32567,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "99a49671-d5f3-409f-ba7e-dee0729e6ffa",
+                "poolID": "e4d979ce-5d51-4160-b8ba-0a56a572e9ba",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "7afb5483-7fb2-4a1f-b5c2-2f9571507e45",
+                    "address": "10.89.0.2",
+                    "port": 31769,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "b4417c51-83b8-48b9-b91c-d72798964b84",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "primary": 48,
+              "timeout": 16
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 0,
+                "ingress_control": 16,
+                "ingress_target": 64,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 48,
+                "weightedDrop": 16
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 0,
+                "primary": 48
+              }
+            },
+            "podMarkers": {
+              "primary": 48,
+              "foreign": 0,
+              "control": 16
+            },
+            "packetsSHA256": "fe4e6112ddaa085cd857983b60b75dd1b7baf12c835ccb42df21390b728baaae",
+            "directForeignNodePort": "foreign"
+          },
+          "transition": {
+            "transitionSHA256": "abf24e9dcf903775ca96f0f6bff8d5790df3ed3fc40d8e22dc7af63f5b5d9165",
+            "mutationToConvergedReadbackNs": 7592066341,
+            "guestElapsedAtBoundaryMs": 7592,
+            "firstPostSequence": 44,
+            "lastPostSequence": 59,
+            "programmingPairs": 44,
+            "programmingOutcomes": {
+              "target": {
+                "primary": 15,
+                "foreign": 2,
+                "timeout": 27
+              },
+              "control": {
+                "control": 44
+              }
+            },
+            "postConvergencePairs": 16,
+            "postConvergenceOutcomes": {
+              "target": {
+                "primary": 12,
+                "timeout": 4
+              },
+              "control": {
+                "control": 16
+              }
+            },
+            "postConvergencePodMarkers": {
+              "primary": 12,
+              "foreign": 0,
+              "control": 16
+            }
+          }
+        },
+        "restored": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "a8eb8592-72bf-4f05-896e-44b61485bb98",
+              "generation": 1,
+              "specSHA256": "b8b6c1dce48aad2a3feab3c7bd16a3d850e0b125c6a4e96678b96b27aa9b23c9",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 3
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "8d20d900-ae39-4ee7-8926-85f2eb460670",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "f048d77c-3b42-40f3-8562-d48fac79bcdf",
+                "poolID": "3e17d53d-85d7-49cb-935c-64011834a161",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "foreign": {
+                    "memberID": "e806ef2e-b346-4ce4-aee9-c4e3b06526c5",
+                    "address": "10.89.0.2",
+                    "port": 31724,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  },
+                  "primary": {
+                    "memberID": "2a4ffcf0-b760-4639-9ec8-eb7cc64365c5",
+                    "address": "10.89.0.2",
+                    "port": 32567,
+                    "weight": 3,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 3
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "99a49671-d5f3-409f-ba7e-dee0729e6ffa",
+                "poolID": "e4d979ce-5d51-4160-b8ba-0a56a572e9ba",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "7afb5483-7fb2-4a1f-b5c2-2f9571507e45",
+                    "address": "10.89.0.2",
+                    "port": 31769,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "b4417c51-83b8-48b9-b91c-d72798964b84",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "foreign": 16,
+              "primary": 48
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 16,
+                "ingress_control": 16,
+                "ingress_target": 64,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 48,
+                "weightedDrop": 0
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 16,
+                "primary": 48
+              }
+            },
+            "podMarkers": {
+              "primary": 48,
+              "foreign": 16,
+              "control": 16
+            },
+            "packetsSHA256": "60e9608f467536cbbb2c044bf81668696c563af17e9c1f9b784991a9b0d83235"
+          },
+          "transition": {
+            "transitionSHA256": "752d7a7a6c5b9fa18428e88a283eb77cf39c555ce7239e8d6b9c12019cb821de",
+            "mutationToConvergedReadbackNs": 7736020076,
+            "guestElapsedAtBoundaryMs": 7737,
+            "firstPostSequence": 45,
+            "lastPostSequence": 60,
+            "programmingPairs": 45,
+            "programmingOutcomes": {
+              "target": {
+                "primary": 15,
+                "timeout": 27,
+                "foreign": 3
+              },
+              "control": {
+                "control": 45
+              }
+            },
+            "postConvergencePairs": 16,
+            "postConvergenceOutcomes": {
+              "target": {
+                "foreign": 4,
+                "primary": 12
+              },
+              "control": {
+                "control": 16
+              }
+            },
+            "postConvergencePodMarkers": {
+              "primary": 12,
+              "foreign": 4,
+              "control": 16
+            }
+          }
+        },
+        "weight-precision": {
+          "routeIdentity": {
+            "udp-weighted": {
+              "uid": "a8eb8592-72bf-4f05-896e-44b61485bb98",
+              "generation": 2,
+              "specSHA256": "a2455e59b45450738fd110e26f63146d60a6e8e4254ae5811c11a021ea30ceee",
+              "backends": [
+                {
+                  "role": "primary",
+                  "port": 3000,
+                  "weight": 257
+                },
+                {
+                  "role": "foreign",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            },
+            "control": {
+              "uid": "8d20d900-ae39-4ee7-8926-85f2eb460670",
+              "generation": 1,
+              "specSHA256": "ad148ce900b55e2492f89d7af19cc895c12831fce7e85712bf9d030f7f4f259b",
+              "backends": [
+                {
+                  "role": "control",
+                  "port": 3000,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "readback": {
+            "gatewayConditions": {
+              "Accepted": {
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              "Programmed": {
+                "status": "True",
+                "reason": "Programmed",
+                "observedGeneration": 1
+              }
+            },
+            "routeConditions": {
+              "udp-weighted": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 2
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 2
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 2
+                }
+              },
+              "control": {
+                "Accepted": {
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1
+                },
+                "ResolvedRefs": {
+                  "status": "True",
+                  "reason": "ResolvedRefs",
+                  "observedGeneration": 1
+                },
+                "gateway-api-openstack.github.io/Programmed": {
+                  "status": "True",
+                  "reason": "Programmed",
+                  "observedGeneration": 1
+                }
+              }
+            },
+            "listeners": {
+              "udp-weighted": {
+                "port": 9310,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "f048d77c-3b42-40f3-8562-d48fac79bcdf",
+                "poolID": "dac05a96-d9fa-4e92-801c-f06d2cedbbb8",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "foreign": {
+                    "memberID": "281f53da-0884-4c98-882b-10292b6286ef",
+                    "address": "10.89.0.2",
+                    "port": 31724,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  },
+                  "primary": {
+                    "memberID": "ef7716d5-5ee3-4f53-b601-060a28e3e37a",
+                    "address": "10.89.0.2",
+                    "port": 32567,
+                    "weight": 256,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 256
+                  }
+                }
+              },
+              "control": {
+                "port": 9311,
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Programmed": {
+                    "status": "True",
+                    "reason": "Programmed",
+                    "observedGeneration": 1
+                  }
+                },
+                "listenerID": "99a49671-d5f3-409f-ba7e-dee0729e6ffa",
+                "poolID": "e4d979ce-5d51-4160-b8ba-0a56a572e9ba",
+                "listenerStatus": "ACTIVE",
+                "poolStatus": "ACTIVE",
+                "discardFraction": {
+                  "denominator": 1,
+                  "numerator": 0
+                },
+                "members": {
+                  "control": {
+                    "memberID": "7afb5483-7fb2-4a1f-b5c2-2f9571507e45",
+                    "address": "10.89.0.2",
+                    "port": 31769,
+                    "weight": 1,
+                    "provisioningStatus": "ACTIVE",
+                    "ipvsWeight": 1
+                  }
+                }
+              }
+            },
+            "vip": "192.0.2.30",
+            "loadBalancerID": "b4417c51-83b8-48b9-b91c-d72798964b84",
+            "loadBalancerStatus": "ACTIVE",
+            "expireNoDestinationConnection": "1"
+          },
+          "wire": {
+            "affected": {
+              "foreign": 2,
+              "primary": 512
+            },
+            "control": {
+              "control": 16
+            },
+            "delta": {
+              "kernel": {
+                "control": 16,
+                "foreign": 2,
+                "ingress_control": 16,
+                "ingress_target": 514,
+                "invalidDrop": 0,
+                "localDrop": 0,
+                "native_input": 0,
+                "primary": 512,
+                "weightedDrop": 0
+              },
+              "pods": {
+                "control": 16,
+                "foreign": 2,
+                "primary": 512
+              }
+            },
+            "podMarkers": {
+              "primary": 512,
+              "foreign": 2,
+              "control": 16
+            },
+            "packetsSHA256": "fd3346b715fe1225d5d2d14939134b10bdfd745318d751fd3462f5370a280c57",
+            "freshIPv4Tuples": {
+              "sourceAddress": "192.0.2.10",
+              "destinationAddress": "192.0.2.30",
+              "target": {
+                "count": 514,
+                "sourcePorts": [
+                  45000,
+                  45513
+                ],
+                "destinationPort": 9310
+              },
+              "control": {
+                "count": 16,
+                "sourcePorts": [
+                  45514,
+                  45529
+                ],
+                "destinationPort": 9311
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
