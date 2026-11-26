@@ -226,6 +226,8 @@ This profile accepts one local Service target, one local ConfigMap CA reference 
 
 ## Authenticate a TCPRoute XBackend
 
+The released provider supports the TCP listener association for a single authenticated pool. [Octavia](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-tcp-default-pool-tls-30dc29021685) · [octavia-lib](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-tcp-default-pool-tls-89991fd0d6de) · [Observed server name and client identity changes](qualification/v1.7.0/provider/xbackend-grpc-tcp-transports/README.md#authenticate-the-origin-of-a-tcp-connection)
+
 Enable the Gateway API v1.7.0 Experimental bundle and run the controller with `--octavia-backend-tls-policy` and `--octavia-tcp-default-pool-tls`. The Amphora region must advertise `tcp_default_pool_tls_v1` and `backend_tls_hostname_v1`. The API and the serving Amphorae must support this association. A client connects to an ordinary Gateway `TCP` listener. Amphora opens a TLS connection to the XBackend and forwards the client's byte stream.
 
 Use an Endpoint GatewayClass with Unmanaged backend security. The XBackend may select Pods or use an ExternalHostname allowed by the class's routed IPv4 settings. The TCPRoute and XBackend share a namespace. Put exactly one positive-weight XBackend reference in the rule and omit `backendRef.port`. Other references may have weight zero and contribute to diagnostics.
