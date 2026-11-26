@@ -454,6 +454,13 @@ func TestUDPRouteProgramsApproximateWeights(t *testing.T) {
 			}
 			r := testReconciler(t, objects...)
 			r.Protocol = gatewayv1.UDPProtocolType
+			r.Config.UDPPacketDrop = mode == cloud.MemberModeEndpoint
+			r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeNodePort
+			r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
+			r.UDPExtendedWeightsAvailable = func(context.Context) (bool, error) {
+				t.Fatal("a native allocation must keep its weights without discovering the extension")
+				return false, nil
+			}
 			identity := bindFixture(t, r, gateway, route, mode)
 			current := reconcileUDPRouteWithGraph(t, r, route, identity, func(nodes []cloud.RouteGraphNode) {
 				if got := nodes[0].Spec.Members; !slices.Equal(got, want) {
@@ -465,15 +472,98 @@ func TestUDPRouteProgramsApproximateWeights(t *testing.T) {
 	}
 }
 
+func TestUDPRouteExtendedWeightsRespectReferenceGrant(t *testing.T) {
+	for _, mode := range []cloud.MemberMode{cloud.MemberModeEndpoint, cloud.MemberModeNodePort} {
+		t.Run(string(mode), func(t *testing.T) {
+			gateway, class, route := udpRouteFixture()
+			primaryRef, primary, primaryEndpoints := udpBackendFixture(route.Namespace, "primary", 1000, "10.1.2.1")
+			secondRef, second, secondEndpoints := udpBackendFixture(route.Namespace, "secondary", 1, "10.1.2.2")
+			remoteRef, remote, remoteEndpoints := udpBackendFixture("remote", "remote", 1, "10.1.2.3")
+			remoteRef.Namespace = ptr.To(gatewayv1.Namespace(remote.Namespace))
+			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{primaryRef, secondRef, remoteRef}
+			grant := &gatewayv1.ReferenceGrant{
+				ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "allow-udp"},
+				Spec: gatewayv1.ReferenceGrantSpec{
+					From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "UDPRoute", Namespace: gatewayv1.Namespace(route.Namespace)}},
+					To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: &remoteRef.Name}},
+				},
+			}
+			objects := []client.Object{gateway, class, route, primary, primaryEndpoints, second, secondEndpoints, remote, remoteEndpoints, grant}
+			members := []cloud.Member{
+				{Address: "10.1.2.1", Port: 9090, Weight: 1000}, {Address: "10.1.2.2", Port: 9090, Weight: 1}, {Address: "10.1.2.3", Port: 9090, Weight: 1},
+			}
+			if mode == cloud.MemberModeNodePort {
+				worker := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "worker"},
+					Status: corev1.NodeStatus{
+						Addresses:  []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.44"}},
+						Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+					},
+				}
+				objects = append(objects, worker)
+				for i, service := range []*corev1.Service{primary, second, remote} {
+					service.Spec.Type = corev1.ServiceTypeNodePort
+					service.Spec.Ports[0].NodePort = 32000 + int32(i)
+					members[i].Address, members[i].Port = worker.Status.Addresses[0].Address, int(service.Spec.Ports[0].NodePort)
+				}
+			}
+			r := testReconciler(t, objects...)
+			r.Protocol = gatewayv1.UDPProtocolType
+			r.Config.UDPPacketDrop = mode == cloud.MemberModeEndpoint
+			r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeNodePort
+			r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
+			extendedAvailable := true
+			r.UDPExtendedWeightsAvailable = func(context.Context) (bool, error) { return extendedAvailable, nil }
+			identity := bindFixture(t, r, gateway, route, mode)
+			route = reconcileUDPRouteWithGraph(t, r, route, identity, func(nodes []cloud.RouteGraphNode) {
+				spec := nodes[0].Spec
+				if spec.UDPPacketDrop == nil || *spec.UDPPacketDrop != (cloud.UDPPacketDrop{Denominator: 1}) || !slices.Equal(spec.Members, members) {
+					t.Fatalf("authorized 1000:1:1 target = %+v, want %v", spec, members)
+				}
+			})
+			checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+			request := viewRoute(route).graphRequest(identity, graph.Ensure, gateway)
+			input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+			if err != nil {
+				t.Fatal(err)
+			}
+			extendedAvailable = false
+			plan, err := r.planRoute(t.Context(), viewRoute(route), identity, true)
+			if err != nil || plan.desired != nil || !plan.detach || plan.programmed.Reason != "UnsupportedValue" {
+				t.Fatalf("the wide ratio survived explicit capability loss: %+v, %v", plan, err)
+			}
+			if err := input.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+				t.Fatalf("capability loss did not fence the sealed target: %v", err)
+			}
+			extendedAvailable = true
+			if err := r.Delete(t.Context(), grant); err != nil {
+				t.Fatal(err)
+			}
+			if err := input.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+				t.Fatalf("grant withdrawal did not fence the sealed target: %v", err)
+			}
+			plan, err = r.planRoute(t.Context(), viewRoute(route), identity, true)
+			want := slices.Clone(members[:2])
+			want[0].Weight = 256
+			if err != nil || plan.desired == nil || plan.desired.UDPPacketDrop == nil ||
+				*plan.desired.UDPPacketDrop != (cloud.UDPPacketDrop{Numerator: 1, Denominator: 1002}) || !slices.Equal(plan.desired.Members, want) {
+				t.Fatalf("revoked grant did not reserve the removed share with native weights: %+v, %v", plan, err)
+			}
+		})
+	}
+}
+
 func TestWeightedUDPRouteOutsideWeightToleranceWithdrawsPool(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		denied    bool
-		resolved  metav1.ConditionStatus
-		refReason string
+		name             string
+		deniedWeight     *int32
+		resolved         metav1.ConditionStatus
+		refReason        string
+		programmedReason string
 	}{
-		{name: "resolved references", resolved: metav1.ConditionTrue, refReason: "ResolvedRefs"},
-		{name: "denied zero-weight reference", denied: true, resolved: metav1.ConditionFalse, refReason: "RefNotPermitted"},
+		{name: "resolved references", resolved: metav1.ConditionTrue, refReason: "ResolvedRefs", programmedReason: "UnsupportedValue"},
+		{name: "denied zero-weight reference", deniedWeight: ptr.To(int32(0)), resolved: metav1.ConditionFalse, refReason: "RefNotPermitted", programmedReason: "UnsupportedValue"},
+		{name: "denied positive-weight reference with discard", deniedWeight: ptr.To(int32(1)), resolved: metav1.ConditionFalse, refReason: "RefNotPermitted", programmedReason: "RefNotPermitted"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			gateway, class, route := udpRouteFixture()
@@ -482,6 +572,11 @@ func TestWeightedUDPRouteOutsideWeightToleranceWithdrawsPool(t *testing.T) {
 			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{firstRef, secondRef}
 			r := testReconciler(t, gateway, class, route, first, firstEndpoints, second, secondEndpoints)
 			r.Protocol = gatewayv1.UDPProtocolType
+			if test.deniedWeight != nil && *test.deniedWeight > 0 {
+				r.Config.UDPPacketDrop = true
+				r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
+				r.UDPExtendedWeightsAvailable = func(context.Context) (bool, error) { return false, nil }
+			}
 			identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
 			route = reconcileUDPRouteWithGraph(t, r, route, identity, nil)
 			// Each member is within 1/256 of its ideal share. Together the
@@ -489,10 +584,10 @@ func TestWeightedUDPRouteOutsideWeightToleranceWithdrawsPool(t *testing.T) {
 			// 1/1001, exceeding the tolerance for their group.
 			route.Spec.Rules[0].BackendRefs[0].Weight = ptr.To(int32(1000))
 			route.Spec.Rules[0].BackendRefs[1].Weight = ptr.To(int32(1))
-			if test.denied {
+			if test.deniedWeight != nil {
 				route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, gatewayv1.BackendRef{
 					BackendObjectReference: gatewayv1.BackendObjectReference{Name: "disabled", Namespace: ptr.To(gatewayv1.Namespace("other")), Port: firstRef.Port},
-					Weight:                 ptr.To(int32(0)),
+					Weight:                 test.deniedWeight,
 				})
 			}
 			route.Generation++
@@ -501,7 +596,7 @@ func TestWeightedUDPRouteOutsideWeightToleranceWithdrawsPool(t *testing.T) {
 			}
 			current := reconcileUDPRoute(t, r, route)
 			checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", test.resolved, test.refReason)
-			checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "UnsupportedValue")
+			checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, test.programmedReason)
 			if current.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
 				t.Fatal("a ratio outside the UDP weight tolerance did not checkpoint pool withdrawal")
 			}

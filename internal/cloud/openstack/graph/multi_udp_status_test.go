@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"testing"
@@ -116,6 +117,106 @@ func newUDPPacketDropFixture(t *testing.T) *tcpGraphFixture {
 
 func newUDPPacketDropProvider(f *tcpGraphFixture) *Provider {
 	return newTestProvider(f.t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{UDPPacketDrop: true})
+}
+
+func TestUDPExtendedWeightsRequireBothCapabilitiesOnEveryPort(t *testing.T) {
+	f := newScopedUDPPacketDropGraph(t, true)
+	f.udpExtendedAdvertised = true
+	route := &f.spec.Routes[0].Spec
+	route.Members[0].Weight = 1000
+	route.Members = append(route.Members, cloud.Member{Address: "10.1.2.3", Port: 8081, Weight: 1})
+	provider := newUDPPacketDropProvider(f)
+	f.spec.ValidateMutation = func(context.Context) error {
+		// Withdraw the advertisement after observation, before the first batch.
+		f.udpExtendedAdvertised = false
+		return nil
+	}
+	before := len(f.writes)
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrDependencyNotReady) || len(f.writes) != before {
+		t.Fatalf("the writer did not recheck extended support: %v, writes %v", err, f.writes[before:])
+	}
+	f.spec.ValidateMutation = nil
+	f.udpExtendedAdvertised = true
+	if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || result.Routes[0].Result.ObservationDeferred {
+		t.Fatalf("the route reported readiness before both ports confirmed the new weights: %+v", result.Routes[0])
+	}
+	settleScopedUDPPacketDropGraph(t, f)
+	type destination struct {
+		address string
+		port    float64
+	}
+	want := map[destination]float64{
+		{"10.1.2.3", 8080}: 1000,
+		{"10.1.2.4", 8080}: 1,
+		{"10.1.2.3", 8081}: 1,
+	}
+	checkReadback := func(path string) {
+		t.Helper()
+		members := f.children(path + "/members")
+		got := make(map[destination]float64, len(members))
+		for _, member := range members {
+			got[destination{member["address"].(string), member["protocol_port"].(float64)}] = member["weight"].(float64)
+		}
+		if len(members) != len(want) || !maps.Equal(got, want) {
+			t.Fatalf("pool %s destination weights = %v, want %v", path, got, want)
+		}
+	}
+	var paths []string
+	for _, listener := range []string{tcpListener, tcpListener + "-9353"} {
+		path := tcpPools + "/" + f.inventory[listener]["default_pool_id"].(string)
+		paths = append(paths, path)
+		checkReadback(path)
+	}
+	if paths[0] == paths[1] {
+		t.Fatal("both winning ports share a single guarded pool")
+	}
+	for portIndex, path := range paths {
+		for _, member := range f.children(path + "/members") {
+			// Give every member weight 1000 on the first port. On the second
+			// port keep the same weight counts and move 1000 to the wrong port.
+			member["weight"] = float64(1000)
+			if portIndex == 1 && member["protocol_port"] != float64(8081) {
+				member["weight"] = float64(1)
+			}
+		}
+		before = len(f.writes)
+		f.inventory[tcpLB]["provisioning_status"] = "PENDING_UPDATE"
+		if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
+			result.Routes[0].Result.ObservationDeferred || len(f.writes) != before {
+			t.Fatalf("inexact readback for %s was retained: %+v, writes %v", path, result.Routes[0], f.writes[before:])
+		}
+		f.inventory[tcpLB]["provisioning_status"] = "ACTIVE"
+		if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
+			!slices.Equal(f.writes[before:], []string{"PUT " + path + "/members"}) {
+			t.Fatalf("inexact readback for %s did not trigger its own batch repair: %+v, writes %v", path, result.Routes[0], f.writes[before:])
+		}
+		settleScopedUDPPacketDropGraph(t, f)
+		for _, current := range paths {
+			checkReadback(current)
+		}
+	}
+	before = len(f.writes)
+	f.udpDiscoveryUnavailable = true
+	if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || len(f.writes) != before {
+		t.Fatalf("transient discovery must hold the last authorized target: %+v, writes %v", result.Routes[0], f.writes[before:])
+	}
+	f.udpDiscoveryUnavailable = false
+	f.udpExtendedAdvertised = false
+	for range paths {
+		if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady {
+			t.Fatalf("capability loss reported the wide route ready: %+v", result.Routes[0])
+		}
+	}
+	for _, path := range paths {
+		if f.inventory[path] != nil {
+			t.Fatalf("capability loss retained wide pool %s", path)
+		}
+	}
+	f.udpExtendedAdvertised, f.udpDropAdvertised = true, false
+	before = len(f.writes)
+	if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || len(f.writes) != before {
+		t.Fatalf("wide weights without base UDP discard were admitted: %+v, writes %v", result.Routes[0], f.writes[before:])
+	}
 }
 
 func newScopedUDPPacketDropGraph(t *testing.T, guarded bool) *tcpGraphFixture {

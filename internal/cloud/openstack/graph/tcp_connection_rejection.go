@@ -154,6 +154,11 @@ func transportBatchMember(desired desiredRoute, member cloud.Member, existing po
 		}
 		if opts.Weight == nil {
 			opts.Weight = &existing.Weight
+			if desired.spec.UDPPacketDrop != nil && existing.Weight > cloud.MaxOctaviaMemberWeight {
+				// A singleton NodePort can preserve native operator weights, but
+				// its new target cannot carry an implicit extended weight forward.
+				opts.Weight = new(1)
+			}
 		}
 		if desired.protocol() == cloud.ListenerProtocolTCP && (member.Weight == 0 || member.Draining) {
 			opts.Backup = &existing.Backup
