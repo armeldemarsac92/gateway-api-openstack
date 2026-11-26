@@ -693,7 +693,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 				return result, err
 			}
 			if step.route.kind == routeMutationReplaceTransportMembers {
-				withdrawn, withdrawalErr := p.withdrawAfterRejectedTransportBatch(ctx, desired, step.routeIndex, &result, err)
+				withdrawn, withdrawalErr := p.withdrawAfterRejectedTransportBatch(ctx, desired, step.routeIndex, step.route.id, &result, err)
 				if withdrawn {
 					return result, withdrawalErr
 				}
@@ -902,7 +902,7 @@ func canWithdrawHTTPWithoutAddress(step graphMutation, desired desiredGatewayGra
 
 func (p *Provider) validatePlannedTrafficSecurity(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation) error {
 	if len(plan) != 0 && plan[0].kind == graphRouteMutation && plan[0].route.kind == routeMutationCreatePool {
-		route := desired.routes[plan[0].routeIndex]
+		route := graphRoutePart(desired, plan[0])
 		if route.spec.UDPPacketDrop != nil {
 			port := route.spec.GatewayRequirements.ListenerPort
 			if len(route.spec.ScopedListenerPorts) == 1 {
@@ -1347,6 +1347,9 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		assigned := node.RetainListenerPorts
 		if assigned != nil && (node.Disposition != cloud.GraphPreserve || spec.Gateway.Disposition != cloud.GraphEnsure || !usesDefaultPool(protocol)) {
 			return invalid("retaining pool defaults requires a preserved route and an ensured transport Gateway")
+		}
+		if node.RestrictUDPPacketDrop && (protocol != cloud.ListenerProtocolUDP || len(ports) == 0 || len(assigned) == 0 || node.Spec.UDPPacketDrop == nil) {
+			return invalid("restricting UDP packet drop requires a preserved guarded target on elected ports")
 		}
 		if node.Disposition == cloud.GraphEnsure {
 			assigned = node.Spec.ScopedListenerPorts

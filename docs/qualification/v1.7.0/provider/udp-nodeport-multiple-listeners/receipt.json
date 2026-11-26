@@ -1,0 +1,807 @@
+{
+  "channels": {
+    "experimental": {
+      "campaignExit": 0,
+      "continuity": {
+        "listener-removed": {
+          "firstPostConvergenceSequence": 119,
+          "ports": {
+            "9310": {
+              "postConvergenceReplies": {"foreign": 2, "primary": 6},
+              "repliesFromProbeStartThroughConvergenceSignal": {"foreign": 30, "primary": 89}
+            },
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 119}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 2, "primary": 6},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 119
+        },
+        "listener-restored": {
+          "firstPostConvergenceSequence": 109,
+          "ports": {
+            "9310": {
+              "postConvergenceReplies": {"foreign": 2, "primary": 6},
+              "repliesFromProbeStartThroughConvergenceSignal": {"foreign": 27, "primary": 82}
+            },
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 109}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 2, "primary": 6},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 109
+        },
+        "restored": {
+          "firstPostConvergenceSequence": 143,
+          "ports": {
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 143}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 0, "primary": 0},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 143
+        },
+        "withdrawal": {
+          "firstPostConvergenceSequence": 146,
+          "ports": {
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 146}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 0, "primary": 0},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 146
+        }
+      },
+      "gatewayAPI": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "channel": "experimental",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "guestCasesExit": 0,
+      "guestDiskVirtualGiB": 18,
+      "guestMemoryMiB": 2688,
+      "guestSetupExit": 0,
+      "identityChecks": {
+        "activeOctaviaAndIPVSMemberWeightsMatched": true,
+        "gatewayUIDAndRouteSpecsPreserved": true,
+        "octaviaLoadBalancerPreserved": true,
+        "podUIDsPreserved": true,
+        "readyEndpointSliceAddressesPreserved": true,
+        "removedListenerPoolAndCommittedGuardAbsentAfterRemoval": true,
+        "restoredListenerAndPoolHaveNewIDs": true,
+        "serviceUIDsPreserved": true,
+        "survivingListenerPoolAndRetainedMemberIDsPreserved": true
+      },
+      "inputsSHA256": {
+        "baseline:9310": "5c4207c7d7913832393813c436c099e21a3f94b573f5967dd35000c219b28d5a",
+        "baseline:9311": "5e1411657221ed9fda18f76118c111c723a7bd4962bd441fcdf59b9ca44f6c18",
+        "baseline:9312": "22825a925030e37d36a4d739204715f4468293d28bc8a344ac06055b947c4f73",
+        "channelReceipt": "4b37b746e2b4ec696a7f7c3340515f4c75470d1e68e864cd5708aa134b3e2e4c",
+        "guestCasesExit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "guestSetupExit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "listener-removed": "a4bbf61711e8b3bd7a567b9c48a60ebd99575e88ac24d605ddac5228d514b947",
+        "listener-removed:9310": "9390d6023e2990b186574eadadc5cfb790a9f7cf8ec767ff7525e16affd258d9",
+        "listener-removed:9311": "ac66c6473725d8af6d838cb1c720a806de1254ea6f501ce08c7d9fad6af937d4",
+        "listener-removed:9312": "9f8154d12f513d9a1233e75ccfc3f6c76443ac50f0180ceeed93e759e0fca48e",
+        "listener-restored": "6b21dedd8cab354d2541f3b4f20473a05e7092ca59e22ce99073300f658ed2a2",
+        "listener-restored:9310": "d3992298c3571c51ee7581c31c2c77f117f24b001c6e2bf294b1c0d23b9d84f2",
+        "listener-restored:9311": "a83628db8f679283091a739473b9fa84f9d42e13f566e4c3dd7ebc3163d00986",
+        "listener-restored:9312": "21406ffcba5e9dda6e145a40ddff8965fc3d51243977c2dd34e366841906f172",
+        "outcomes": "8e0fef5fa11505ac52dae03ab9941c9fb989b7636b95978a61497be40e4a3cf8",
+        "preflight": "2ed6c4a69d8a329d6ccd5fd6cedb5ad1d05becb34150a808c23013f53c06b9fe",
+        "restored": "29b66ce71b660a71719f79319d61cfc24683998a0b3aac0d0f610fff3292cf07",
+        "restored:9310": "dea17556f5ee41777a9109a241bcd9070f606a3662556995b75106e6cecaa81c",
+        "restored:9311": "45f14a3baf945f5fb963a609d009a64920f9c3707734f6603eed7e90423f5ed5",
+        "restored:9312": "f055e1fa34b74180ee8afccdbd072bc6317e1aa7f89a46615c342b3cd41f1551",
+        "vmStorage": "57a625c16bfe9ca9e2df4f82b8603564c63e7f19ac7d3c092678538600b74051",
+        "withdrawal": "95c6ab67a4b965cb1e1ad177f4a15fac8eadb30d1a725bc523f77bcf360b6fcf",
+        "withdrawal:9310": "398521493ab201b2d172b80bb61cbf39d057bc9b1a20b9c12ebc9d38493ac1e2",
+        "withdrawal:9311": "25e071450826e6e0cc17d15503cc7abcbd3a17eddd8a9ac481950028b620dc6d",
+        "withdrawal:9312": "5f39d5586f4aaee16a4d9e87832de90aa844f608d96992f820e966ef8103e390"
+      },
+      "kubernetes": "v1.36.4",
+      "launcherExit": 0,
+      "liveTrafficMeasured": true,
+      "ociSignatureVerified": true,
+      "octavia": {
+        "filesVerified": 677,
+        "revision": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+        "sha256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5",
+        "version": "19.0.1.dev112",
+        "wheel": "octavia-19.0.1.dev112-py3-none-any.whl"
+      },
+      "octaviaLib": {
+        "filesVerified": 24,
+        "revision": "735564bb8701e13495cc79554170ab65ceb1a811",
+        "sha256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b",
+        "version": "3.12.1.dev24",
+        "wheel": "octavia_lib-3.12.1.dev24-py3-none-any.whl"
+      },
+      "phases": {
+        "baseline": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "gatewayGeneration": 1,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "listener-removed": {
+          "activePorts": [
+            9310,
+            9311
+          ],
+          "gatewayGeneration": 2,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "ingressPackets": 64,
+              "nativeInput": 64,
+              "outcomes": {"timeout": 64},
+              "podDeliveries": {"control": 0, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "listener-restored": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "gatewayGeneration": 3,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "restored": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "gatewayGeneration": 1,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "withdrawal": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "directForeignNodePortEchoSucceeded": true,
+          "gatewayGeneration": 1,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 4, "numerator": 1},
+              "ingressPackets": 64,
+              "memberWeights": {"primary": 1},
+              "nativeInput": 0,
+              "outcomes": {"primary": 48, "timeout": 16},
+              "podDeliveries": {"control": 0, "foreign": 0, "primary": 48},
+              "weightedDrops": 16
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 4, "numerator": 1},
+              "ingressPackets": 64,
+              "memberWeights": {"primary": 1},
+              "nativeInput": 0,
+              "outcomes": {"primary": 48, "timeout": 16},
+              "podDeliveries": {"control": 0, "foreign": 0, "primary": 48},
+              "weightedDrops": 16
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "RefNotPermitted", "status": "False"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        }
+      },
+      "routeGenerations": {"control": 1, "udp-weighted": 1},
+      "status": "passed"
+    },
+    "standard": {
+      "campaignExit": 0,
+      "continuity": {
+        "listener-removed": {
+          "firstPostConvergenceSequence": 120,
+          "ports": {
+            "9310": {
+              "postConvergenceReplies": {"foreign": 2, "primary": 6},
+              "repliesFromProbeStartThroughConvergenceSignal": {"foreign": 30, "primary": 90}
+            },
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 120}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 2, "primary": 6},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 120
+        },
+        "listener-restored": {
+          "firstPostConvergenceSequence": 124,
+          "ports": {
+            "9310": {
+              "postConvergenceReplies": {"foreign": 2, "primary": 6},
+              "repliesFromProbeStartThroughConvergenceSignal": {"foreign": 31, "primary": 93}
+            },
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 124}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 2, "primary": 6},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 124
+        },
+        "restored": {
+          "firstPostConvergenceSequence": 155,
+          "ports": {
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 155}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 0, "primary": 0},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 155
+        },
+        "withdrawal": {
+          "firstPostConvergenceSequence": 161,
+          "ports": {
+            "9311": {
+              "postConvergenceReplies": {"control": 8},
+              "repliesFromProbeStartThroughConvergenceSignal": {"control": 161}
+            }
+          },
+          "postConvergencePodMarkers": {"control": 8, "foreign": 0, "primary": 0},
+          "roundsAfterConvergence": 8,
+          "roundsFromProbeStartThroughConvergenceSignal": 161
+        }
+      },
+      "gatewayAPI": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "channel": "standard",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "guestCasesExit": 0,
+      "guestDiskVirtualGiB": 18,
+      "guestMemoryMiB": 3072,
+      "guestSetupExit": 0,
+      "identityChecks": {
+        "activeOctaviaAndIPVSMemberWeightsMatched": true,
+        "gatewayUIDAndRouteSpecsPreserved": true,
+        "octaviaLoadBalancerPreserved": true,
+        "podUIDsPreserved": true,
+        "readyEndpointSliceAddressesPreserved": true,
+        "removedListenerPoolAndCommittedGuardAbsentAfterRemoval": true,
+        "restoredListenerAndPoolHaveNewIDs": true,
+        "serviceUIDsPreserved": true,
+        "survivingListenerPoolAndRetainedMemberIDsPreserved": true
+      },
+      "inputsSHA256": {
+        "baseline:9310": "977ae885ad3a968a8cc8240c393a53883144893653957181c30e962f2810af10",
+        "baseline:9311": "5e1411657221ed9fda18f76118c111c723a7bd4962bd441fcdf59b9ca44f6c18",
+        "baseline:9312": "02f3a2863e31fba8c633666158ac861b6c23d882dc9e2865111a1dce25eec390",
+        "channelReceipt": "be3514299ecc2208336755c1a6736404e1a90e90d039e96b3339fc5c8b30ff1a",
+        "guestCasesExit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "guestSetupExit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "listener-removed": "b44dd97e37c8f1fdd74526ce27595ea7890980e13f3f9f4390e62d433934f87f",
+        "listener-removed:9310": "c766aa8d39fe1023bdc2cdcdb0af0bbc614225c764eef17b8164a22069e6bff1",
+        "listener-removed:9311": "125fd751e96a76253fe2a371c3918fc5758bfa39c959ab0ac605da210a2d6755",
+        "listener-removed:9312": "e1df2a5dfc992cb8eaff350bc313fbc39eb0384c1971615c729c6904d09fbda2",
+        "listener-restored": "ef5280c61b72e1587cc53e95afb8c4d1c0b805b09a1be514e9f8e1f90ca14e10",
+        "listener-restored:9310": "4e20f961ca5a9c07b0541c4eb8e638fa24aced5a52f485f5c7dcd4c783f11696",
+        "listener-restored:9311": "73c1aaf58d749d1cce4e1a84a238d1fbac232b4f93dcc667353c9cc03645f6df",
+        "listener-restored:9312": "1805b9d58651d77c05cf78e8d6a42484ccf9d6dd30494760b13fe46c3d9fd71f",
+        "outcomes": "6ce56b4438400ce11de8690d1d7542a7e589ab7907e2b3ae066a84da73f42941",
+        "preflight": "0d3da857e395ca89c39aa298ad407992b9ddfd71ee0fc8bd779e51078e63caf2",
+        "restored": "35dd70bb5ebf3bf27c74ff7bd342a4a5cb964172591a509e52dbc35b7bd5e2c0",
+        "restored:9310": "ef9a560773f21ccc5d5979d10ac4926871a7bfd975bdf10e1ac574b8495a9c53",
+        "restored:9311": "de338a8c29f6054d62c1812eced936ffc2f51e85a9dd50acd69a7b0010f4bbbe",
+        "restored:9312": "a6dea5728551349e3c5fe80918bb54c4962ef0752761810ba95bcc9e31686b8e",
+        "vmStorage": "7dd1d278b9e9f0f5813e1818bcfb1b3ba8ccf7aa82baa68d661e2c362f5b0f75",
+        "withdrawal": "9e1b0cb670fd372b8780da512a0fa360a6670bb7be1d4c5fb0e2f98460fc20f2",
+        "withdrawal:9310": "d5e786ee5576c7e7ed840e3e2634251a659bf8368ad28cc6c0f61c3e51bc94ed",
+        "withdrawal:9311": "a817d819cb84a12b6fe2368bb519cb42ba1f76d3254edd7d20d0198b5ad2560c",
+        "withdrawal:9312": "1536fdb6c809129b6c9858a448e2b74fa7e32bdf5d9f8b69a535f62590070989"
+      },
+      "kubernetes": "v1.36.4",
+      "launcherExit": 0,
+      "liveTrafficMeasured": true,
+      "ociSignatureVerified": true,
+      "octavia": {
+        "filesVerified": 677,
+        "revision": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+        "sha256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5",
+        "version": "19.0.1.dev112",
+        "wheel": "octavia-19.0.1.dev112-py3-none-any.whl"
+      },
+      "octaviaLib": {
+        "filesVerified": 24,
+        "revision": "735564bb8701e13495cc79554170ab65ceb1a811",
+        "sha256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b",
+        "version": "3.12.1.dev24",
+        "wheel": "octavia_lib-3.12.1.dev24-py3-none-any.whl"
+      },
+      "phases": {
+        "baseline": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "gatewayGeneration": 1,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "listener-removed": {
+          "activePorts": [
+            9310,
+            9311
+          ],
+          "gatewayGeneration": 2,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "ingressPackets": 64,
+              "nativeInput": 64,
+              "outcomes": {"timeout": 64},
+              "podDeliveries": {"control": 0, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "listener-restored": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "gatewayGeneration": 3,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "restored": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "gatewayGeneration": 1,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 64,
+              "memberWeights": {"foreign": 1, "primary": 3},
+              "nativeInput": 0,
+              "outcomes": {"foreign": 16, "primary": 48},
+              "podDeliveries": {"control": 0, "foreign": 16, "primary": 48},
+              "weightedDrops": 0
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "ResolvedRefs", "status": "True"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        },
+        "withdrawal": {
+          "activePorts": [
+            9310,
+            9311,
+            9312
+          ],
+          "directForeignNodePortEchoSucceeded": true,
+          "gatewayGeneration": 1,
+          "listeners": {
+            "9310": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 4, "numerator": 1},
+              "ingressPackets": 64,
+              "memberWeights": {"primary": 1},
+              "nativeInput": 0,
+              "outcomes": {"primary": 48, "timeout": 16},
+              "podDeliveries": {"control": 0, "foreign": 0, "primary": 48},
+              "weightedDrops": 16
+            },
+            "9311": {
+              "attachedRoutes": 2,
+              "discardFraction": {"denominator": 1, "numerator": 0},
+              "ingressPackets": 16,
+              "memberWeights": {"control": 1},
+              "nativeInput": 0,
+              "outcomes": {"control": 16},
+              "podDeliveries": {"control": 16, "foreign": 0, "primary": 0},
+              "weightedDrops": 0
+            },
+            "9312": {
+              "attachedRoutes": 1,
+              "discardFraction": {"denominator": 4, "numerator": 1},
+              "ingressPackets": 64,
+              "memberWeights": {"primary": 1},
+              "nativeInput": 0,
+              "outcomes": {"primary": 48, "timeout": 16},
+              "podDeliveries": {"control": 0, "foreign": 0, "primary": 48},
+              "weightedDrops": 16
+            }
+          },
+          "weightedRouteConditions": {
+            "Accepted": {"observedGeneration": 1, "reason": "Accepted", "status": "True"},
+            "ResolvedRefs": {"observedGeneration": 1, "reason": "RefNotPermitted", "status": "False"},
+            "gateway-api-openstack.github.io/Programmed": {"observedGeneration": 1, "reason": "Programmed", "status": "True"}
+          }
+        }
+      },
+      "routeGenerations": {"control": 1, "udp-weighted": 1},
+      "status": "passed"
+    }
+  },
+  "controller": {
+    "configDigest": "sha256:c94e89e629027fc6fe197e669ea45fc76b51d5f679262c29162695a369547262",
+    "managerSHA256": "032d83b9376b25363aec0328db89d2fcd013feb7e960d89e7272b94b606ebc28",
+    "manifestDigest": "sha256:55727b6be94134519d8aa95de557f52a7ff1696484c6b484ab4d9206db51215f",
+    "normalAndNoCacheBuildsMatch": true,
+    "ociArchiveSHA256": "db96b62f3fc3ed403183a998929f16c692fab0dd5369328ef2c22f0f2e16024e",
+    "optIn": "--octavia-udp-nodeport-packet-drop",
+    "platform": "linux/amd64",
+    "sourceRevision": "f233af8aa65337ac6c4e39a9c091e44678e01ee6",
+    "tree": "ebfd03182f89211d41586961cc5503a4f0e3b99a"
+  },
+  "failedBootstrapAttempts": [
+    {
+      "channel": "standard",
+      "disposition": "referencegrant-missing-at-bootstrap",
+      "inputsSHA256": {
+        "channelReceipt": "114f750a4044ad431ea1bd18bdda9ccec6bfdb05700dcf9238c8ef300910804e",
+        "failureLog": "3e1041a2d44a5bea393f777973f1c98d33c076cd38122022020adc0227db367e",
+        "runnerExit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      "liveTrafficMeasured": false,
+      "runnerExit": 1
+    },
+    {
+      "channel": "experimental",
+      "disposition": "referencegrant-missing-at-bootstrap",
+      "inputsSHA256": {
+        "channelReceipt": "b4fe77c550b8fd4472bb8199ad1fb37c35a70e393e1c95b49899e4d933bb3e3d",
+        "failureLog": "282230ef8288a7fc30200a31527481457fade923b87ede9f42ae319a219d47da",
+        "runnerExit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+      },
+      "liveTrafficMeasured": false,
+      "runnerExit": 1
+    }
+  ],
+  "fixtureRepair": "The multiport fixture now creates its ReferenceGrant explicitly before it reads it.",
+  "inputsSHA256": {
+    "terminalManifest": "65d6261cf29cdaa10053067aac2430b42e79e881a91e2f3df9d9434e7acfdfa7",
+    "verifiedImage": "c56056f77b630477b1bb92d4076edbcf2af3fa4d1a2664ead4c6ef3fc319ffcd",
+    "wirePins": "2135a93dd5da663c974d63d150f36f9c7eaf9fcd18560fed5299e92869bf212b"
+  },
+  "scope": "local kind and Amphora fixture, fresh IPv4 UDP NodePort flows",
+  "skippedAttempts": [
+    {
+      "campaignExit": 75,
+      "channel": "standard",
+      "disposition": "host-memory-preflight",
+      "guestMemoryMiB": 4992,
+      "inputsSHA256": {
+        "campaignLog": "1e9133208f4a03c00d3d4feaca9cfe9cdf56bb6ff5c25c3e986ab995e0ca40e2",
+        "outcomes": "0c4e7cab0353ece786fd90ffdb8cc9ce9078dac34245fd6a2432b33207bd24b1",
+        "preflight": "bc89be927545c9d3d3a387514d27e084d2241b5b1ee72160bcc7c75c3749a578"
+      },
+      "liveTrafficMeasured": false,
+      "runnerExit": null
+    },
+    {
+      "campaignExit": 75,
+      "channel": "experimental",
+      "disposition": "host-memory-preflight",
+      "guestMemoryMiB": 3072,
+      "inputsSHA256": {
+        "campaignLog": "2b7ce92461f84f25b9eae349e30dee08baf5dbd336def5dc4a70e0b2a5b80804",
+        "outcomes": "f7dcf390a2352f856b31176a13b4a5de542098cfa9e94d66265a7516f0e8ffd9",
+        "preflight": "e6800a77f2783b0554679d0b24b6e059c28b7b5e3e7d94ebabdea96902b4c850"
+      },
+      "liveTrafficMeasured": false,
+      "runnerExit": null
+    },
+    {
+      "campaignExit": 75,
+      "channel": "experimental",
+      "disposition": "host-memory-preflight",
+      "guestMemoryMiB": 3072,
+      "inputsSHA256": {
+        "campaignLog": "192512e0d07a9232cc2905edc7fc136e6adbe4a48d2e8c32065eb84bf245dc60",
+        "outcomes": "f7dcf390a2352f856b31176a13b4a5de542098cfa9e94d66265a7516f0e8ffd9",
+        "preflight": "9182d24a4cae88de5f9976c5be172b06e9b6b54b9775517ed9bf244c232907d4"
+      },
+      "liveTrafficMeasured": false,
+      "runnerExit": null
+    },
+    {
+      "campaignExit": 75,
+      "channel": "experimental",
+      "disposition": "host-memory-preflight",
+      "guestMemoryMiB": 2816,
+      "inputsSHA256": {
+        "campaignLog": "3fd3319bfc34ff5d7663f4341b6945ad8ee293a2fd8ed4d7421c370b4c0465a6",
+        "outcomes": "f7dcf390a2352f856b31176a13b4a5de542098cfa9e94d66265a7516f0e8ffd9",
+        "preflight": "21175560c1ed5537facb1fdb6b54fed7b7fd556f9a72a6efb491866000208b75"
+      },
+      "liveTrafficMeasured": false,
+      "runnerExit": null
+    }
+  ],
+  "terminalQualificationPassed": true
+}

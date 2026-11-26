@@ -119,8 +119,20 @@ func (route observedRouteGraph) validateDefaultPoolChildren() error {
 
 func defaultPoolOwner(listener *listeners.Listener, routes []observedRouteGraph) int {
 	return slices.IndexFunc(routes, func(route observedRouteGraph) bool {
-		return route.pool != nil && route.pool.ID == listener.DefaultPoolID
+		return route.defaultPool(listener.DefaultPoolID).pool != nil
 	})
+}
+
+func (route observedRouteGraph) defaultPool(id string) observedRouteGraph {
+	if route.pool != nil && route.pool.ID == id {
+		return route
+	}
+	for _, part := range route.udpParts {
+		if part.pool != nil && part.pool.ID == id {
+			return *part
+		}
+	}
+	return observedRouteGraph{}
 }
 
 func unprovenDefaultPool(listener *listeners.Listener) error {

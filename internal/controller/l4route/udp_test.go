@@ -90,6 +90,16 @@ func testUDPPacketDropGrantLifecycle(t *testing.T, mode cloud.MemberMode) {
 	r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeNodePort
 	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
 	id := bindFixture(t, r, gateway, route, mode)
+	base := route.DeepCopy()
+	controller.SealRouteAnchor(r.Config, route, id, 8080)
+	if err := r.Patch(t.Context(), route, controller.OptimisticMergeFrom(base)); err != nil {
+		t.Fatal(err)
+	}
+	controller.SetGatewayListenerScope(r.Config, gateway, gatewayv1.UDPProtocolType)
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: "second", Protocol: gatewayv1.UDPProtocolType, Port: 9311})
+	if err := r.Update(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
 	r.Writer = readyRouteWriter(t, r)
 	reconcile := func() graph.RouteInputs {
 		t.Helper()
@@ -105,6 +115,7 @@ func testUDPPacketDropGrantLifecycle(t *testing.T, mode cloud.MemberMode) {
 		t.Helper()
 		spec := input.Nodes[0].Spec
 		if spec.UDPPacketDrop == nil || *spec.UDPPacketDrop != drop || !slices.Equal(spec.Members, want) ||
+			!slices.Equal(spec.ScopedListenerPorts, []int{8080, 9311}) || spec.Identity != id ||
 			spec.HealthMonitor != (cloud.HealthMonitorConfig{}) || string(route.UID) != id.RouteUID || !reflect.DeepEqual(route.Spec.Rules[0].BackendRefs, originalRefs) {
 			t.Fatalf("unexpected UDP forwarding target: %+v, want %+v with %v", spec, drop, want)
 		}
@@ -136,6 +147,21 @@ func testUDPPacketDropGrantLifecycle(t *testing.T, mode cloud.MemberMode) {
 	}
 	partial := slices.Clone(members[:1])
 	partial[0].Weight = 1
+	beforeRouteCheckpoint := func(share cloud.UDPPacketDrop, wanted []cloud.Member) graph.RouteInputs {
+		t.Helper()
+		request := graph.Request{Identity: controller.GatewayIdentity(r.Config, gateway), Action: graph.Ensure, Gateway: gateway}
+		input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+		if err != nil || len(input.Nodes) != 1 {
+			t.Fatalf("observe UDPRoute from Gateway = %+v, %v", input.Nodes, err)
+		}
+		node := input.Nodes[0]
+		if node.Disposition != cloud.GraphPreserve || !node.RestrictUDPPacketDrop || !slices.Equal(node.RetainListenerPorts, []int{8080, 9311}) ||
+			node.Spec.UDPPacketDrop == nil || *node.Spec.UDPPacketDrop != share || !slices.Equal(node.Spec.Members, wanted) {
+			t.Fatalf("Gateway observation did not expose the fresh authorized target without checkpointing it: %+v", node)
+		}
+		return input
+	}
+	withdrawal := beforeRouteCheckpoint(cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial)
 	revoked := reconcile()
 	check(revoked, cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial, metav1.ConditionFalse, "RefNotPermitted")
 	r.Config.UDPPacketDrop, r.Config.UDPNodePortPacketDrop = mode == cloud.MemberModeNodePort, mode == cloud.MemberModeEndpoint
@@ -152,6 +178,10 @@ func testUDPPacketDropGrantLifecycle(t *testing.T, mode cloud.MemberMode) {
 	if err := revoked.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
 		t.Fatalf("a restored grant did not fence the old drop fraction: %v", err)
 	}
+	if err := withdrawal.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("the Gateway's pre-checkpoint withdrawal was not fenced: %v", err)
+	}
+	beforeRouteCheckpoint(cloud.UDPPacketDrop{Denominator: 1}, members)
 	check(reconcile(), cloud.UDPPacketDrop{Denominator: 1}, members, metav1.ConditionTrue, "ResolvedRefs")
 
 	if worker != nil {

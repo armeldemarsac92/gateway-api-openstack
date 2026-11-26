@@ -266,6 +266,13 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			// confirms each retained pool against the fresh backend snapshot.
 			node.Spec = *spec
 			node.RetainListenerPorts = ports
+		} else if scoped && spec.UDPPacketDrop != nil {
+			// The grant or endpoint set may change before this route gets
+			// the writer lock. Use the live target to stop revoked traffic
+			// while the route's checkpoint still controls new forwarding.
+			node.Spec = *spec
+			node.RetainListenerPorts = ports
+			node.RestrictUDPPacketDrop = true
 		}
 	}
 	if trigger != nil {

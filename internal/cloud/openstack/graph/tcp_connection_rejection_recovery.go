@@ -177,7 +177,7 @@ func (p *Provider) submitTransportBatch(ctx context.Context, desired desiredGate
 		if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
 			return nil
 		}
-		handled, withdrawalErr := p.withdrawAfterRejectedTransportBatch(ctx, desired, index, result, err)
+		handled, withdrawalErr := p.withdrawAfterRejectedTransportBatch(ctx, desired, index, batch.id, result, err)
 		if handled {
 			return withdrawalErr
 		}

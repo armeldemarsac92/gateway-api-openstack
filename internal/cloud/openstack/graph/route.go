@@ -285,9 +285,9 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	if drop != nil {
 		canForward := slices.ContainsFunc(spec.Members, func(member cloud.Member) bool { return !member.Draining })
 		if protocol != cloud.ListenerProtocolUDP || !drop.Valid() ||
-			spec.HealthMonitor != (cloud.HealthMonitorConfig{}) || len(spec.ScopedListenerPorts) > 1 ||
+			spec.HealthMonitor != (cloud.HealthMonitorConfig{}) ||
 			drop.DropsAll() && len(spec.Members) != 0 || !drop.DropsAll() && !canForward {
-			return invalid(errors.New("UDP packet drop requires a dedicated UDP listener, no monitor and a complete real-member set"))
+			return invalid(errors.New("UDP packet drop requires UDP, no monitor and a complete real-member set"))
 		}
 	}
 	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable && fraction == nil && drop == nil {
@@ -781,6 +781,9 @@ func httpResourceRole(base, backend, match string) string {
 	}
 	if strings.HasPrefix(backend, tcpWeightedPartPrefix) {
 		return tcpWeightedResourceRole(base, backend)
+	}
+	if strings.HasPrefix(backend, udpDropPartPrefix) {
+		return udpDropResourceRole(base, backend)
 	}
 	return openstackidentity.HTTPFragmentRole(base, backend, match)
 }

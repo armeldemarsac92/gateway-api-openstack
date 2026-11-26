@@ -237,12 +237,12 @@ func (r *Reconciler) tcpConnectionRejectionEnabled() bool {
 	return r.protocol() == gatewayv1.TCPProtocolType && r.Config.TCPConnectionRejection
 }
 
-// A pool with UDP packet discard can serve exactly one IPv4 UDP listener.
+// Each elected port gets a dedicated discard pool on an IPv4 UDP Gateway.
 func (r *Reconciler) udpPacketDropEnabled(gateway *gatewayv1.Gateway, topology classconfig.Resolved, ports []int) bool {
 	mode := topology.Topology.MemberMode
 	enabled := mode == cloud.MemberModeEndpoint && r.Config.UDPPacketDrop ||
 		mode == cloud.MemberModeNodePort && r.Config.UDPNodePortPacketDrop
-	if r.protocol() != gatewayv1.UDPProtocolType || !enabled || len(ports) != 1 || len(gateway.Status.Addresses) != 1 {
+	if r.protocol() != gatewayv1.UDPProtocolType || !enabled || len(ports) == 0 || len(gateway.Status.Addresses) != 1 {
 		return false
 	}
 	address := gateway.Status.Addresses[0]

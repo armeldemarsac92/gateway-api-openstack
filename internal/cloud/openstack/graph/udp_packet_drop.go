@@ -55,7 +55,9 @@ func hasUDPDropTarget(desired desiredGatewayGraph) bool {
 }
 
 func hasUDPDropReadback(observed observedGatewayGraph) bool {
-	return slices.ContainsFunc(observed.routes, observedRouteGraph.udpDropPool)
+	return slices.ContainsFunc(observed.routes, func(route observedRouteGraph) bool {
+		return route.udpDropPool() || len(route.udpParts) != 0
+	})
 }
 
 func (p *Provider) observeUDPPacketDropCapability(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) {
@@ -92,8 +94,16 @@ func pendingUDPGraph(desired desiredGatewayGraph, protocol string) bool {
 func (p *Provider) observePendingUDPRoutes(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph) error {
 	routes, err := p.observeRouteGraphsWithListeners(ctx, desired.routeOwners(), actual.loadBalancer,
 		actual.listener, actual.protocol, actual.scopedListeners)
+	if err != nil {
+		return err
+	}
+	for _, listener := range actual.scopedListeners {
+		if listener.DefaultPoolID != "" && defaultPoolOwner(&listener, routes) == -1 {
+			return unprovenDefaultPool(&listener)
+		}
+	}
 	actual.routes = routes
-	return err
+	return nil
 }
 
 // Octavia can replace a lost UDP batch or remove its pool when the same pool
@@ -111,8 +121,53 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 			return cloud.GatewayGraphResult{}, false, nil
 		}
 	}
-	waitingIndex := -1
+	partDesired, partActual, parts := udpDropPlanningParts(desired, actual)
+	var submission udpDropBatch
+	result, handled, err := p.reconcileUDPPacketDropParts(ctx, partDesired, partActual, parts, &submission)
+	combineUDPDropResults(&result, parts, len(desired.routes))
+	if submission.mutation.id != "" {
+		index := submission.index
+		if len(parts) != 0 {
+			index = parts[index].owner
+		}
+		err = p.submitTransportBatch(ctx, desired, actual, index, submission.mutation, &result)
+	}
+	return result, handled, err
+}
+
+type udpDropBatch struct {
+	mutation routeMutation
+	index    int
+}
+
+func (p *Provider) reconcileUDPPacketDropParts(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, parts []udpDropPlanningPart, submission *udpDropBatch) (cloud.GatewayGraphResult, bool, error) {
+	pending := actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE"
+	indices := make([]int, len(actual.routes))
+	priorities := make([]int, len(actual.routes))
 	for index, observed := range actual.routes {
+		indices[index] = index
+		route, node := desired.routes[index], desired.spec.Routes[index]
+		switch {
+		case observed.pool == nil:
+			priorities[index] = 2
+		case node.Disposition == cloud.GraphDelete || route.udpDropUnavailable ||
+			route.spec.UDPPacketDrop != nil && staleUDPDestinations(route, observed) ||
+			observed.udpDropPool() && route.spec.UDPPacketDrop == nil:
+			priorities[index] = 0
+		case len(observed.pool.Listeners) == 0:
+			priorities[index] = 2
+		default:
+			priorities[index] = 1
+		}
+	}
+	slices.SortStableFunc(indices, func(a, b int) int { return priorities[a] - priorities[b] })
+	waitingIndex := -1
+	unsettledDetach := -1
+	for _, index := range indices {
+		if unsettledDetach >= 0 && priorities[index] != 0 {
+			break
+		}
+		observed := actual.routes[index]
 		if observed.pool == nil {
 			continue
 		}
@@ -126,7 +181,15 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		poolStatus := observed.pool.ProvisioningStatus
 		pendingBatch := pending && managed && poolStatus == "PENDING_UPDATE"
 		pendingDelete := pending && managed && poolStatus == "PENDING_DELETE"
-		if !managed && !wantDrop || pending && !pendingBatch && !pendingDelete {
+		migration := udpNoMigration
+		if len(parts) != 0 {
+			migration = parts[index].migration
+		}
+		if !managed && node.RestrictUDPPacketDrop {
+			// An uncheckpointed target cannot enroll a stock default.
+			continue
+		}
+		if !managed && !wantDrop && migration == udpNoMigration || pending && !pendingBatch && !pendingDelete {
 			continue
 		}
 		owned := servingPoolListeners(actual, observed.pool.ID)
@@ -141,7 +204,8 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 			continue
 		}
 
-		if retainDrop && !pending && !failed && actual.addressReadError == nil && actual.loadBalancer.AdminStateUp &&
+		restrict := node.RestrictUDPPacketDrop && len(owned) == 1 && slices.Contains(node.RetainListenerPorts, owned[0].ProtocolPort)
+		if retainDrop && !restrict && !pending && !failed && actual.addressReadError == nil && actual.loadBalancer.AdminStateUp &&
 			len(owned) == 1 && owned[0].AdminStateUp && slices.Contains(node.RetainListenerPorts, owned[0].ProtocolPort) {
 			ready, err := retainedTransportBackendReady(route, observed, actual)
 			if err != nil {
@@ -156,9 +220,37 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 			}
 		}
 
+		superseded := supersededDefaultPoolListener(route, owned, actual.scoped)
 		switch {
-		case pendingDelete || !wantDrop || route.udpDropUnavailable || supersededDefaultPoolListener(route, owned, actual.scoped) != "",
+		case pendingDelete || !wantDrop && !restrict || route.udpDropUnavailable || superseded != "",
 			route.udpDropUnverified && staleUDPDestinations(route, observed):
+			unprovenDetach := migration != udpNoMigration && slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
+				return listener.DefaultPoolID != observed.pool.ID && listener.ProvisioningStatus != "ACTIVE"
+			})
+			clearSharedDefault := migration == udpDetachSharedStockPool && len(owned) != 0
+			if unprovenDetach {
+				// A failed detach can already report no default. The
+				// regional pool delete renders only its current listeners.
+				clearSharedDefault = len(owned) != 0 && (staleUDPDestinations(route, observed) || superseded != "")
+				if !clearSharedDefault {
+					unsettledDetach = index
+					continue
+				}
+			}
+			if clearSharedDefault {
+				if err := p.validateUDPPoolCascade(observed); err != nil {
+					return cloud.GatewayGraphResult{}, true, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
+				}
+				step := clearListenerDefaultPool(actual.protocol)
+				step.listenerID = superseded
+				if step.listenerID == "" {
+					step.listenerID = owned[0].ID
+				}
+				actual.outcome = p.progressingOutcome(step.message)
+				result := p.pendingTransportBatchResult(ctx, desired, actual, index)
+				err := p.executeUDPPacketDropMutation(ctx, desired, actual, index, step, &result)
+				return result, true, err
+			}
 			return p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP packet drop pool")
 		case route.udpDropUnverified:
 			waitingIndex = index
@@ -180,6 +272,22 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		if readErr != nil || actual.addressReadError != nil && (changed || failed) {
 			return p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing an unverified Octavia UDP default")
 		}
+		if restrict {
+			retained := retainedUDPDestinations(route, observed)
+			if !staleUDPDestinations(route, observed) && !failed && (!pendingBatch || changed) {
+				// An existing, more restrictive target can wait for its
+				// route checkpoint without admitting any new member.
+				route.spec.Members = retained
+				if err := p.validateUDPPacketDropSecurity(ctx, desired, route, owned[0].ProtocolPort); err != nil {
+					return p.handleUDPPacketDropSecurityError(ctx, desired, actual, index, err)
+				}
+				continue
+			}
+			if len(retained) != len(route.members) ||
+				udpDropShareGreater(observed.udpDrop.Value, *route.spec.UDPPacketDrop) {
+				return p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing an Octavia UDP default that cannot restrict its authorized target")
+			}
+		}
 		if !pendingBatch && !changed && !failed {
 			continue
 		}
@@ -195,9 +303,12 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		} else {
 			actual.outcome = p.progressingOutcome(batch.message())
 		}
-		result := p.pendingTransportBatchResult(ctx, desired, actual, index)
-		err := p.submitTransportBatch(ctx, desired, actual, index, batch, &result)
-		return result, true, err
+		*submission = udpDropBatch{mutation: batch, index: index}
+		return p.pendingTransportBatchResult(ctx, desired, actual, index), true, nil
+	}
+	if unsettledDetach >= 0 {
+		actual.outcome = p.progressingOutcome("Waiting to confirm Octavia detached the former UDP default")
+		return p.waitForUDPPacketDrop(ctx, desired, actual, unsettledDetach)
 	}
 	// An active scoped Gateway can still reconcile its other listeners. The
 	// scoped planner holds each unverified route at its existing attachment.
@@ -208,13 +319,30 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 	return cloud.GatewayGraphResult{}, false, nil
 }
 
+func retainedUDPDestinations(route desiredRoute, observed observedRouteGraph) []cloud.Member {
+	active := make(map[string]string, len(observed.members))
+	for _, member := range observed.members {
+		if member.AdminStateUp && member.Weight > 0 && member.ProvisioningStatus != "PENDING_DELETE" {
+			active[memberKey(member.Address, member.ProtocolPort)] = member.SubnetID
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(route.members), func(member cloud.Member) bool {
+		subnet, found := active[memberKey(member.Address, member.Port)]
+		return !found || subnet != route.memberSubnet(member)
+	})
+}
+
+func udpDropShareGreater(a, b cloud.UDPPacketDrop) bool {
+	return int64(a.Numerator)*int64(b.Denominator) > int64(b.Numerator)*int64(a.Denominator)
+}
+
 func staleUDPDestinations(route desiredRoute, observed observedRouteGraph) bool {
 	wanted := route.spec.UDPPacketDrop
 	current := observed.udpDrop.Value
 	if !current.Valid() {
 		current = cloud.UDPPacketDrop{Denominator: 1}
 	}
-	if len(observed.members) != 0 && int64(wanted.Numerator)*int64(current.Denominator) > int64(current.Numerator)*int64(wanted.Denominator) {
+	if len(observed.members) != 0 && udpDropShareGreater(*wanted, current) {
 		return true
 	}
 	ready := make(map[string]string, len(route.members))
@@ -255,7 +383,7 @@ func (p *Provider) waitForUDPPacketDrop(ctx context.Context, desired desiredGate
 func (p *Provider) withdrawUDPPacketDrop(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int, message string) (cloud.GatewayGraphResult, bool, error) {
 	actual.outcome = p.progressingOutcome(message)
 	result := p.pendingTransportBatchResult(ctx, desired, actual, index)
-	err := p.deleteUDPPacketDropPool(ctx, desired, actual, index, &result)
+	err := p.deleteUDPPacketDropPool(ctx, desired, actual, index, actual.routes[index], &result)
 	return result, true, err
 }
 
@@ -313,8 +441,7 @@ func (p *Provider) validateUDPPoolCascade(route observedRouteGraph) error {
 		func(member pools.Member) string { return member.ID })
 }
 
-func (p *Provider) deleteUDPPacketDropPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int, result *cloud.GatewayGraphResult) error {
-	observed := actual.routes[index]
+func (p *Provider) deleteUDPPacketDropPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int, observed observedRouteGraph, result *cloud.GatewayGraphResult) error {
 	if err := p.validateUDPPoolCascade(observed); err != nil {
 		return &cloud.GraphError{Identity: desired.routes[index].spec.Identity, Err: err}
 	}
