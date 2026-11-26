@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-TCPRoute and UDPRoute can forward to ServiceImport endpoints. [Build record](image.json) · [Connection and datagram counts](provider/transport-service-imports/README.md)
+Producer HTTPRoutes can attach to an enrolled ServiceImport through the opt-in ambient pilot. [Build record](image.json) · [Waypoint responses](provider/ambient-service-import-parents/README.md)
+
+TCPRoute and UDPRoute can forward to ServiceImport endpoints. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-71d946b555e2780793ecdca99592d5da7f5db02a/image.json) · [Connection and datagram counts](provider/transport-service-imports/README.md)
 
 HTTPRoute and GRPCRoute can mirror requests to ServiceImport endpoints. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-19258c824a1c2660d551a01335f8aeb836e2be7e/image.json) · [Per-origin mirror traffic](provider/service-import-request-mirror/README.md)
 
