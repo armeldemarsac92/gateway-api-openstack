@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -120,6 +121,140 @@ func TestGRPCXBackendTrustRotationNeedsProviderReadback(t *testing.T) {
 	condition := meta.FindStatusCondition(grpc.Status.Parents[0].Conditions, r.Config.Domain()+"/Programmed")
 	require.NotNil(t, condition)
 	require.Equal(t, "Pending", condition.Reason)
+}
+
+func TestGRPCXBackendExternalHostnameUsesAuthorizedRoutedMembers(t *testing.T) {
+	f, backend, _, route := grpcXBackendFixture(t)
+	backend.Spec.Type = gatewayx.BackendTypeExternalHostname
+	backend.Spec.EndpointSelector = nil
+	backend.Spec.ExternalHostname = &gatewayx.ExternalHostnameBackend{Hostname: "origin.example.test"}
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	now := time.Now()
+	cache := f.reconciler.ExternalHostnames
+	cache.now = func() time.Time { return now }
+	allowed := netip.MustParseAddr("198.51.100.22")
+	outside := netip.MustParseAddr("192.0.2.22")
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	for _, phase := range []struct {
+		name    string
+		answers []netip.Addr
+		members []cloud.Member
+	}{
+		{"permitted", []netip.Addr{allowed, outside}, []cloud.Member{{Address: allowed.String(), Port: 8443}}},
+		{"outside configured networks", []netip.Addr{outside}, nil},
+	} {
+		t.Run(phase.name, func(t *testing.T) {
+			now = now.Add(time.Minute)
+			cache.lookup = func(_ context.Context, family, hostname string) ([]netip.Addr, error) {
+				if family != "ip4" || hostname != "origin.example.test." {
+					t.Errorf("unexpected DNS query %s %s", family, hostname)
+				}
+				return phase.answers, nil
+			}
+			before := len(provider.routeSpecs)
+			_, err := r.Reconcile(t.Context(), request)
+			require.NoError(t, err)
+			require.NoError(t, f.client.Get(t.Context(), request.NamespacedName, route))
+			require.Len(t, route.Status.Parents, 1)
+			require.True(t, meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)),
+				"route conditions: %v", route.Status.Parents[0].Conditions)
+			for _, spec := range provider.routeSpecs[before:] {
+				if spec.GRPC && len(spec.HTTPBackends) == 1 {
+					pool := spec.HTTPBackends[0]
+					require.True(t, pool.RoutedExternal)
+					require.Equal(t, phase.members, pool.Members)
+					require.Equal(t, len(phase.members) == 0, pool.Unavailable)
+					require.NotNil(t, pool.BackendTLS)
+					require.True(t, pool.BackendTLS.RequireH2)
+					return
+				}
+			}
+			t.Fatal("the provider did not receive the native gRPC pool")
+		})
+	}
+	f.reconciler.Config.XBackendExternalHostnameClasses = nil
+	cache.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		t.Error("DNS lookup on a GatewayClass without the external hostname option")
+		return nil, nil
+	}
+	r = newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	_, err := r.Reconcile(t.Context(), request)
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), request.NamespacedName, route))
+	refs := meta.FindStatusCondition(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	require.NotNil(t, refs)
+	require.Equal(t, metav1.ConditionFalse, refs.Status)
+	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), refs.Reason)
+}
+
+func TestGRPCExternalHostnameWithdrawsMembersWhenH2CBecomesUnavailable(t *testing.T) {
+	f, backend, _, route := grpcXBackendFixture(t)
+	backend.Spec.Type = gatewayx.BackendTypeExternalHostname
+	backend.Spec.EndpointSelector = nil
+	backend.Spec.ExternalHostname = &gatewayx.ExternalHostnameBackend{Hostname: "origin.example.test"}
+	backend.Spec.TLS = nil
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	ip := netip.MustParseAddr("198.51.100.22")
+	f.reconciler.ExternalHostnames.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{ip}, nil
+	}
+	available := true
+	f.reconciler.BackendH2CAvailable = func(context.Context) (bool, error) { return available, nil }
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	for _, provided := range []bool{true, false, true} {
+		available = provided
+		first := len(provider.routeSpecs)
+		_, err := r.Reconcile(t.Context(), request)
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), request.NamespacedName, route))
+		require.Len(t, route.Status.Parents, 1)
+		refs := meta.FindStatusCondition(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+		require.NotNil(t, refs)
+		require.Equal(t, available, refs.Status == metav1.ConditionTrue)
+		if !available {
+			require.Equal(t, string(gatewayv1.RouteReasonUnsupportedProtocol), refs.Reason)
+		}
+		var pools []cloud.HTTPBackend
+		for _, spec := range provider.routeSpecs[first:] {
+			if spec.GRPC {
+				pools = append(pools, spec.HTTPBackends...)
+			}
+		}
+		require.Len(t, pools, 1)
+		require.Equal(t, available, pools[0].BackendH2C)
+		require.Equal(t, !available, pools[0].Unavailable)
+		if available {
+			require.Equal(t, []cloud.Member{{Address: ip.String(), Port: 8443}}, pools[0].Members)
+		} else {
+			require.Empty(t, pools[0].Members)
+		}
+	}
+}
+
+func TestExternalHostnameLookupPreservesSameNamedServiceImport(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	backend := addExternalHostnameRule(t, f, f.route, "shared")
+	inputs := &routeModelInputs{gateway: f.gateway, input: model.Input{
+		XBackendProfile: model.XBackendProfile{ExternalHostname: true},
+		XBackends:       []model.XBackendObservation{{Key: client.ObjectKeyFromObject(backend), Spec: backend.Spec}},
+	}}
+	imported := cloud.HTTPBackend{Kind: cloud.HTTPBackendKindServiceImport, Namespace: backend.Namespace, Name: backend.Name,
+		RoutedExternal: true, Port: 9000, Members: []cloud.Member{{Address: "192.0.2.10", Port: 9000}}}
+	external := cloud.HTTPBackend{Kind: cloud.HTTPBackendKindXBackend, Namespace: backend.Namespace, Name: backend.Name, RoutedExternal: true, Port: 8089}
+	ensures := []routeValidationSnapshot{{route: f.route, gatewayClass: &gatewayv1.GatewayClass{}, desired: cloud.RouteSpec{HTTPBackends: []cloud.HTTPBackend{imported, external}}}}
+	f.reconciler.ExternalHostnames.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("198.51.100.15")}, nil
+	}
+	_, err := f.reconciler.resolveExternalHostnameMembers(t.Context(), inputs, ensures)
+	require.NoError(t, err)
+	pools := ensures[0].desired.HTTPBackends
+	require.Equal(t, imported, pools[0])
+	require.Equal(t, []cloud.Member{{Address: "198.51.100.15", Port: 8089}}, pools[1].Members)
 }
 
 type unavailableXBackendPodInventory struct{ client.Reader }

@@ -89,7 +89,7 @@ func validateDefaultPool(pool pools.Pool, loadBalancerID string, listener *liste
 }
 
 func validateDefaultPoolParent(pool pools.Pool, loadBalancerID, protocol string) error {
-	if pool.TLSEnabled {
+	if pool.TLSEnabled && (protocol != cloud.ListenerProtocolTCP || !slices.Contains(pool.Tags, tcpDefaultPoolTLSTag)) {
 		return fmt.Errorf("%w: %s pool %s has unexpected TLS settings", cloud.ErrOwnershipConflict, protocol, pool.ID)
 	}
 	return validateBoundPoolParent(pool, loadBalancerID, protocol)
@@ -262,7 +262,7 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			detach = !ready
+			detach = !ready || !actual.tcpDefaultPoolTLSMatches(actual.listener.ID, route)
 			// An existing edge permits no Gateway traffic restoration while its
 			// route checkpoint is pending.
 			restoration = nil
@@ -321,10 +321,12 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 					message += " in the VIP IP family"
 				}
 				routeResult.Outcome = p.progressingOutcome(message)
+			case index != defaultOwner && !actual.canAttachTCPDefaultPoolTLS(actual.listener.ID, route):
+				routeResult.Outcome = p.progressingOutcome("Waiting for Octavia TCP default pool TLS listener readback")
 			case index != defaultOwner:
 				message := fmt.Sprintf("Attaching the selected Octavia %s pool", actual.protocol)
 				routeResult.Outcome = p.progressingOutcome(message)
-				attach = append(attach, graphMutation{kind: graphSetListenerDefaultPool, poolID: observed.pool.ID, message: message})
+				attach = append(attach, graphMutation{kind: graphSetListenerDefaultPool, poolID: observed.pool.ID, tcpDefaultPoolTLS: route.spec.BackendTLS != nil, message: message})
 			case !gatewayReady:
 				routeResult.Outcome = result.Gateway.Outcome
 			}
@@ -381,7 +383,7 @@ func validateRouteGatewayIDs(recorded, observed cloud.GatewayState) error {
 }
 
 func transportPoolPending(err error) bool {
-	return errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) ||
+	return errors.Is(err, errTCPDefaultPoolTLS) || errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) ||
 		errors.Is(err, errTCPRejectionReadback) || errors.Is(err, errUDPPacketDropReadback) ||
 		errors.Is(err, errUDPPacketDropUnavailable) || errors.Is(err, errUDPPacketDropUnverified)
 }

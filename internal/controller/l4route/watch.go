@@ -75,6 +75,9 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager, imports *controller.
 		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackendPod), builder.WithPredicates(controller.XBackendPodPredicate()))
 	}
+	if r.tcpXBackendsEnabled() && r.Config.TCPDefaultPoolTLS {
+		setup.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackendCA))
+	}
 	if imports != nil && r.Config.MulticlusterServiceImports {
 		imports.WatchCRD(setup)
 		setup.WatchesRawSource(imports.Subscribe(r.enqueueServiceImport))
@@ -310,6 +313,10 @@ func (r *Reconciler) enqueueGrant(ctx context.Context, object client.Object) []r
 	}
 	keys := routeRequests{}
 	for _, from := range grant.Spec.From {
+		if r.tcpXBackendsEnabled() && r.Config.TCPDefaultPoolTLS && r.Config.XBackendClientCertificate &&
+			from.Group == gatewayx.GroupName && from.Kind == model.XBackendKind && string(from.Namespace) != grant.Namespace {
+			r.enqueueTCPRoutesForXBackendGrant(ctx, keys, string(from.Namespace), grant)
+		}
 		if from.Group != gatewayv1.GroupName || from.Kind != r.kind() || string(from.Namespace) == grant.Namespace {
 			continue
 		}

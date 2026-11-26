@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/utils/ptr"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,7 +45,17 @@ func (r *Reconciler) tcpXBackendsEnabled() bool {
 	return r.protocol() == gatewayv1.TCPProtocolType && r.Config.XBackendEnabled()
 }
 
-func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, mode cloud.MemberMode) (*gatewayx.XBackend, *model.Diagnostic, error) {
+func (r *Reconciler) tcpXBackendProfile(gateway *gatewayv1.Gateway, mode cloud.MemberMode) model.XBackendProfile {
+	return model.XBackendProfile{
+		MemberMode:        mode,
+		ServerTLS:         r.Config.TCPDefaultPoolTLS,
+		ClientTLS:         r.Config.XBackendClientCertificate,
+		ExternalHostname:  r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
+		ServiceDNSDomains: r.Config.XBackendServiceDNSDomains,
+	}
+}
+
+func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, profile model.XBackendProfile) (*gatewayx.XBackend, *model.Diagnostic, error) {
 	backend := &gatewayx.XBackend{}
 	err := r.APIReader.Get(ctx, key, backend)
 	switch {
@@ -52,8 +64,41 @@ func (r *Reconciler) readTCPXBackend(ctx context.Context, key client.ObjectKey, 
 	case err != nil:
 		return nil, nil, fmt.Errorf("get TCP XBackend %s: %w", key, err)
 	default:
-		return backend, model.ValidateTCPXBackend(backend.Spec, mode), nil
+		return backend, model.ValidateTCPXBackend(backend.Spec, profile), nil
 	}
+}
+
+// Count positive references before resolving or merging them. Invalid and
+// duplicate references still occupy a declared share of the route.
+func singletonTCPReference(route *transportRoute) bool {
+	positive := 0
+	for _, ref := range route.backendRefs {
+		if ptr.Deref(ref.Weight, 1) > 0 {
+			positive++
+		}
+	}
+	return positive == 1
+}
+
+func (r *Reconciler) observeTCPXBackendTLS(ctx context.Context, backend *gatewayx.XBackend, class gatewayv1.ObjectName, eligible bool) (*cloud.BackendTLSValidation, string, *model.Diagnostic, error) {
+	if !eligible {
+		return nil, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, "Authenticated TCP XBackend requires exactly one positive-weight backend reference"), nil
+	}
+	var observed model.XBackendObservation
+	if err := graph.NewBackendTLSObserver(r.APIReader, nil).ObserveXBackendTLS(ctx, &observed, backend, class, r.XBackendClientCertificates); err != nil {
+		return nil, "", nil, err
+	}
+	if tls := observed.TLS; tls.Validation == nil {
+		reason := tls.RefReason
+		if reason == "" {
+			reason = tls.Reason
+		}
+		return nil, "", backendRejection(gatewayv1.RouteConditionReason(reason), tls.Message), nil
+	}
+	if issue := observed.ClientCertificateIssue; issue != nil {
+		return nil, "", backendRejection(gatewayv1.RouteConditionReason(issue.Reason), issue.Message), nil
+	}
+	return observed.TLS.Validation.CloudValidation(), observed.ClientCertificateReference, nil, nil
 }
 
 func (r *Reconciler) transportMembers(ctx context.Context, backend transportBackend, topology classconfig.Resolved, addresses []gatewayv1.GatewayStatusAddress, matchVIPFamily bool) ([]cloud.Member, *model.Diagnostic, error) {

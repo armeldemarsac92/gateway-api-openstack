@@ -61,6 +61,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func newExternalHostnameFixture(t *testing.T) *routeModelInputFixture {
@@ -418,7 +419,7 @@ func TestXBackendExternalHostnameSharesGatewayRefreshAcrossMutations(t *testing.
 		}
 		assertGraphs("198.51.100.10")
 	}
-	wantDelay := controller.OpenStackResyncAfter(externalHostnameRefresh, f.gateway.UID)
+	wantDelay := controller.OpenStackResyncAfter(routebackend.ExternalHostnameRefresh, f.gateway.UID)
 	gatewayRequest := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(f.gateway)}
 	if len(queue.pending) != 1 || queue.pending[gatewayRequest] <= 0 || queue.pending[gatewayRequest] > wantDelay ||
 		!reflect.DeepEqual(lookups, map[string]int{"accounts.example.test.": 1, "inventory.example.test.": 1, "payments.example.test.": 1}) {

@@ -276,8 +276,8 @@ func TestTCPXBackendProfileLimits(t *testing.T) {
 			MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "database"},
 		}},
 	}
-	require.Nil(t, ValidateTCPXBackend(spec, cloud.MemberModeEndpoint))
-	nodePort := ValidateTCPXBackend(spec, cloud.MemberModeNodePort)
+	require.Nil(t, ValidateTCPXBackend(spec, XBackendProfile{MemberMode: cloud.MemberModeEndpoint}))
+	nodePort := ValidateTCPXBackend(spec, XBackendProfile{MemberMode: cloud.MemberModeNodePort})
 	require.NotNil(t, nodePort)
 	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), nodePort.Reason)
 	for _, test := range []struct {
@@ -288,7 +288,7 @@ func TestTCPXBackendProfileLimits(t *testing.T) {
 		{"application protocol", func(spec *gatewayx.BackendSpec) { spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP) }, gatewayv1.RouteReasonUnsupportedProtocol},
 		{"authenticated TLS", func(spec *gatewayx.BackendSpec) { spec.TLS.Mode = gatewayx.BackendTLSModeServerOnly }, gatewayv1.RouteReasonUnsupportedValue},
 		{"HTTP persistence", func(spec *gatewayx.BackendSpec) { spec.SessionPersistence = &gatewayv1.SessionPersistence{} }, gatewayv1.RouteReasonUnsupportedValue},
-		{"external hostname", func(spec *gatewayx.BackendSpec) {
+		{"external hostname without opt-in", func(spec *gatewayx.BackendSpec) {
 			spec.Type, spec.EndpointSelector = gatewayx.BackendTypeExternalHostname, nil
 			spec.ExternalHostname = &gatewayx.ExternalHostnameBackend{Hostname: "database.example.test"}
 		}, gatewayv1.RouteReasonUnsupportedValue},
@@ -296,7 +296,7 @@ func TestTCPXBackendProfileLimits(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			backend := spec.DeepCopy()
 			test.change(backend)
-			diagnostic := ValidateTCPXBackend(*backend, cloud.MemberModeEndpoint)
+			diagnostic := ValidateTCPXBackend(*backend, XBackendProfile{MemberMode: cloud.MemberModeEndpoint})
 			require.NotNil(t, diagnostic)
 			require.Equal(t, string(test.reason), diagnostic.Reason)
 		})

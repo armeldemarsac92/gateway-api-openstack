@@ -85,14 +85,16 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	if r.APIReader == nil {
 		return graph.RouteInputs{}, controller.ErrAPIReaderRequired
 	}
-	snapshot, err := r.observeRoutes(ctx, request, gateway)
+	var dns tcpExternalHostnameObservations
+	snapshot, err := r.observeRoutes(ctx, request, gateway, &dns)
 	if err != nil {
 		return graph.RouteInputs{}, err
 	}
+	dns.sealed = true
 	return graph.RouteInputs{
 		Nodes: snapshot.nodes,
 		Validate: func(ctx context.Context) error {
-			latest, err := r.observeRoutes(ctx, request, gateway)
+			latest, err := r.observeRoutes(ctx, request, gateway, &dns)
 			if err != nil {
 				return err
 			}
@@ -104,7 +106,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	}, nil
 }
 
-func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, expectedGateway *gatewayv1.Gateway) (routeGraphSnapshot, error) {
+func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, expectedGateway *gatewayv1.Gateway, dns *tcpExternalHostnameObservations) (routeGraphSnapshot, error) {
 	var snapshot routeGraphSnapshot
 	routes, err := r.readRoutes(ctx)
 	if err != nil {
@@ -212,6 +214,11 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			winningNodes = append(winningNodes, winningNode{index: len(snapshot.nodes), route: route, checkpoint: binding.Forwarding})
 		default:
 			peerAttached = true
+			if request.Action == graph.Ensure && !dns.sealed && r.tcpXBackendsEnabled() {
+				// A Gateway reconciliation can observe loss of attachment before
+				// the route checkpoints its detach.
+				r.InvalidateExternalHostnames(identity)
+			}
 		}
 		if scoped && node.Disposition == cloud.GraphPreserve {
 			// A bound route with no fresh authorized target cannot keep a
@@ -228,7 +235,7 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 	}
 	for _, winner := range winningNodes {
 		ports := winners[winner.route.GetUID()]
-		spec, target, backends, err := r.observeRouteBackend(ctx, winner.route, observedGateway, listeners[0], ports)
+		spec, target, backends, err := r.observeRouteBackend(ctx, winner.route, observedGateway, listeners[0], ports, dns)
 		if err != nil {
 			return snapshot, err
 		}
@@ -285,7 +292,7 @@ func (r *Reconciler) liveGateway(ctx context.Context, identity cloud.Identity, e
 	return gateway, nil
 }
 
-func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ports []int) (*cloud.RouteSpec, string, routeBackendRevisions, error) {
+func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ports []int, dns *tcpExternalHostnameObservations) (*cloud.RouteSpec, string, routeBackendRevisions, error) {
 	var revisions routeBackendRevisions
 	class, err := r.gatewayClass(ctx, gateway)
 	if err != nil || class == nil {
@@ -317,7 +324,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if collect {
 		mode = topology.Topology.MemberMode
 	}
-	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, topology.Topology.MemberMode, collect)
+	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, r.tcpXBackendProfile(gateway, topology.Topology.MemberMode), gateway.Spec.GatewayClassName, singletonTCPReference(route), collect)
 	revisions.services = invalid.services
 	revisions.xBackends = invalid.xBackends
 	revisions.imports = invalid.imports
@@ -334,7 +341,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if len(backends) == 0 && rejectWeight == 0 {
 		return nil, "", revisions, nil
 	}
-	spec, target, diagnostic, err := r.buildRouteSpec(ctx, route, gateway, listener, backends, rejectWeight, topology, ports...)
+	spec, target, diagnostic, err := r.buildRouteSpec(ctx, route, gateway, listener, backends, rejectWeight, topology, dns, ports...)
 	if err != nil && rejectWeight > 0 {
 		return nil, "", revisions, nil
 	}

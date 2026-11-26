@@ -94,6 +94,8 @@ type Config struct {
 	BackendRetryBudget bool
 	// TCPConnectionRejection opts into proportional rejection on TCPRoute and TLSRoute pools.
 	TCPConnectionRejection bool
+	// TCPDefaultPoolTLS enables XBackend authentication on a clear TCP listener.
+	TCPDefaultPoolTLS bool
 	// UDPPacketDrop opts eligible UDPRoute pools into proportional packet discard.
 	UDPPacketDrop bool
 	// TelemetryPolicy enables Experimental Gateway tracing on a capable Octavia provider.
@@ -118,7 +120,7 @@ type Config struct {
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
 	GatewayAPIChannel string
-	// XBackendExternalHostnameClasses opt in to routed ExternalHostname HTTP backends.
+	// XBackendExternalHostnameClasses opt in to routed XBackend ExternalHostname backends.
 	XBackendExternalHostnameClasses []string
 	// XBackendExternalHostnameCIDRs bounds the destinations that Amphora may use.
 	XBackendExternalHostnameCIDRs []netip.Prefix
@@ -246,6 +248,9 @@ func (c Config) Validate() error {
 	}
 	if c.XBackendSessionPersistence && !c.XBackendEnabled() {
 		return fmt.Errorf("--octavia-xbackend-session-persistence requires --gateway-api-channel=experimental")
+	}
+	if c.TCPDefaultPoolTLS && (!c.XBackendEnabled() || !c.BackendTLSPolicy) {
+		return fmt.Errorf("--octavia-tcp-default-pool-tls requires --gateway-api-channel=experimental and --octavia-backend-tls-policy")
 	}
 	if c.XBackendClientCertificate && (!c.XBackendEnabled() || !c.BackendTLSPolicy) {
 		return fmt.Errorf("--xbackend-client-certificate-map requires --gateway-api-channel=experimental and --octavia-backend-tls-policy")

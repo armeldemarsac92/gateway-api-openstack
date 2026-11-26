@@ -40,6 +40,7 @@ type ListenerInventory struct {
 	HTTPSVirtualHosts        map[string][]string
 	TCPTLSTermination        map[string]bool
 	TCPTLSMixedMode          map[string]bool
+	TCPDefaultPoolTLS        map[string]bool
 	SNICertificatesObserved  map[string]bool
 	Items                    []listeners.Listener
 	DefaultPoolsObserved     bool
@@ -70,6 +71,7 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			listeners.Listener
 			TCPTLSTermination   json.RawMessage `json:"tcp_tls_termination"`
 			TCPTLSMixedMode     json.RawMessage `json:"tcp_tls_mixed_mode"`
+			TCPDefaultPoolTLS   json.RawMessage `json:"tcp_default_pool_tls"`
 			SNICertificates     *[]string       `json:"sni_container_refs"`
 			RequestFilters      json.RawMessage `json:"request_filter_sections"`
 			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
@@ -126,6 +128,13 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			// Only a literal true verifies mixed mode. Preserve listener
 			// identity and admin state so a malformed row can still close.
 			inventory.TCPTLSMixedMode[item.ID] = string(observed.TCPTLSMixedMode) == "true"
+		}
+		switch string(observed.TCPDefaultPoolTLS) {
+		case "true", "false":
+			if inventory.TCPDefaultPoolTLS == nil {
+				inventory.TCPDefaultPoolTLS = make(map[string]bool)
+			}
+			inventory.TCPDefaultPoolTLS[item.ID] = string(observed.TCPDefaultPoolTLS) == "true"
 		}
 		if observed.RequestFilters != nil {
 			if inventory.RequestFilters == nil {
@@ -202,6 +211,26 @@ func (s *Service) CreateTCPTLSListener(ctx context.Context, opts listeners.Creat
 // UpdateListener updates one listener.
 func (s *Service) UpdateListener(ctx context.Context, id string, opts listeners.UpdateOpts) (*listeners.Listener, error) {
 	return listeners.Update(ctx, s.client, id, opts).Extract()
+}
+
+type tcpDefaultPoolTLSOptions struct {
+	listeners.UpdateOpts
+	enabled bool
+}
+
+func (opts tcpDefaultPoolTLSOptions) ToListenerUpdateMap() (map[string]any, error) {
+	body, err := opts.UpdateOpts.ToListenerUpdateMap()
+	if err == nil {
+		body["listener"].(map[string]any)["tcp_default_pool_tls"] = opts.enabled
+	}
+	return body, err
+}
+
+// SetTCPDefaultPoolTLS updates the authenticated association and its mode atomically.
+func (s *Service) SetTCPDefaultPoolTLS(ctx context.Context, id, poolID string, enabled bool) error {
+	opts := tcpDefaultPoolTLSOptions{UpdateOpts: listeners.UpdateOpts{DefaultPoolID: &poolID}, enabled: enabled}
+	_, err := listeners.Update(ctx, s.client, id, opts).Extract()
+	return err
 }
 
 type listenerClientAuthenticationOptions struct {
