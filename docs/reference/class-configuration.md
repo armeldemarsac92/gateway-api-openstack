@@ -257,6 +257,8 @@ The backend supplies the port, so omit `backendRefs[].port`. The controller sele
 
 #### Forward a GRPCRoute to an XBackend
 
+The local trials recorded protobuf replies, gRPC status codes and server-authenticated transport while the h2c selector changed. [Observed GRPCRoute traffic](../qualification/v1.7.0/provider/grpcroute-xbackend/README.md)
+
 Use the Experimental bundle and controller overlay on an Endpoint-mode Gateway with unmanaged backend security and a network path to Pod IPv4 addresses. Enable the [native GRPCRoute frontend](../qualification/v1.7.0/provider/grpc-h2c-controller.md), including `--octavia-backend-h2c` and either `--octavia-fixed-http-responses` or `--octavia-weighted-http-targets`. For multiple primary references use `--octavia-weighted-http-targets`.
 
 An `EndpointSelector` XBackend in the GRPCRoute's namespace supplies the port. Omit the reference's `port`. An XBackend in a different namespace remains forbidden even with a ReferenceGrant. For example, the `reports` XBackend above can serve the following native route if its selected Pods implement gRPC. Use a listener and hostname combination available to GRPCRoute.

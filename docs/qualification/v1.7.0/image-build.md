@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-Gateway routes can forward to IPv4 endpoints of a Headless ServiceImport. [Build record](image.json) · [HTTP, gRPC and TLS observations](provider/headless-service-imports/README.md)
+GRPCRoute can forward protobuf calls to Pods selected by an Experimental XBackend. [Build record](image.json) · [gRPC transport and Pod selection](provider/grpcroute-xbackend/README.md)
+
+Gateway routes can forward to IPv4 endpoints of a Headless ServiceImport. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-6a52d5a7d99f166a335775e9ba801cd04163a294/image.json) · [HTTP, gRPC and TLS observations](provider/headless-service-imports/README.md)
 
 TCPRoute can forward raw TCP connections to Pods selected by an Experimental XBackend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-62ac0896591cc64c266d9159453f143c4fc6d05c/image.json) · [TCP traffic and Pod eligibility](provider/tcproute-xbackend/README.md)
 
