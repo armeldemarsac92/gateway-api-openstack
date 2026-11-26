@@ -1,9 +1,11 @@
 {
   "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
-  "istioRevision": "953e8af367342ea0b230f6f98e99f919aa82372e",
+  "istioRevision": "329c846d3de8c2b06e5a238d59bc7aa1ece8d4ca",
   "platform": "linux/amd64",
-  "ociArchiveSHA256": "2d8fc2c4926086b945109c83996c8fd45b8ec23d1059b0f76e3e1cc6ab055a65",
-  "pilotSHA256": "af859ab33c5b28a38ba6f50ea833d0c61acca7eb334679c8ebb17238bc23c63e",
-  "sourceTree": "e78a45a81d6af0c93f83e08ef09f0c053fa2cab1",
-  "sourcePatchSHA256": "5077b17868f951eabd4ce13648e307d5f497633ad82bfc2c2314d0315c43d1dd"
+  "manifestDigest": "sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d",
+  "ociArchiveSHA256": "d18aa65857462db51e6a495531abe684e5d908f16d0d1cee70e3e5ca3a15700a",
+  "pilotSHA256": "99dafcc2bd32c87bbef6c1c87f9452ade6d89d70100ef8a4d4eb2cf1235229d8",
+  "sourceTree": "2e647d504d82229533e40bd1d2681d755f2e4bcc",
+  "sourcePatchSHA256": "f8def331b5f8a78180c70ca74407bddb2f251c735e2f25c176371fb3cdabc95d",
+  "grpcPatchSHA256": "e4974d420c1eb647688f3e20c0d6b3578f81eb170fbe60a7a7742e09d9a71a4d"
 }

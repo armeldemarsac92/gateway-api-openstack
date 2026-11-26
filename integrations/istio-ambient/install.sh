@@ -70,11 +70,14 @@ deploy_chart hibiscus-ambient-base base --set global.enableReaderRBAC=false
 pilot_values=(--values "$module/istiod.yaml")
 if [[ "$service_import_parents" == true ]]; then
     pilot_values+=(--values "$module/service-import-parents.yaml")
-elif [[ "$consumer_routes" == true ]]; then
-    pilot_values+=(--values "$module/consumer-routes.yaml")
 fi
+# Both consumer options pin the same image. Apply their values after the ServiceImport
+# values so the shared consumer image is selected while preserving the requested flags.
 if [[ "$grpc_consumer_routes" == true ]]; then
     pilot_values+=(--values "$module/grpc-consumer-routes.yaml")
+fi
+if [[ "$consumer_routes" == true ]]; then
+    pilot_values+=(--values "$module/consumer-routes.yaml")
 fi
 deploy_chart hibiscus-ambient-istiod istiod "${pilot_values[@]}"
 deploy_chart hibiscus-ambient-cni cni --values "$module/cni.yaml"

@@ -38,7 +38,7 @@ const (
 	consumerPilot              = "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fdb9d02e2b427f81d2763fce329361ac32432080cc14b7115315bed4508bbcc5"
 	producerServiceImportPilot = "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849"
 	serviceImportPilot         = "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a4c0e37f5140f00a242d914b3199cc2fc5d4c97bf071f2fe85d592dce8e6f20"
-	grpcConsumerPilot          = "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fd69a489e859f50fa82e297bd11ce55caf9db83764264da6b651aaad1be1e2b6"
+	sharedConsumerPilot        = "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d"
 	cniImage                   = "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e"
 	ztunnelImage               = "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
 )
@@ -130,7 +130,7 @@ func pilotConfigured(pilot *corev1.Container) bool {
 		return false
 	}
 	switch pilot.Image {
-	case stockPilot, consumerPilot, producerServiceImportPilot, serviceImportPilot, grpcConsumerPilot:
+	case stockPilot, consumerPilot, producerServiceImportPilot, serviceImportPilot, sharedConsumerPilot:
 	default:
 		return false
 	}
