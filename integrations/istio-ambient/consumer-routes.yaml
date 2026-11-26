@@ -1,2 +1,5 @@
-# Istio 1.31.0 with the Hibiscus consumer HTTPRoute patch, linux/amd64.
-image: ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fdb9d02e2b427f81d2763fce329361ac32432080cc14b7115315bed4508bbcc5
+# Hibiscus Istio 1.31.0, linux/amd64, with consumer HTTP request-header support enabled.
+image: ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:326753a96f40b855ad4c36d7a8b530fa74c2a3c7054572b7bf9f8b3f5f97567d
+pilot:
+  env:
+    PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST: "true"

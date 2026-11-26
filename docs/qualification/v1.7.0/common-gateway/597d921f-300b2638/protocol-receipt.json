@@ -1,0 +1,1918 @@
+{
+  "gatewayAPIVersion": "v1.7.0",
+  "httpLedgerBaseRevision": "3062bbfcce4f741cfc2ecad9b7d622de67c9d41f",
+  "gitSourceSignaturesVerified": [
+    "controller",
+    "octavia",
+    "octaviaLib"
+  ],
+  "artifacts": {
+    "gatewayAPI": {
+      "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "executableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+      "registrySHA256": "9e636e9da4db8ba2cb7058860786b5f55442db792b0dbe872ce2c348c81632e0",
+      "baseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "crdBundleSHA256": {
+        "experimental": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "standard": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1"
+      }
+    },
+    "controller": {
+      "sourceRevision": "597d921fd083bb71f9ad3fc024f5f6bf0891e0ba",
+      "tree": "a6db2901671eef2d13d4c923d5560840577d2350",
+      "manifestDigest": "sha256:af7a3aaf6b691d33a43e9be6313573bb4a06dd573a2cd865ae88b138d233a750",
+      "configDigest": "sha256:4c9166bb0a282d21bb84de7b8b8a6c778971c7b25efe1fe9e8693900ce5d2f54",
+      "ociArchiveSHA256": "5088eb63491731550c14e25e1382571f409d7942202727f50d16e2d098063e2d",
+      "ociSignatureVerified": false,
+      "managerSHA256": "83cc52dbae43238325247b91268b5283051e1f2c50b5d7014a619d7d9e0734ae"
+    },
+    "octavia": {
+      "source": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+      "tree": "bb82262c8b13b175a1414ec659a10c43412f0c79",
+      "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+    },
+    "octaviaLib": {
+      "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "tree": "503a73ff7e5e70fd4cd60dbb97c3c71e28f42060",
+      "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+    }
+  },
+  "selections": {
+    "05-grpc-c": {
+      "profile": "GATEWAY-GRPC",
+      "channel": "standard",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GRPCExactMethodMatching",
+        "GRPCRouteHeaderMatching",
+        "GRPCRouteListenerHostnameMatching",
+        "GRPCRouteMultipleGateways",
+        "GRPCRouteWeight",
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific"
+      ],
+      "skipTests": [],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "acb5ecd1df035d5e1e70971992b3544c56cfe2f78d245e17b1984d3d85916120",
+      "preflightSHA256": "0228b1100caf4b61198ab6b5be656ddcd890d9842a8660694c745d8913b73c86",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:07:11+01:00",
+      "reportPath": "protocol-yaml/gateway-grpc-standard-core-default.yaml",
+      "reportSHA256": "ce63aec2e886423fb2eeb153b118e116f8ce7db4db27a9c3c6ba4acea4536d48",
+      "fixtureReceiptSHA256": "dfd44d2f8cf07427a4a8a1ca981ca76be8fb02e4349d9b64cee4b1162069b156",
+      "upstreamLogSHA256": "ce092fb8bb59201c0ce708c3bcdc71ec100e217808ad95aef92e05ce400f8b59",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 17,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 17,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "06-grpc-e": {
+      "profile": "GATEWAY-GRPC",
+      "channel": "standard",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "BackendTLSPolicyGRPCRoute",
+        "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection",
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant"
+      ],
+      "skipTests": [
+        "GRPCExactMethodMatching",
+        "GRPCRouteHeaderMatching",
+        "GRPCRouteListenerHostnameMatching",
+        "GRPCRouteMultipleGateways",
+        "GRPCRouteWeight",
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "BackendTLSPolicySANValidation",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayPort8080"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "02b95f3fee863869089c9d1579d62e524f00f0eeeba57e960ce0b432064e27cc",
+      "preflightSHA256": "29e60e6a1905e7541d46da708c70dadb73ae1b0d27d08ed8c612503e6d8a90de",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:13:53+01:00",
+      "reportPath": "protocol-yaml/gateway-grpc-standard-extended-default.yaml",
+      "reportSHA256": "3e35ee208e1bf6c8a3ee9787e27631b4f9a789066abefcdc21e9266b38ddd439",
+      "fixtureReceiptSHA256": "3ad43f00f940ac1febe7a201fb710d5a345132eafde47f85e92d4e068a6e9572",
+      "upstreamLogSHA256": "f68238bbb26417af2a1488448c1e54839402fc22fd6b4c5a392127bbc9545f4b",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 13,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 13,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GRPCExactMethodMatching",
+          "GRPCRouteHeaderMatching",
+          "GRPCRouteListenerHostnameMatching",
+          "GRPCRouteMultipleGateways",
+          "GRPCRouteWeight",
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            3374
+          ],
+          "unusableAddress": [
+            3377
+          ],
+          "usableAddress": [
+            3382
+          ],
+          "testPass": [
+            3679
+          ]
+        }
+      }
+    },
+    "07-grpc-c": {
+      "profile": "GATEWAY-GRPC",
+      "channel": "experimental",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GRPCExactMethodMatching",
+        "GRPCRouteHeaderMatching",
+        "GRPCRouteListenerHostnameMatching",
+        "GRPCRouteMultipleGateways",
+        "GRPCRouteWeight",
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific"
+      ],
+      "skipTests": [],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "c18cb8f0861ee09b122a1909b35a07b8d2eae82474ea51329f590eb4a768da42",
+      "preflightSHA256": "44991f12ff93f93be2679d0078d431bb6d951240151ceb08772aa873348656e0",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:18:45+01:00",
+      "reportPath": "protocol-yaml/gateway-grpc-experimental-core-default.yaml",
+      "reportSHA256": "a4b37069a788a6c72f2c8d22301b1d34db4bd05ec193179d5e24dd694df13ac9",
+      "fixtureReceiptSHA256": "25c2cc9668ee34e82e644cef92ed35ff30be136a8ebc0b14c1d6af1fffd263e9",
+      "upstreamLogSHA256": "0d13aa72c7ec6f596d24196a88367b5a6b70f136218b685dc633eeb2ae941def",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 17,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 17,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "08-grpc-e": {
+      "profile": "GATEWAY-GRPC",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "BackendTLSPolicyGRPCRoute",
+        "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection",
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant"
+      ],
+      "skipTests": [
+        "GRPCExactMethodMatching",
+        "GRPCRouteHeaderMatching",
+        "GRPCRouteListenerHostnameMatching",
+        "GRPCRouteMultipleGateways",
+        "GRPCRouteWeight",
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "BackendTLSPolicySANValidation",
+        "ClusterTrustBundle",
+        "GatewayAddressRoutability",
+        "GatewayAddressRoutabilityCluster",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayListenerFilters",
+        "GatewayPort8080"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "9b9b5836b58b7e3490ce8b45c367d3b5f4703c659ba5f9877906796a65245b5c",
+      "preflightSHA256": "690384fc373c003d7baa309fabccf18025b429fd9114327399f8d09764afbd06",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:22:32+01:00",
+      "reportPath": "protocol-yaml/gateway-grpc-experimental-extended-default.yaml",
+      "reportSHA256": "29153f1a426c1b247c531ceed6e50e531f5f37ef32ffde166c1a88d6e71800fb",
+      "fixtureReceiptSHA256": "a8f758cf4db37b128e3181aee43af0ac5c55ba8e61134beb1608f22f19c843fe",
+      "upstreamLogSHA256": "3a81b81a3d08de65eda1449b286faf59bebe6501d3eae25035eeedfecf84b338",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 13,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 13,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GRPCExactMethodMatching",
+          "GRPCRouteHeaderMatching",
+          "GRPCRouteListenerHostnameMatching",
+          "GRPCRouteMultipleGateways",
+          "GRPCRouteWeight",
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            2767
+          ],
+          "unusableAddress": [
+            2770
+          ],
+          "usableAddress": [
+            2780
+          ],
+          "testPass": [
+            3348
+          ]
+        }
+      }
+    },
+    "09-tcp-c": {
+      "profile": "GATEWAY-TCP",
+      "channel": "standard",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TCPRouteInvalidBackendRefNonexistent",
+        "TCPRouteInvalidCrossNamespaceBackendRef",
+        "TCPRouteInvalidNonTCPListener",
+        "TCPRouteMultipleRoutesAttachment",
+        "TCPRouteParentRefAttachAll",
+        "TCPRouteParentRefPortAndSectionName",
+        "TCPRouteReferenceGrant",
+        "TCPRouteWeightedRouting"
+      ],
+      "skipTests": [],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "ff2f070e011635ae0869e0aeb21463bcad421019689cad0ff01b5be83d7147f6",
+      "preflightSHA256": "231e03a343704b47ceb6a5020ac77c87c4bbdf2e72b301958331d913e3f27e7d",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:28:42+01:00",
+      "reportPath": "protocol-yaml/gateway-tcp-standard-core-default.yaml",
+      "reportSHA256": "eea4256ddb5fa239bdf310ddbb4003f1622124340e70f1766b3bd3e94d34b26b",
+      "fixtureReceiptSHA256": "20d43ec7bbe49f94c8260621edfa96276a1e0f5af4ade015757eacf980934f93",
+      "upstreamLogSHA256": "f89de953b712803130217af1c5f02a9138ccb77c90ee0eb4c2e143a30ce484b6",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 20,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 20,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "10-tcp-e": {
+      "profile": "GATEWAY-TCP",
+      "channel": "standard",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TCPRouteInvalidBackendRefNonexistent",
+        "TCPRouteInvalidCrossNamespaceBackendRef",
+        "TCPRouteInvalidNonTCPListener",
+        "TCPRouteMultipleRoutesAttachment",
+        "TCPRouteParentRefAttachAll",
+        "TCPRouteParentRefPortAndSectionName",
+        "TCPRouteReferenceGrant",
+        "TCPRouteWeightedRouting"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "TCPRoute"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "4581b8d5d4aaeee44977e0bb244e086c3b435c54bec66bfa68d9b25552aeb8b1",
+      "preflightSHA256": "d2a7afa103fe5e0057909cf8ad03c10a0b0d8637ec40e09592ba5b6be6e15aee",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:32:00+01:00",
+      "reportPath": "protocol-yaml/gateway-tcp-standard-extended-default.yaml",
+      "reportSHA256": "9a28603f1015c3c0efc85943dedf72f14ca5f647558739e57b466efa2e5bb66f",
+      "fixtureReceiptSHA256": "8d19d51e654ea3fcff5fc73b1dcffd2e90feec2bd618b1dfa60df1d396de8c51",
+      "upstreamLogSHA256": "4d6c7a10863e3d9f30b4796f773a41be6fa704687621a6cd99d25d9ab7bf2e13",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 11,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TCPRouteInvalidBackendRefNonexistent",
+          "TCPRouteInvalidCrossNamespaceBackendRef",
+          "TCPRouteInvalidNonTCPListener",
+          "TCPRouteMultipleRoutesAttachment",
+          "TCPRouteParentRefAttachAll",
+          "TCPRouteParentRefPortAndSectionName",
+          "TCPRouteReferenceGrant",
+          "TCPRouteWeightedRouting"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            1953
+          ],
+          "unusableAddress": [
+            1956
+          ],
+          "usableAddress": [
+            1961
+          ],
+          "testPass": [
+            2263
+          ]
+        }
+      }
+    },
+    "11-tcp-c": {
+      "profile": "GATEWAY-TCP",
+      "channel": "experimental",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TCPRouteInvalidBackendRefNonexistent",
+        "TCPRouteInvalidCrossNamespaceBackendRef",
+        "TCPRouteInvalidNonTCPListener",
+        "TCPRouteMultipleRoutesAttachment",
+        "TCPRouteParentRefAttachAll",
+        "TCPRouteParentRefPortAndSectionName",
+        "TCPRouteReferenceGrant",
+        "TCPRouteWeightedRouting"
+      ],
+      "skipTests": [],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "9a11f3c403119e7e4ce1b61208a7b8da7f71250bf89589d3e03ab2d0ae5da94a",
+      "preflightSHA256": "c3fa2e545f7a16c5d52f24fd613d6b6ad3d3a7127643b272ee51a37258f69aa4",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:42:38+01:00",
+      "reportPath": "protocol-yaml/gateway-tcp-experimental-core-default.yaml",
+      "reportSHA256": "cb89aec9faa3d8d777bb21276ca90f951a83fc91539466bfbc2f9425c631cc4d",
+      "fixtureReceiptSHA256": "1e8f238736833b0e77920fe3c5c6f50df79f07a2a7fe1d41d4f56d62f5ad6041",
+      "upstreamLogSHA256": "550cfe86d0a8d34fa5a300892c5a3b1b3e9929da6cdb6184fddc82136a69782d",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 20,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 20,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "12-tcp-e": {
+      "profile": "GATEWAY-TCP",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TCPRouteInvalidBackendRefNonexistent",
+        "TCPRouteInvalidCrossNamespaceBackendRef",
+        "TCPRouteInvalidNonTCPListener",
+        "TCPRouteMultipleRoutesAttachment",
+        "TCPRouteParentRefAttachAll",
+        "TCPRouteParentRefPortAndSectionName",
+        "TCPRouteReferenceGrant",
+        "TCPRouteWeightedRouting"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "ClusterTrustBundle",
+        "GatewayAddressRoutability",
+        "GatewayAddressRoutabilityCluster",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayListenerFilters",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "TCPRoute"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "8e792f7843d4f02152ac7ae640f0a9109ec881780cdd7da9dddb01b64606dc1d",
+      "preflightSHA256": "28f61b5d125592af37cbe0af570467bce9d9ba9192894e39a384e2ef44565938",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T07:57:31+01:00",
+      "reportPath": "protocol-yaml/gateway-tcp-experimental-extended-default.yaml",
+      "reportSHA256": "df49664fad7f5685b63ef9c25d5bd37dc0b40b4710f6a7b5202ae2f7ed13d20e",
+      "fixtureReceiptSHA256": "925b1b72acb0af8a68e2864fb77bd6007422901a70a97d228b88bc5d1129341a",
+      "upstreamLogSHA256": "f85008c1297db326e0fbd86dc311af0db73577962517397f5830402eea587a6a",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 11,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TCPRouteInvalidBackendRefNonexistent",
+          "TCPRouteInvalidCrossNamespaceBackendRef",
+          "TCPRouteInvalidNonTCPListener",
+          "TCPRouteMultipleRoutesAttachment",
+          "TCPRouteParentRefAttachAll",
+          "TCPRouteParentRefPortAndSectionName",
+          "TCPRouteReferenceGrant",
+          "TCPRouteWeightedRouting"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            1577
+          ],
+          "unusableAddress": [
+            1591
+          ],
+          "usableAddress": [
+            1611
+          ],
+          "testPass": [
+            2300
+          ]
+        }
+      }
+    },
+    "13-tls-c": {
+      "profile": "GATEWAY-TLS",
+      "channel": "standard",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteSimpleSameNamespace"
+      ],
+      "skipTests": [],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {
+        "TLSRouteListenerTerminateNotSupported": [
+          "Listener_with_unsupported_mode_Terminate_must_have_Accepted=False_with_Reason=UnsupportedValue"
+        ]
+      },
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "c8e4db83d53abe06e3caaea46cbe5ea2bdbb04a994819fbf972f2434e3eddb7f",
+      "preflightSHA256": "084fc2394a5e0957cd936ebd1a142948a9d2f0eeb626e1fea397e5a0d138eb94",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T08:08:13+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-standard-core-default.yaml",
+      "reportSHA256": "18f367cdddb047246ecf98e770da35d02761e67a21333a5e6265d77667415d1f",
+      "fixtureReceiptSHA256": "8d7bb4d8e3e2d6024cc124297628b986c7651993af1fb67d385a9e5fa1af1f76",
+      "upstreamLogSHA256": "2e8804339c0907cd7914cfe3c92358c80cbfdc39e0df8a104cd2863c01a26ab3",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "14-tls-e": {
+      "profile": "GATEWAY-TLS",
+      "channel": "standard",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "BackendTLSPolicyTLSRouteTerminate",
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetAllowedRoutesSupportedKinds",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant",
+        "TLSRouteListenerTerminateSupportedKinds",
+        "TLSRouteMixedTerminationSameNamespace",
+        "TLSRouteMultipleRoutesAttachmentSameHostnameIntersection",
+        "TLSRouteTerminateSimpleSameNamespace"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerMixedTerminationNotSupported",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteSimpleSameNamespace"
+      ],
+      "ignoredCases": {
+        "TLSRouteListenerMixedTerminationNotSupported": {
+          "dependency": "Disable mixed TCP TLS while keeping Terminate enabled.",
+          "reason": "deployment",
+          "variant": "terminate-only"
+        }
+      },
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "BackendTLSPolicySANValidation",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayPort8080"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "294794e8c03c33e42a741b467ab675ae17b57017bb1977e78ed32b5b145d0f34",
+      "preflightSHA256": "aa81d7eab1bdeccaf525d96e96747a8cc1ed74c72638063d93153379678679c2",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T08:57:19+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-standard-extended-default.yaml",
+      "reportSHA256": "973b5c46b5ecdf8f429958652a4345cb9656783d3a4d99abe3c2fcb9d6105ac4",
+      "fixtureReceiptSHA256": "e7851be816ad919d9a439df07e9fef8d3765f8d302f6605d3b87b756e341a5cd",
+      "upstreamLogSHA256": "b52ab0c33b602e7e466110b783cc88c609692b1416f77767d50eec505243fae6",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 17,
+        "Skipped": 1
+      },
+      "selectedStatistics": {
+        "Passed": 17,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerMixedTerminationNotSupported"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            4148
+          ],
+          "unusableAddress": [
+            4156
+          ],
+          "usableAddress": [
+            4176
+          ],
+          "testPass": [
+            4694
+          ]
+        }
+      }
+    },
+    "15-tls-t": {
+      "profile": "GATEWAY-TLS",
+      "channel": "standard",
+      "subset": "extended",
+      "variant": "terminate-only",
+      "eligibleCases": [
+        "TLSRouteListenerMixedTerminationNotSupported"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteListenerTerminateSupportedKinds",
+        "TLSRouteSimpleSameNamespace",
+        "TLSRouteTerminateSimpleSameNamespace"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {
+        "TLSRouteListenerMixedTerminationNotSupported": [
+          "Listener_with_unsupported_mixed_Terminate/Passthrough_must_have_Accepted=False_with_Reason=ProtocolConflict"
+        ]
+      },
+      "profileFeaturesWithoutSelectedTest": [
+        "BackendTLSPolicy",
+        "BackendTLSPolicySANValidation",
+        "GatewayAddressEmpty",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayInfrastructure",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "GatewayStaticAddresses",
+        "ListenerSet",
+        "ReferenceGrant",
+        "TLSRouteModeMixed"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "f04f7915d46d85fd5b162c19fef7b56fe5ddd53853f55abed4ac6a521834f0a0",
+      "preflightSHA256": "ad1ca1b3d1db5e3620cb208a13a307feafacee69ccd0eb68f8083c195db18d70",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T09:34:04+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-standard-extended-terminate-only.yaml",
+      "reportSHA256": "9acbe8220ee3b895e54561c59c23f0072bf366f6ea7e7f6f3eb2a8920ce64d80",
+      "fixtureReceiptSHA256": "c3e851146a137e9456cd01fa0b7e181c884c7d8f08017c17ea58edf06290cde3",
+      "upstreamLogSHA256": "e0add4eb2d164b86d963c3451ab2b74cb87ed8f264077eeb882f6390be8d0e6a",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 2
+      },
+      "selectedStatistics": {
+        "Passed": 1,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerTerminateSupportedKinds",
+          "TLSRouteTerminateSimpleSameNamespace"
+        ]
+      }
+    },
+    "16-tls-c": {
+      "profile": "GATEWAY-TLS",
+      "channel": "experimental",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteSimpleSameNamespace"
+      ],
+      "skipTests": [],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {
+        "TLSRouteListenerTerminateNotSupported": [
+          "Listener_with_unsupported_mode_Terminate_must_have_Accepted=False_with_Reason=UnsupportedValue"
+        ]
+      },
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "e3fcd46500af0649ee2b9969ecc84824beda816a5e2b140213c2fa7dc745c96f",
+      "preflightSHA256": "4b13cee3c19eefaa46e5d81eee4bac1e1fa518afc42fcf4c5c98bc6ab2467b34",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:08:15+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-experimental-core-default.yaml",
+      "reportSHA256": "b8b2909a9ea0773338f0f8d3261ad1ccdaeea8156737314c92510f444de528d8",
+      "fixtureReceiptSHA256": "2923449beaf310b80a373b0823544dd5b9d65aaa4bedd8af7be4eefcb9d7eb26",
+      "upstreamLogSHA256": "467427fe3d18e0b2bba5caf23add65f3d4e200011d9a9ddee679eea2765c2781",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "17-tls-e": {
+      "profile": "GATEWAY-TLS",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "BackendTLSPolicyTLSRouteTerminate",
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetAllowedRoutesSupportedKinds",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant",
+        "TLSRouteListenerTerminateSupportedKinds",
+        "TLSRouteMixedTerminationSameNamespace",
+        "TLSRouteMultipleRoutesAttachmentSameHostnameIntersection",
+        "TLSRouteTerminateSimpleSameNamespace"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerMixedTerminationNotSupported",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteSimpleSameNamespace"
+      ],
+      "ignoredCases": {
+        "TLSRouteListenerMixedTerminationNotSupported": {
+          "dependency": "Disable mixed TCP TLS while keeping Terminate enabled.",
+          "reason": "deployment",
+          "variant": "terminate-only"
+        }
+      },
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "BackendTLSPolicySANValidation",
+        "ClusterTrustBundle",
+        "GatewayAddressRoutability",
+        "GatewayAddressRoutabilityCluster",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayListenerFilters",
+        "GatewayPort8080"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "71b25385e9fb0e59fb7cde54aca754b9a9212da1cca9a7ee62da8fb4b7f79dbd",
+      "preflightSHA256": "48159e9ecd4927eb2db0c93d48c05acfa68a96d49f3be0344505d7d4f99ee42d",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T13:42:24+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-experimental-extended-default.yaml",
+      "reportSHA256": "255737c5bf0ec0b4b06ac7fc3907caafec610c01736f3f667a82d8a027024b6d",
+      "fixtureReceiptSHA256": "bdd24ae58373c97b7901f0ab4ff15908e6606f7915f5ceee3627bd853c2bf97c",
+      "upstreamLogSHA256": "2cabef56bf1b346b6f9a687218a42cbf7c665de189e1504c09d6b2e1881fd440",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 17,
+        "Skipped": 1
+      },
+      "selectedStatistics": {
+        "Passed": 17,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerMixedTerminationNotSupported"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            4304
+          ],
+          "unusableAddress": [
+            4312
+          ],
+          "usableAddress": [
+            4337
+          ],
+          "testPass": [
+            5059
+          ]
+        }
+      }
+    },
+    "18-tls-t": {
+      "profile": "GATEWAY-TLS",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "terminate-only",
+      "eligibleCases": [
+        "TLSRouteListenerMixedTerminationNotSupported"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteListenerTerminateSupportedKinds",
+        "TLSRouteSimpleSameNamespace",
+        "TLSRouteTerminateSimpleSameNamespace"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {
+        "TLSRouteListenerMixedTerminationNotSupported": [
+          "Listener_with_unsupported_mixed_Terminate/Passthrough_must_have_Accepted=False_with_Reason=ProtocolConflict"
+        ]
+      },
+      "profileFeaturesWithoutSelectedTest": [
+        "BackendTLSPolicy",
+        "BackendTLSPolicySANValidation",
+        "ClusterTrustBundle",
+        "GatewayAddressEmpty",
+        "GatewayAddressRoutability",
+        "GatewayAddressRoutabilityCluster",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayInfrastructure",
+        "GatewayListenerFilters",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "GatewayStaticAddresses",
+        "ListenerSet",
+        "ReferenceGrant",
+        "TLSRouteModeMixed"
+      ],
+      "fixture": "native-haproxy",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "673778f15ca2712733c6871574965be7e2be3bc4176e34418bfa142b3a163252",
+      "preflightSHA256": "0862af691e2e3ae36ea303f6c4ba3ee31c105e638313330dc50152546926c098",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T13:44:28+01:00",
+      "reportPath": "protocol-yaml/gateway-tls-experimental-extended-terminate-only.yaml",
+      "reportSHA256": "e6520a8c34a8e09b3f0dd8879c1dabe1f1d84beca7f3e7d81c9d2d5af331b4ae",
+      "fixtureReceiptSHA256": "b3f0cc31c8d38f4b28379678c49bf8fd7951d76bec6400debb1986451cdcdb08",
+      "upstreamLogSHA256": "e34711006a054c926c9338e5495d0771a57f41741d65acf50102ad8ae3f883fd",
+      "officialStatus": "partial",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 2
+      },
+      "selectedStatistics": {
+        "Passed": 1,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "extended": [
+          "TLSRouteListenerTerminateSupportedKinds",
+          "TLSRouteTerminateSimpleSameNamespace"
+        ]
+      }
+    },
+    "19-udp-c": {
+      "profile": "GATEWAY-UDP",
+      "channel": "standard",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "UDPRoute",
+        "UDPRouteInvalidBackendRefNonexistent",
+        "UDPRouteInvalidCrossNamespaceBackendRef",
+        "UDPRouteMultipleRoutesAttachment",
+        "UDPRouteNotAllowedByListeners",
+        "UDPRouteParentRefAttachAllListeners",
+        "UDPRouteParentRefPortAndSectionName",
+        "UDPRouteReferenceGrant",
+        "UDPRouteWeightedRouting"
+      ],
+      "skipTests": [
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteSimpleSameNamespace"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [
+        "TLSRoute"
+      ],
+      "requiredNestedAssertions": {
+        "UDPRouteNotAllowedByListeners": [
+          "UDPRoute_should_have_Accepted=False_with_reason_NotAllowedByListeners",
+          "Gateway_should_have_0_Routes_attached_on_the_TLS_listener"
+        ]
+      },
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-keepalived-ipvs",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "c053096843f4c613ff5cd4511f68066fb191b16945e203cc0754acd84579a480",
+      "preflightSHA256": "5c18c311d25ba8648c5992e6eb062f15b5eaddcf3421185714d5a322dd6e34cc",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:17:06+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-standard-core-default.yaml",
+      "reportSHA256": "7e37ce8a338d4caaf90baa507d8ef87c4f47413547808e2b7b4c206b0d3bbf0c",
+      "fixtureReceiptSHA256": "a7712e9d8850be86cef58abbff04e963787d0156202a055cfe0ef2030ede7a9b",
+      "upstreamLogSHA256": "702f2d6b4e1ae806d6787f7a7afff2db835a15d0df6f5d05b316cf3c8dd1b72c",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "20-udp-e": {
+      "profile": "GATEWAY-UDP",
+      "channel": "standard",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "UDPRoute",
+        "UDPRouteInvalidBackendRefNonexistent",
+        "UDPRouteInvalidCrossNamespaceBackendRef",
+        "UDPRouteMultipleRoutesAttachment",
+        "UDPRouteNotAllowedByListeners",
+        "UDPRouteParentRefAttachAllListeners",
+        "UDPRouteParentRefPortAndSectionName",
+        "UDPRouteReferenceGrant",
+        "UDPRouteWeightedRouting"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "UDPRoute"
+      ],
+      "fixture": "native-keepalived-ipvs",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "3f9a20f37fc7f1d7a44d60dfe7c064c9e565cba0753b715267e18708e8f1cb78",
+      "preflightSHA256": "b2fd39f17914e03ec4aae75467759446074274ed0ee0f0af47f9345edbfb725c",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:20:08+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-standard-extended-default.yaml",
+      "reportSHA256": "ff031c4bb88aa8e570c500c99b8e6d0ed88c76431f71449f954e73e51463d670",
+      "fixtureReceiptSHA256": "5dc510550e17bf1e66bf1eea3bf1b6fcf3556f72bdc9a49a6531b2ccd226ff64",
+      "upstreamLogSHA256": "aacebd7af091614dcbe9674fe9c116b862edb1c8821fc212d630f62cb617c9f6",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 11,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "UDPRoute",
+          "UDPRouteInvalidBackendRefNonexistent",
+          "UDPRouteInvalidCrossNamespaceBackendRef",
+          "UDPRouteMultipleRoutesAttachment",
+          "UDPRouteNotAllowedByListeners",
+          "UDPRouteParentRefAttachAllListeners",
+          "UDPRouteParentRefPortAndSectionName",
+          "UDPRouteReferenceGrant",
+          "UDPRouteWeightedRouting"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            1667
+          ],
+          "unusableAddress": [
+            1672
+          ],
+          "usableAddress": [
+            1676
+          ],
+          "testPass": [
+            2236
+          ]
+        }
+      }
+    },
+    "21-udp-c": {
+      "profile": "GATEWAY-UDP",
+      "channel": "experimental",
+      "subset": "core",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "UDPRoute",
+        "UDPRouteInvalidBackendRefNonexistent",
+        "UDPRouteInvalidCrossNamespaceBackendRef",
+        "UDPRouteMultipleRoutesAttachment",
+        "UDPRouteNotAllowedByListeners",
+        "UDPRouteParentRefAttachAllListeners",
+        "UDPRouteParentRefPortAndSectionName",
+        "UDPRouteReferenceGrant",
+        "UDPRouteWeightedRouting"
+      ],
+      "skipTests": [
+        "TLSRouteHostnameIntersection",
+        "TLSRouteInvalidBackendRefNonexistent",
+        "TLSRouteInvalidBackendRefUnknownKind",
+        "TLSRouteInvalidNoMatchingListener",
+        "TLSRouteInvalidNoMatchingListenerHostname",
+        "TLSRouteInvalidReferenceGrant",
+        "TLSRouteListenerPassthroughSupportedKinds",
+        "TLSRouteListenerTerminateNotSupported",
+        "TLSRouteSimpleSameNamespace"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [
+        "TLSRoute"
+      ],
+      "requiredNestedAssertions": {
+        "UDPRouteNotAllowedByListeners": [
+          "UDPRoute_should_have_Accepted=False_with_reason_NotAllowedByListeners",
+          "Gateway_should_have_0_Routes_attached_on_the_TLS_listener"
+        ]
+      },
+      "profileFeaturesWithoutSelectedTest": [],
+      "fixture": "native-keepalived-ipvs",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 0,
+      "selectionSHA256": "71d1faccf4a8da6c7309bac8f9a1bcaeac44a0a9b4013adf453735077867ca2f",
+      "preflightSHA256": "5202260876bb1f0c4d3528c0785f16aff21814fc904163917130a1211fad918f",
+      "fixtureRunnerExit": 0,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:28:04+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-experimental-core-default.yaml",
+      "reportSHA256": "f768055b57c03a0dd64c8959c0961d0704279eb12437151548e810bebc4fc7f5",
+      "fixtureReceiptSHA256": "8462157151d13ec0aee66479d30a1ba73e5f13230438289ea27aaec6258e1e5b",
+      "upstreamLogSHA256": "e9365baf8bc1128a4192886462ef5c709f67900b40774a5fa203780e29ec9a3f",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 21,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {}
+    },
+    "22-udp-e": {
+      "profile": "GATEWAY-UDP",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "default",
+      "eligibleCases": [
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidParametersRef",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant"
+      ],
+      "skipTests": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "UDPRoute",
+        "UDPRouteInvalidBackendRefNonexistent",
+        "UDPRouteInvalidCrossNamespaceBackendRef",
+        "UDPRouteMultipleRoutesAttachment",
+        "UDPRouteNotAllowedByListeners",
+        "UDPRouteParentRefAttachAllListeners",
+        "UDPRouteParentRefPortAndSectionName",
+        "UDPRouteReferenceGrant",
+        "UDPRouteWeightedRouting"
+      ],
+      "ignoredCases": {},
+      "auxiliaryFeatures": [],
+      "requiredNestedAssertions": {},
+      "profileFeaturesWithoutSelectedTest": [
+        "ClusterTrustBundle",
+        "GatewayAddressRoutability",
+        "GatewayAddressRoutabilityCluster",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayListenerFilters",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "UDPRoute"
+      ],
+      "fixture": "native-keepalived-ipvs",
+      "defaultSuiteParallelism": true,
+      "caseTimeoutOverrides": {},
+      "fixtureExit": 1,
+      "selectionSHA256": "ad0ff575dcafdaa8e9b75265f08a19d2c76a8133afa8986583d261b4ef6dcf5c",
+      "preflightSHA256": "c75b10b5a604110b2b02ef19a7b044359f00ab355753ad81eebc1a523195dda3",
+      "fixtureRunnerExit": 1,
+      "state": "reported",
+      "suiteExit": 0,
+      "reportDate": "2026-11-26T14:37:10+01:00",
+      "reportPath": "protocol-yaml/gateway-udp-experimental-extended-default.yaml",
+      "reportSHA256": "61713c11530473fecc2a7610dde30ae16e987d8c1dfe3e35b589ea20bcc63f13",
+      "fixtureReceiptSHA256": "f8837eff95f4a4066550b79135ae630424bcae8162f915fb3fcbb3d867fc87b5",
+      "upstreamLogSHA256": "9ebf20b70f82af0dcfe8f9e8b996e96f4c5aa3d0cf9629ad29b72f8d79b1268b",
+      "officialStatus": "success",
+      "officialSubsetStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "selectedStatistics": {
+        "Passed": 11,
+        "Failed": 0,
+        "Skipped": 0
+      },
+      "failedCases": [],
+      "skippedSelectedCases": [],
+      "reportExcludedCases": {
+        "core": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "UDPRoute",
+          "UDPRouteInvalidBackendRefNonexistent",
+          "UDPRouteInvalidCrossNamespaceBackendRef",
+          "UDPRouteMultipleRoutesAttachment",
+          "UDPRouteNotAllowedByListeners",
+          "UDPRouteParentRefAttachAllListeners",
+          "UDPRouteParentRefPortAndSectionName",
+          "UDPRouteReferenceGrant",
+          "UDPRouteWeightedRouting"
+        ]
+      },
+      "fixtureDifferences": {
+        "GatewayStaticAddresses": {
+          "official": "PASS",
+          "fixture": "ASSERTION-NOT-OBSERVED",
+          "consolidatedCampaign": "PASS"
+        }
+      },
+      "staticAddressObservations": {
+        "usableAddressAllocatedByFixture": true,
+        "usableAddressAllocatedByFixtureReceiptIndices": [
+          0
+        ],
+        "unusableAddressReachedFixtureAllocator": false,
+        "upstreamAssertionsObserved": true,
+        "upstreamLogLines": {
+          "unsupportedAddressType": [
+            2128
+          ],
+          "unusableAddress": [
+            2131
+          ],
+          "usableAddress": [
+            2137
+          ],
+          "testPass": [
+            2442
+          ]
+        }
+      }
+    }
+  }
+}

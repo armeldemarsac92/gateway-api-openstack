@@ -1,0 +1,214 @@
+{
+  "channel": "experimental",
+  "controller": "454c154167a521956cd043967cf6d27e8755b292",
+  "octavia": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "managerSHA256": "f512ae1e303ba15e1fc2df9c16842c2cbb74b2ccf696d5570feaf218bdbcee58",
+  "controllerOCI": "sha256:aa63196f0ecf38d26dcfcd28b4e298177b009e8cd0684475e99b42a7ace82e19",
+  "upstreamExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+  "eligible": [
+    "BackendTLSPolicy",
+    "BackendTLSPolicyConflictResolution",
+    "BackendTLSPolicyInvalidCACertificateRef",
+    "BackendTLSPolicyInvalidKind",
+    "BackendTLSPolicyObservedGenerationBump",
+    "BackendTLSPolicyPreserveForeignStatus",
+    "BackendTLSPolicySANValidation",
+    "GatewayFrontendClientCertificateValidation",
+    "GatewayFrontendClientCertificateValidationInsecureFallback",
+    "GatewayFrontendInvalidDefaultClientCertificateValidation",
+    "GatewayHTTPListenerIsolation",
+    "GatewayInfrastructureMetadata",
+    "GatewayInvalidFrontendClientCertificateValidation",
+    "GatewayInvalidParametersRef",
+    "GatewayInvalidTLSBackendConfiguration",
+    "GatewayOptionalAddressValue",
+    "GatewayStaticAddresses",
+    "GatewayTLSBackendClientCertificate",
+    "GatewayWithAttachedRoutesWithPort8080",
+    "HTTPRoute303Redirect",
+    "HTTPRoute307Redirect",
+    "HTTPRoute308Redirect",
+    "HTTPRouteBackendProtocolH2C",
+    "HTTPRouteBackendProtocolWebSocket",
+    "HTTPRouteBackendRequestHeaderModifier",
+    "HTTPRouteBackendURLRewrite",
+    "HTTPRouteCORS",
+    "HTTPRouteHTTPSListenerDetectMisdirectedRequests",
+    "HTTPRouteInvalidParentRefNotMatchingListenerPort",
+    "HTTPRouteInvalidParentRefSectionNameNotMatchingPort",
+    "HTTPRouteListenerPortMatching",
+    "HTTPRouteMethodMatching",
+    "HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection",
+    "HTTPRouteNamedRule",
+    "HTTPRouteQueryParamMatching",
+    "HTTPRouteRedirectPath",
+    "HTTPRouteRedirectPort",
+    "HTTPRouteRedirectPortAndScheme",
+    "HTTPRouteRedirectScheme",
+    "HTTPRouteRequestHeaderModifierBackendWeights",
+    "HTTPRouteRequestMirror",
+    "HTTPRouteRequestMultipleMirrors",
+    "HTTPRouteRequestPercentageMirror",
+    "HTTPRouteResponseHeaderModifier",
+    "HTTPRouteRetry",
+    "HTTPRouteRetryConnectionError",
+    "HTTPRouteRetryWithBackendTimeout",
+    "HTTPRouteRetryWithRequestTimeout",
+    "HTTPRouteRewriteHost",
+    "HTTPRouteRewritePath",
+    "HTTPRouteTimeoutBackendRequest",
+    "HTTPRouteTimeoutRequest",
+    "ListenerSetAllowedNamespaceNone",
+    "ListenerSetAllowedNamespaceSame",
+    "ListenerSetAllowedNamespaceSelector",
+    "ListenerSetAllowedRoutesNamespaces",
+    "ListenerSetDefaultNotAllowed",
+    "ListenerSetDualParentRefIndependence",
+    "ListenerSetGatewayParentSectionNameNotFound",
+    "ListenerSetHTTPRouting",
+    "ListenerSetHostnameConflict",
+    "ListenerSetProtocolConflict",
+    "ListenerSetReferenceGrant",
+    "ListenerSetRouteStatusScopedToParentRef"
+  ],
+  "upstreamExit": 1,
+  "fixtureExit": 1,
+  "official": {
+    "failedTests": [
+      "BackendTLSPolicy",
+      "BackendTLSPolicySANValidation",
+      "GatewayFrontendClientCertificateValidation",
+      "GatewayFrontendClientCertificateValidationInsecureFallback",
+      "GatewayFrontendInvalidDefaultClientCertificateValidation",
+      "ListenerSetAllowedRoutesNamespaces",
+      "ListenerSetHTTPRouting"
+    ],
+    "result": "failure",
+    "statistics": {
+      "Failed": 7,
+      "Passed": 57,
+      "Skipped": 0
+    },
+    "supportedFeatures": [
+      "BackendTLSPolicy",
+      "BackendTLSPolicySANValidation",
+      "GatewayAddressEmpty",
+      "GatewayBackendClientCertificate",
+      "GatewayFrontendClientCertificateValidation",
+      "GatewayFrontendClientCertificateValidationInsecureFallback",
+      "GatewayHTTPListenerIsolation",
+      "GatewayHTTPSListenerDetectMisdirectedRequests",
+      "GatewayInfrastructure",
+      "GatewayPort8080",
+      "GatewayRouteHostnameIntersectionPrecedence",
+      "GatewayStaticAddresses",
+      "HTTPRoute303RedirectStatusCode",
+      "HTTPRoute307RedirectStatusCode",
+      "HTTPRoute308RedirectStatusCode",
+      "HTTPRouteBackendProtocolH2C",
+      "HTTPRouteBackendProtocolWebSocket",
+      "HTTPRouteBackendRequestHeaderModification",
+      "HTTPRouteBackendTimeout",
+      "HTTPRouteBackendURLRewrite",
+      "HTTPRouteCORS",
+      "HTTPRouteDestinationPortMatching",
+      "HTTPRouteHostRewrite",
+      "HTTPRouteMethodMatching",
+      "HTTPRouteNamedRouteRule",
+      "HTTPRouteParentRefPort",
+      "HTTPRoutePathRedirect",
+      "HTTPRoutePathRewrite",
+      "HTTPRoutePortRedirect",
+      "HTTPRouteQueryParamMatching",
+      "HTTPRouteRequestMirror",
+      "HTTPRouteRequestMultipleMirrors",
+      "HTTPRouteRequestPercentageMirror",
+      "HTTPRouteRequestTimeout",
+      "HTTPRouteResponseHeaderModification",
+      "HTTPRouteRetryCodes",
+      "HTTPRouteRetryConnectionError",
+      "HTTPRouteSchemeRedirect",
+      "ListenerSet"
+    ],
+    "unsupportedFeatures": [
+      "ClusterTrustBundle",
+      "GatewayAddressRoutability",
+      "GatewayAddressRoutabilityCluster",
+      "GatewayListenerFilters"
+    ]
+  },
+  "observedGoTrailers": {
+    "PASS": 57,
+    "FAIL": 6
+  },
+  "startedWithoutFinalGoTrailer": [
+    "ListenerSetHTTPRouting"
+  ],
+  "localFixtureCounts": {
+    "FAIL": 6,
+    "NOT-RUN": 1,
+    "PASS": 57
+  },
+  "closedListenerRemoval": {
+    "capabilityAdvertised": true,
+    "configuredProviders": [
+      "amphora"
+    ],
+    "optInActive": true,
+    "provider": "amphora"
+  },
+  "nativeClosureObservations": {
+    "acknowledgedClosures": 38,
+    "guardedPoliciesAbsentAfterWorker": 66,
+    "guardedRemovalCalls": 66,
+    "listenerUpdatePublications": 71,
+    "rawSHA256": "c13c02a6e7ed4827a78a111fdaee2d015873eb748a8071fab603d933e1213540"
+  },
+  "staticAddress": {
+    "upstream": "PASS",
+    "fixture": "PASS",
+    "allocator": [
+      {
+        "address": "192.0.2.249",
+        "result": "allocated"
+      }
+    ]
+  },
+  "previous": {
+    "report": "https://github.com/armeldemarsac92/gateway-api-openstack/blob/c6e4216dd3260b5060253e6801585cc9233d7463/docs/qualification/v1.7.0/common-gateway/597d921f-300b2638/gateway-http-experimental-extended-default.yaml",
+    "sha256": "77fad3630361cb1ffafddd9892b754a6036189a54b8019afe9f8a1578c3764ab",
+    "statistics": {
+      "Failed": 11,
+      "Passed": 53,
+      "Skipped": 0
+    },
+    "failures": [
+      "BackendTLSPolicy",
+      "BackendTLSPolicyInvalidKind",
+      "BackendTLSPolicySANValidation",
+      "GatewayFrontendClientCertificateValidation",
+      "GatewayFrontendClientCertificateValidationInsecureFallback",
+      "GatewayFrontendInvalidDefaultClientCertificateValidation",
+      "GatewayHTTPListenerIsolation",
+      "GatewayTLSBackendClientCertificate",
+      "HTTPRouteRedirectPortAndScheme",
+      "ListenerSetAllowedRoutesNamespaces",
+      "ListenerSetHTTPRouting"
+    ]
+  },
+  "nowPassing": [
+    "BackendTLSPolicyInvalidKind",
+    "GatewayHTTPListenerIsolation",
+    "GatewayTLSBackendClientCertificate",
+    "HTTPRouteRedirectPortAndScheme"
+  ],
+  "nowFailing": [],
+  "evidenceSHA256": {
+    "receipt.json": "561893a9af80289448f9544ca248552bba9b4c408be350a6613f29798ac8bc9f",
+    "extended-report.yaml": "83d54c023dfed36e99ccef861c2eca34be9afcc0f37235a0bcae5f633629e9cd",
+    "extended.log": "c1a6f65ed60912e06e17b044e2cbd63d279a831eafebc51e879aaec1381ba24a",
+    "regional-requests.json": "782786576f4615511dc458155d8cf0cf59e58cf7a524048fd6aa0f6b703a72da",
+    "native-mutations.json": "c13c02a6e7ed4827a78a111fdaee2d015873eb748a8071fab603d933e1213540"
+  }
+}

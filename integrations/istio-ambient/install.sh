@@ -2,8 +2,8 @@
 set -euo pipefail
 
 usage() {
-    printf '%s\n' 'Usage: install.sh render CHART_DIR [--consumer-routes] [--service-import-parents]' \
-        '       install.sh install CHART_DIR KUBECONFIG CONTEXT standard|experimental [--consumer-routes] [--service-import-parents]' >&2
+    printf '%s\n' 'Usage: install.sh render CHART_DIR [--consumer-routes] [--service-import-parents] [--grpc-consumer-routes]' \
+        '       install.sh install CHART_DIR KUBECONFIG CONTEXT standard|experimental [--consumer-routes] [--service-import-parents] [--grpc-consumer-routes]' >&2
     exit 2
 }
 
@@ -12,10 +12,12 @@ charts=${2:-}
 [[ -n "$charts" ]] || usage
 consumer_routes=false
 service_import_parents=false
+grpc_consumer_routes=false
 while (( $# )); do
     case ${!#} in
         --consumer-routes) consumer_routes=true ;;
         --service-import-parents) service_import_parents=true ;;
+        --grpc-consumer-routes) grpc_consumer_routes=true ;;
         *) break ;;
     esac
     set -- "${@:1:$#-1}"
@@ -68,7 +70,13 @@ deploy_chart hibiscus-ambient-base base --set global.enableReaderRBAC=false
 pilot_values=(--values "$module/istiod.yaml")
 if [[ "$service_import_parents" == true ]]; then
     pilot_values+=(--values "$module/service-import-parents.yaml")
-elif [[ "$consumer_routes" == true ]]; then
+fi
+# Both consumer options pin the same image. Apply their values after the ServiceImport
+# values so the shared consumer image is selected while preserving the requested flags.
+if [[ "$grpc_consumer_routes" == true ]]; then
+    pilot_values+=(--values "$module/grpc-consumer-routes.yaml")
+fi
+if [[ "$consumer_routes" == true ]]; then
     pilot_values+=(--values "$module/consumer-routes.yaml")
 fi
 deploy_chart hibiscus-ambient-istiod istiod "${pilot_values[@]}"

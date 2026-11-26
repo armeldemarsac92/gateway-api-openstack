@@ -1,0 +1,45 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-26T13:46:06Z"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact: null
+  organization: ""
+  project: ""
+  url: ""
+  version: ""
+kind: ConformanceReport
+mode: ambient-extended-study
+profiles:
+- core:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 3
+      Skipped: 0
+  name: MESH-GRPC
+  summary: Core tests succeeded.
+- core:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 7
+      Skipped: 0
+  extended:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 7
+      Skipped: 0
+    supportedFeatures:
+    - MeshClusterIPMatching
+    - MeshConsumerRoute
+    - MeshHTTPRouteBackendRequestHeaderModification
+    - MeshHTTPRouteNamedRouteRule
+    - MeshHTTPRouteQueryParamMatching
+    - MeshHTTPRouteRedirectPath
+    - MeshHTTPRouteRedirectPort
+    - MeshHTTPRouteRewritePath
+    - MeshHTTPRouteSchemeRedirect
+  name: MESH-HTTP
+  summary: Core tests succeeded. Extended tests succeeded.
