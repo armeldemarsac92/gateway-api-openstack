@@ -163,7 +163,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate Service BackendTLSPolicy and Experimental XBackend ServerOnly upstreams with regional Octavia backend TLS and a Barbican CA (requires 2.8 or newer for Services, 2.24 or newer for XBackend ServerOnly, and regional h2 enforcement for GRPCRoute)")
 	flag.BoolVar(&l7PolicyBatchActivation, "octavia-l7policy-batch-activation", false, "enable prepared HTTP forwarding policies together when the regional Octavia provider advertises support")
-	flag.BoolVar(&l7PolicyConditionalRemoval, "octavia-l7policy-conditional-removal", false, "remove a retiring, disabled HTTP(S) route policy and its rules when the regional Octavia provider advertises support")
+	flag.BoolVar(&l7PolicyConditionalRemoval, "octavia-l7policy-conditional-removal", false, "remove a retiring HTTP(S) route policy and its rules when Octavia confirms the policy or its listener is disabled and advertises the corresponding capability")
 	flag.BoolVar(&clusterTrustBundles, "gateway-api-cluster-trust-bundle", false, "allow named Kubernetes ClusterTrustBundle references in HTTPS frontend validation and Service BackendTLSPolicy")
 	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "validate client certificates on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")

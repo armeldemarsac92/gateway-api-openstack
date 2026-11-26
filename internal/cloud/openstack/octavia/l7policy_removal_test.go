@@ -59,7 +59,7 @@ func TestConditionalL7PolicyRemovalUsesTheObservedRevision(t *testing.T) {
 	require.Equal(t, "policy-1", snapshot.Policy.Policy.ID)
 	require.Len(t, snapshot.Rules, 1)
 	require.Equal(t, []string{"route-owner"}, snapshot.Rules[0].Tags)
-	require.NoError(t, service.RemovePolicyRevision(t.Context(), "policy-1", snapshot.Revision))
+	require.NoError(t, service.RemovePolicyRevision(t.Context(), PolicyRemoval{PolicyID: "policy-1", ExpectedRevision: snapshot.Revision}))
 
 	delete(policy, "rules")
 	_, err = service.ObservePolicyRemoval(t.Context(), "policy-1")

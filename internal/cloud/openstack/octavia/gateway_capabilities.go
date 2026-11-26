@@ -79,6 +79,8 @@ const (
 
 const GatewayCapabilityL7PolicyConditionalRemoval = "l7policy_conditional_removal_v1"
 
+const GatewayCapabilityL7PolicyClosedListenerRemoval = "l7policy_closed_listener_removal_v1"
+
 const GatewayCapabilityTLSSNIPassthroughWeightedPools = "tls_sni_passthrough_weighted_pools_v1"
 
 // RuleTypeHTTPPathLiteral is the Octavia type for a raw HTTP path predicate.
