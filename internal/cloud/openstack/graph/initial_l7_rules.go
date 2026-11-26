@@ -58,20 +58,61 @@ func independentPreparedTLSPolicy(desired desiredGatewayGraph, actual observedGa
 	if index == -1 {
 		return false
 	}
-	wanted := route.policies[index]
-	if !positiveExactPath(wanted) || len(rulesFor(wanted, route.hostnameRuleValue)) < 2 {
-		return false
-	}
 	if step.route.kind == routeMutationEnablePolicy && !slices.ContainsFunc(backend.policies, func(policy observedRoutePolicy) bool {
 		return policy.policy.ID == step.route.id && policy.initialRules
 	}) {
+		return false
+	}
+	return independentExactHTTPPolicy(desired, actual, step.routeIndex, index, listenerID, port, policyCount)
+}
+
+// Give the next appendable exact SAN policy's unreferenced pool its first
+// planned write before later exact SAN pools. Stop at the first other kind of
+// work so the existing order of policy repairs and live backend work holds.
+func prioritizeSANPoolSetup(desired desiredGatewayGraph, actual observedGatewayGraph, steps []graphMutation, listenerID string, port int, policyCount int32) {
+	for i, step := range steps {
+		route, backend := desired.routes[step.routeIndex], actual.routes[step.routeIndex]
+		if scopedHTTPRoutePort(route) != port || !isSANPoolSetup(route, backend, step.route) {
+			return
+		}
+		if route.policies[0].position != policyCount+1 {
+			continue
+		}
+		if i > 0 && independentExactHTTPPolicy(desired, actual, step.routeIndex, 0, listenerID, port, policyCount) {
+			copy(steps[1:i+1], steps[:i])
+			steps[0] = step
+		}
+		return
+	}
+}
+
+func isSANPoolSetup(route desiredRoute, backend observedRouteGraph, step routeMutation) bool {
+	tls := route.spec.BackendTLS
+	if tls == nil || tls.Denied || tls.Trust != cloud.BackendTLSTrustReference || len(tls.SubjectAltNames) == 0 ||
+		route.xBackend || route.unavailable || len(route.policies) != 1 || len(backend.policies) != 0 || backend.weightedPoolHeld {
+		return false
+	}
+	switch step.kind {
+	case routeMutationCreatePool, routeMutationSetBackendTLS:
+		return step.backendTLS != nil && (step.poolAdmin == nil || *step.poolAdmin)
+	case routeMutationCreateMember, routeMutationCreateMonitor:
+		return route.backendTLS.phase == backendTLSVerified
+	default:
+		return false
+	}
+}
+
+func independentExactHTTPPolicy(desired desiredGatewayGraph, actual observedGatewayGraph, routeIndex, policyIndex int, listenerID string, port int, policyCount int32) bool {
+	route := desired.routes[routeIndex]
+	wanted := route.policies[policyIndex]
+	if !positiveExactPath(wanted) || len(rulesFor(wanted, route.hostnameRuleValue)) < 2 {
 		return false
 	}
 	for i, sibling := range desired.routes {
 		onListener := desired.spec.Routes[i].Disposition == cloud.GraphEnsure && scopedHTTPRoutePort(sibling) == port
 		if onListener {
 			for j, policy := range sibling.policies {
-				if i == step.routeIndex && j == index {
+				if i == routeIndex && j == policyIndex {
 					continue
 				}
 				if !positiveExactPath(policy) || policy.path == wanted.path {

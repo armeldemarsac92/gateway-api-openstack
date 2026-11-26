@@ -535,6 +535,18 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	// its rank. Each new call refreshes the list after Octavia shifts positions.
 	// Filling this prefix first keeps inserts and moves within the current list.
 	if groupedHTTP {
+		readyTLSListener := func(port int) string {
+			if !p.initialL7Rules || staleMemberWithdrawal || holdPolicyOrder[port] || handovers.ports[port] {
+				return ""
+			}
+			if scopedHTTP && slices.Contains(result.Gateway.ScopedListenerReadyPorts, port) {
+				return listenersByPort[port].ID
+			}
+			if !scopedHTTP && gatewayReady && actual.listener.ProvisioningStatus == "ACTIVE" {
+				return actual.listener.ID
+			}
+			return ""
+		}
 		var preparedTLS []graphMutation
 		ensures = slices.DeleteFunc(ensures, func(step graphMutation) bool {
 			port := scopedHTTPRoutePort(desired.routes[step.routeIndex])
@@ -546,13 +558,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				if holdPolicyOrder[port] {
 					return true
 				}
-				listenerID := step.listenerID
-				if !scopedHTTP && gatewayReady && actual.listener.ProvisioningStatus == "ACTIVE" {
-					listenerID = actual.listener.ID
-				}
-				frontendReady := scopedHTTP && slices.Contains(result.Gateway.ScopedListenerReadyPorts, port) ||
-					!scopedHTTP && gatewayReady
-				if p.initialL7Rules && !staleMemberWithdrawal && frontendReady && listenerID != "" &&
+				if listenerID := readyTLSListener(port); listenerID != "" &&
 					independentPreparedTLSPolicy(desired, actual, step, listenerID, port, policyCount[port]) {
 					preparedTLS = append(preparedTLS, step)
 					return true
@@ -569,6 +575,12 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		})
 		plan = append(plan, preparedTLS...)
 		orderHTTPBackendMutations(ensures)
+		if len(ensures) > 1 && len(actual.routes) == len(desired.routes) {
+			port := scopedHTTPRoutePort(desired.routes[ensures[0].routeIndex])
+			if listenerID := readyTLSListener(port); listenerID != "" {
+				prioritizeSANPoolSetup(desired, actual, ensures, listenerID, port, policyCount[port])
+			}
+		}
 	}
 	plan = append(plan, ensures...)
 	if canRestoreTraffic {

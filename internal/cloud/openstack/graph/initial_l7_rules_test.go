@@ -414,6 +414,74 @@ func TestInitialL7RulesHoldOnlyTheAffectedPort(t *testing.T) {
 	}
 }
 
+func TestSANPolicyPreparesItsOwnBackendInPolicyOrder(t *testing.T) {
+	first, observed := convergedRoutePlanFixture()
+	first.backendKey, first.hostnameRuleValue = "first", "^app.example.test$"
+	tls := newGraphBackendTLS(t)
+	tls.SubjectAltNames = []cloud.BackendTLSSubjectAltName{{Type: cloud.BackendTLSSANHostname, Hostname: tls.Hostname}}
+	first.spec.BackendTLS = tls
+	first.backendTLS = backendTLSPlan{phase: backendTLSConfigure, settings: octavia.BackendTLSSettings{
+		Hostname: tls.Hostname, SubjectAltNames: tls.SubjectAltNames, CAReference: "ca",
+	}}
+	sibling := first
+	sibling.backendKey = "a-sibling-sorted-first"
+	sibling.policies = slices.Clone(first.policies)
+	sibling.policies[0].path, sibling.policies[0].position = "/other", 2
+	desired := desiredGatewayGraph{
+		protocol: cloud.ListenerProtocolHTTP,
+		routes:   []desiredRoute{{httpParts: []desiredRoute{sibling, first}}},
+		spec: cloud.GatewayGraphSpec{
+			Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: cloud.GatewaySpec{ListenerPort: 80}},
+			Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}},
+		},
+	}
+	actual := observedGatewayGraph{protocol: cloud.ListenerProtocolHTTP, loadBalancer: safetyObservedLoadBalancer(),
+		state: cloud.GatewayState{VIPAddress: "192.0.2.1", ListenerID: "listener"},
+		listener: &listeners.Listener{
+			ID: "listener", Protocol: cloud.ListenerProtocolHTTP, ProtocolPort: 80, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		adminObserved: map[string]bool{"listener": true},
+		routes:        []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{}}},
+	}
+	actual.loadBalancer.AdminStateUp, actual.loadBalancer.ProvisioningStatus = true, "ACTIVE"
+	provider := &Provider{initialL7Rules: true}
+
+	next := func(kind routeMutationKind, backendKey string) routeMutation {
+		t.Helper()
+		plan, _, err := provider.buildGatewayGraphPlan(desired, actual)
+		if err != nil || len(plan) == 0 || plan[0].route.kind != kind || plan[0].routeIndex != 0 || plan[0].backendKey != backendKey {
+			t.Fatalf("plan = %v, error = %v, want %v for backend %q", plan, err, kind, backendKey)
+		}
+		return plan[0].route
+	}
+	parts := desired.routes[0].httpParts
+	parts[0].policies[0].path = first.policies[0].path
+	next(routeMutationCreatePool, sibling.backendKey)
+	parts[0].policies[0].path = "/other"
+	if step := next(routeMutationCreatePool, first.backendKey); step.backendTLS == nil {
+		t.Fatal("the first pool must be created with its authenticated TLS settings")
+	}
+
+	backend := &observedRouteGraph{pool: observed.pool}
+	actual.routes[0].httpParts[first.backendKey] = backend
+	backend.pool.ProvisioningStatus, backend.pool.AdminStateUp = "ACTIVE", false
+	backend.pool.Tags = []string{backendTLSManagedTag, backendTLSSANTag, backendTLSRevisionTag(tls)}
+	backend.pool.TLSEnabled = true
+	parts[1].backendTLS.phase = backendTLSVerified
+	if step := next(routeMutationSetBackendTLS, first.backendKey); step.poolAdmin == nil || !*step.poolAdmin {
+		t.Fatal("the verified pool must be enabled before adding its members")
+	}
+	backend.pool.AdminStateUp = true
+	next(routeMutationCreateMember, first.backendKey)
+	backend.members = observed.members
+	backend.members[0].ProvisioningStatus = "ACTIVE"
+	next(routeMutationCreateMonitor, first.backendKey)
+	backend.monitor = observed.monitor
+	backend.monitor.ProvisioningStatus = "ACTIVE"
+	if step := next(routeMutationCreatePolicy, first.backendKey); step.policy.position != 1 || step.parentID != backend.pool.ID {
+		t.Fatalf("first policy must use position 1 and the verified pool, got %+v", step)
+	}
+}
+
 func TestPreparedSANPolicyAdvancesBeforeUnrelatedBackend(t *testing.T) {
 	route, observed := convergedRoutePlanFixture()
 	sibling, _ := convergedRoutePlanFixture()
