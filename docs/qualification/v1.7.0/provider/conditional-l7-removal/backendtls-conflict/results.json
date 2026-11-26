@@ -1,0 +1,83 @@
+{
+  "case": "BackendTLSPolicyConflictResolution",
+  "channel": "experimental",
+  "profile": "GATEWAY-HTTP",
+  "subset": "extended",
+  "scope": "isolated kind VM, local Octavia WSGI/SQLite, Barbican HTTPS and real HAProxy",
+  "release": {
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "experimentalBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+    "upstreamExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e"
+  },
+  "controller": {
+    "source": "71d946b555e2780793ecdca99592d5da7f5db02a",
+    "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:72043752d124f24dddd5e2e083cffb5ef6b9e31754502b56a43347fa17bc03a5",
+    "runningManagerSHA256": "2f691e8aa22b7a2811021722599873e80b58489eea9d961b97d160d1610f9c01"
+  },
+  "octavia": {
+    "filesVerified": 674,
+    "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+    "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+    "version": "19.0.1.dev109"
+  },
+  "octaviaLib": {
+    "filesVerified": 24,
+    "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+    "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+    "version": "3.12.1.dev22"
+  },
+  "HAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+  "official": {
+    "result": "PASS",
+    "upstreamExit": 0,
+    "profileResult": "partial",
+    "extendedStatistics": {
+      "Failed": 0,
+      "Passed": 1,
+      "Skipped": 63
+    },
+    "reportSHA256": "4485a9802e1ea790265f402e9e3566119cd0dc0da56c2e7d4d0db63d2bc2ba74"
+  },
+  "traffic": {
+    "httpAssertionsPassed": 4,
+    "assertions": [
+      "TestConformance/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed",
+      "TestConformance/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed",
+      "TestConformance/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_with_section_name_should_succeed",
+      "TestConformance/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_without_section_name_should_succeed"
+    ]
+  },
+  "routeDeletion": {
+    "requestedAt": "2026-11-26T04:21:22.775437+01:00",
+    "firstObservedNotFoundAt": "2026-11-26T03:21:31.729360+00:00",
+    "secondsToFirstObservedNotFound": 8.954,
+    "upstreamDeadlineSeconds": 30,
+    "caseTimeoutOverrides": {}
+  },
+  "octaviaRemoval": {
+    "advertisedAndEnabled": true,
+    "conditionalRequestsAccepted": 4,
+    "distinctPolicies": 4,
+    "readbacksWithPolicyAndRulesGone": 4,
+    "ordinaryRuleOrPolicyDeletesDuringObservedDeletion": 0
+  },
+  "earlierExperimentalRun": {
+    "controllerSource": "13a6870cb63abafa131527b7b1b67048d962cd57",
+    "octaviaSource": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543",
+    "caseResult": "FAIL",
+    "httpAssertionsPassed": 4,
+    "upstreamDeadlineSeconds": 30,
+    "reportSHA256": "8206c814752293a51786ced3a9ad9f48e5e79fd41a3aa7b02cf26113094b67a0"
+  },
+  "rawEvidenceSHA256": {
+    "experimental/extended-report.yaml": "4485a9802e1ea790265f402e9e3566119cd0dc0da56c2e7d4d0db63d2bc2ba74",
+    "experimental/extended.log": "2729179fa562a71e4e441e3b658b16b2b7f8b21510f7cdd333dbaf7881a5f04e",
+    "experimental/receipt.json": "dbc1af1f07d911cf2897a7fdd112dfd69af17fe974248c96c684d78152c26f6b",
+    "experimental/route-observation.jsonl": "a0cfd041093b2889f2bc27a6315ef76700640e582d7d65f46480f88ea15a8250",
+    "experimental/native-mutations.json": "cbc6cafc6dcda43fc5de4a2eabfdbee1ee907ddc01c252b91bd49a08b258bf63",
+    "experimental/regional-requests.json": "81c3e8b7e605b2f4c00ea2d3f67cdb4651a2932846e39daf2750c86e58f9af7b",
+    "selection.json": "ac982287503d95bd1457688d997109b9904527fc283db9030b6449d500042c62",
+    "reference-comparison.json": "8751e089c36f96fa1e6b6eb0f19b92e3b28d0a1c231076e73945a560c396cfff",
+    "replay-result.json": "c0b030f52071f6c1fd9588c9bf680cb796c98d0f77034f543f6a24f8e09eca07"
+  }
+}

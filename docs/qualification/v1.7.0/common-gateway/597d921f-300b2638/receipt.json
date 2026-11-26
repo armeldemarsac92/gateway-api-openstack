@@ -1,0 +1,48 @@
+{
+  "inputs": {
+    "campaignInputSHA256": "dc1106d6668d861e02f419b57c7fe31c281fef10e6fb8c4213144c8549769b34",
+    "controllerRevision": "597d921fd083bb71f9ad3fc024f5f6bf0891e0ba",
+    "controllerManifestDigest": "sha256:af7a3aaf6b691d33a43e9be6313573bb4a06dd573a2cd865ae88b138d233a750",
+    "controllerManagerSHA256": "83cc52dbae43238325247b91268b5283051e1f2c50b5d7014a619d7d9e0734ae",
+    "controllerOCIArchiveSHA256": "5088eb63491731550c14e25e1382571f409d7942202727f50d16e2d098063e2d",
+    "controllerOCISignatureVerified": false,
+    "octaviaRevision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+    "octaviaWheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+    "haProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "standardBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "upstreamExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e"
+  },
+  "core": {
+    "report": "gateway-http-standard-core-default.yaml",
+    "reportSHA256": "acdfcc51cd987b196bf3943de7ed2ef3d47c4537265f44c19d256e2bcbcaff2f",
+    "selectionSHA256": "6c16d1212baf5543b63e980060f63056ab22a90ec1da9f0a80e328ad788bc6b0",
+    "originalReceiptSHA256": "f49e14b392f5485fa820eb9118142a41b96c94b37daff63adb8cb5b388d31ccd"
+  },
+  "extended": {
+    "report": "gateway-http-standard-extended-default.yaml",
+    "reportSHA256": "db13ed0a580838a5d387f89836f0bb3724966abab6f4a2f9115099b3486e1799",
+    "selectionSHA256": "b3f9f3568f67008af4b47cbc8d3c0e9760d5b4194d94002aab12d1164b96a814",
+    "originalReceiptSHA256": "cc3f7aee61aa6b731c9773da04ebadbe1c43f389c01ae82cc30e46aa43197b91",
+    "upstreamLogSHA256": "d2464650bf0b992c06327a5b7639ff036ec532ecfab38d41ac8c6bc830a98795",
+    "nativeReloadTraceSHA256": "4d9a4254a55cea4f4a4a806437a30b5232a83c5626c668504228ef01904b3471",
+    "cleanupTimeoutLogLines": {
+      "HTTPRouteRedirectPortAndScheme": 10808,
+      "ListenerSetHTTPRouting": 64570,
+      "GatewayHTTPListenerIsolation": 64589,
+      "ListenerSetAllowedRoutesNamespaces": 66437
+    },
+    "cors": {
+      "paths": ["/cors-1", "/cors-wildcard-origin"],
+      "timeoutLogLines": [4698, 4700],
+      "timeoutUTC": "2026-11-26T04:04:19.023Z",
+      "firstRecordedReloadWithBothPathsUTC": "2026-11-26T04:04:19.873Z",
+      "subsequentSuccessfulPreflightLogLine": 4788
+    },
+    "staticAddresses": {
+      "upstreamStatusAndAddressAssertions": "PASS",
+      "usableAddressAllocationObserved": true,
+      "unusableAddressAllocationAttemptObserved": false
+    }
+  }
+}

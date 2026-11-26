@@ -29,7 +29,11 @@ An HTTP rule can mix Service and ServiceImport references with separate weights.
 
 A valid Headless reference with no eligible members keeps `ResolvedRefs=True`. Its share uses the existing unavailable backend behavior, including HTTP 503 or gRPC `UNAVAILABLE`. TLSRoute rejects that share under the same regional capability requirements as an invalid backend. IPv6 endpoint forwarding and MCS providers that expose Headless endpoints through another mechanism are outside this profile.
 
+On both local release channels, removing and restoring the HTTP import grant preserved the weights and the independently authorized gRPC route. [Route conditions and traffic by phase](qualification/v1.7.0/provider/multicluster-service-imports/README.md)
+
 ## Mirror HTTPRoute and GRPCRoute requests
+
+An ownerless EndpointSlice retaining the same MCS import name and source cluster stays outside the homonymous core Service when its manager label disappears. The local grant cycle recorded one primary reply per request and the copies received at each remote endpoint. [HTTP and gRPC counts and conditions](qualification/v1.7.0/provider/service-import-request-mirror/README.md)
 
 Enable `--octavia-http-request-mirror` alongside `--multicluster-service-imports`. A mirror in a `backendRefs[].filters` list also requires `--octavia-weighted-http-targets`. Use a region that advertises the [HTTP request mirroring capabilities](qualification/v1.7.0/provider/http-request-mirror.md) or [gRPC request mirroring capabilities](getting-started.md#grpc-request-mirroring) for the route protocol. The same IPv4 Endpoint and unmanaged backend security prerequisites apply.
 
@@ -57,8 +61,18 @@ Enable the [passthrough](operator-octavia-tls-sni-passthrough.md) or [terminatio
 
 A TLSRoute can mix Services and ServiceImports in the same weighted rule. An invalid import or a revoked grant preserves the backend’s connection share as rejection through the regional TCP connection rejection capability, or through independent weighted SNI pools if the region supports them for the selected listener mode. Enable `--octavia-tcp-connection-rejection` to use the single-pool rejection capability. When the regional provider offers neither mechanism, forwarding for that SNI hostname is withdrawn. Separate hostnames continue to use their own backend ports.
 
+The local passthrough Gateway kept both target weights through a TLSRoute ReferenceGrant withdrawal and restoration. [SNI pool state, closed connections and origin counts](qualification/v1.7.0/provider/tlsroute-service-imports/README.md)
+
+The local trials recorded HTTP traffic to distinct published ports, an imported gRPC origin, and TLS connection weights after the final imported endpoint disappeared. [Headless ServiceImport traffic](qualification/v1.7.0/provider/headless-service-imports/README.md)
+
 ## Forward TCPRoute connections and UDPRoute packets
+
+A local trial exercised a 3:1 rule with a same-named Service and Headless ServiceImport. Removing the import grant left the separate control route reachable through both protocols. [TCP connections and UDP packet counts](qualification/v1.7.0/provider/transport-service-imports/README.md)
 
 Use the same `backendRefs` example under a TCPRoute or UDPRoute rule on a listener with the matching protocol. The import and a homonymous core Service can appear in the same rule with separate weights. For example, an import at weight 3 and a Service at weight 1 give the import three quarters of the traffic.
 
 Enable `--octavia-tcp-connection-rejection` for TCPRoute or `--octavia-udp-packet-drop` for UDPRoute in a region that advertises the corresponding proportional rejection capability. UDP packet discard requires a dedicated IPv4 Endpoint listener and uses EndpointSlice readiness for Headless imports. A missing grant, invalid import or loss of the last eligible Headless endpoint rejects the TCP share or discards the UDP share. When the applicable capability is unavailable, the controller withdraws forwarding for the affected route until it can honor those weights. A zero-weight import is still validated and contributes no traffic.
+
+## Use a ServiceImport as a mesh route parent
+
+For an enrolled IPv4 ClusterSetIP with one HTTP port, the producer can attach an HTTPRoute in the import’s namespace. Enable the controller projection and install the matching Hibiscus Istio pilot. The waypoint selects the route using the import VIP. [Configuration and prerequisites](../integrations/istio-ambient/README.md#mesh-serviceimport-opt-in) · [Local responses](qualification/v1.7.0/provider/ambient-service-import-parents/README.md)
