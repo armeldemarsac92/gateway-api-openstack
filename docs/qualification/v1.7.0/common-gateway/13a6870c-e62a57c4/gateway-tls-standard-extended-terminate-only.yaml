@@ -1,0 +1,75 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-26T01:15:19+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 13a6870cb63abafa131527b7b1b67048d962cd57
+kind: ConformanceReport
+mode: local-octavia-amphora-signed
+profiles:
+- core:
+    result: partial
+    skippedTests:
+    - GatewayClassObservedGenerationBump
+    - GatewayInvalidRouteKind
+    - GatewayInvalidTLSConfiguration
+    - GatewayListenerUnsupportedProtocol
+    - GatewayModifyListeners
+    - GatewayNameMaximumLength
+    - GatewayObservedGenerationBump
+    - GatewayPreserveForeignConditions
+    - GatewaySecretInvalidReferenceGrant
+    - GatewaySecretMissingReferenceGrant
+    - GatewaySecretReferenceGrantAllInNamespace
+    - GatewaySecretReferenceGrantSpecific
+    - TLSRouteHostnameIntersection
+    - TLSRouteInvalidBackendRefNonexistent
+    - TLSRouteInvalidBackendRefUnknownKind
+    - TLSRouteInvalidNoMatchingListener
+    - TLSRouteInvalidNoMatchingListenerHostname
+    - TLSRouteInvalidReferenceGrant
+    - TLSRouteListenerPassthroughSupportedKinds
+    - TLSRouteListenerTerminateNotSupported
+    - TLSRouteSimpleSameNamespace
+    statistics:
+      Failed: 0
+      Passed: 0
+      Skipped: 21
+  extended:
+    result: partial
+    skippedTests:
+    - TLSRouteListenerTerminateSupportedKinds
+    - TLSRouteTerminateSimpleSameNamespace
+    statistics:
+      Failed: 0
+      Passed: 1
+      Skipped: 2
+    supportedFeatures:
+    - TLSRouteModeTerminate
+    unsupportedFeatures:
+    - BackendTLSPolicy
+    - BackendTLSPolicySANValidation
+    - ClusterTrustBundle
+    - GatewayAddressEmpty
+    - GatewayAddressRoutability
+    - GatewayAddressRoutabilityCluster
+    - GatewayBackendClientCertificate
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayHTTPListenerIsolation
+    - GatewayHTTPSListenerDetectMisdirectedRequests
+    - GatewayInfrastructure
+    - GatewayListenerFilters
+    - GatewayPort8080
+    - GatewayRouteHostnameIntersectionPrecedence
+    - GatewayStaticAddresses
+    - ListenerSet
+    - TLSRouteModeMixed
+  name: GATEWAY-TLS
+  summary: Core tests partially succeeded with 21 test skips. Extended tests partially
+    succeeded with 2 test skips.

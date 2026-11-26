@@ -1,0 +1,90 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-26T03:32:33+01:00"
+gatewayAPIChannel: experimental
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 13a6870cb63abafa131527b7b1b67048d962cd57
+kind: ConformanceReport
+mode: local-octavia-amphora-signed
+profiles:
+- core:
+    result: partial
+    skippedTests:
+    - GatewayClassObservedGenerationBump
+    - GatewayInvalidRouteKind
+    - GatewayInvalidTLSConfiguration
+    - GatewayListenerUnsupportedProtocol
+    - GatewayModifyListeners
+    - GatewayNameMaximumLength
+    - GatewayObservedGenerationBump
+    - GatewayPreserveForeignConditions
+    - GatewaySecretInvalidReferenceGrant
+    - GatewaySecretMissingReferenceGrant
+    - GatewaySecretReferenceGrantAllInNamespace
+    - GatewaySecretReferenceGrantSpecific
+    - TLSRouteHostnameIntersection
+    - TLSRouteInvalidBackendRefNonexistent
+    - TLSRouteInvalidBackendRefUnknownKind
+    - TLSRouteInvalidNoMatchingListener
+    - TLSRouteInvalidNoMatchingListenerHostname
+    - TLSRouteInvalidReferenceGrant
+    - TLSRouteListenerPassthroughSupportedKinds
+    - TLSRouteListenerTerminateNotSupported
+    - TLSRouteSimpleSameNamespace
+    statistics:
+      Failed: 0
+      Passed: 0
+      Skipped: 21
+  extended:
+    result: partial
+    skippedTests:
+    - GatewayInfrastructureMetadata
+    - GatewayInvalidParametersRef
+    - GatewayOptionalAddressValue
+    - GatewayStaticAddresses
+    - ListenerSetAllowedNamespaceNone
+    - ListenerSetAllowedNamespaceSame
+    - ListenerSetAllowedNamespaceSelector
+    - ListenerSetAllowedRoutesSupportedKinds
+    - ListenerSetDefaultNotAllowed
+    - ListenerSetHostnameConflict
+    - ListenerSetProtocolConflict
+    - ListenerSetReferenceGrant
+    - TLSRouteListenerMixedTerminationNotSupported
+    - TLSRouteListenerTerminateSupportedKinds
+    - TLSRouteMixedTerminationSameNamespace
+    - TLSRouteMultipleRoutesAttachmentSameHostnameIntersection
+    - TLSRouteTerminateSimpleSameNamespace
+    statistics:
+      Failed: 0
+      Passed: 1
+      Skipped: 17
+    supportedFeatures:
+    - BackendTLSPolicy
+    - GatewayAddressEmpty
+    - GatewayInfrastructure
+    - GatewayRouteHostnameIntersectionPrecedence
+    - GatewayStaticAddresses
+    - ListenerSet
+    - TLSRouteModeMixed
+    - TLSRouteModeTerminate
+    unsupportedFeatures:
+    - BackendTLSPolicySANValidation
+    - ClusterTrustBundle
+    - GatewayAddressRoutability
+    - GatewayAddressRoutabilityCluster
+    - GatewayBackendClientCertificate
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayHTTPListenerIsolation
+    - GatewayHTTPSListenerDetectMisdirectedRequests
+    - GatewayListenerFilters
+    - GatewayPort8080
+  name: GATEWAY-TLS
+  summary: Core tests partially succeeded with 21 test skips. Extended tests partially
+    succeeded with 17 test skips.
