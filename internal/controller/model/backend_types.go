@@ -17,6 +17,8 @@ limitations under the License.
 package model
 
 import (
+	"net/netip"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
@@ -58,21 +60,21 @@ type ServicePortKey struct {
 // BackendGroup preserves one backendRef's contribution independently of endpoints.
 // Groups are not combined even when their Services or endpoints overlap.
 type BackendGroup struct {
-	Reference        gatewayv1.HTTPBackendRef
-	Weight           int32
-	Authorization    BackendAuthorization
-	State            BackendState
-	Service          types.NamespacedName
-	ServiceUID       types.UID
-	ServiceImport    types.NamespacedName
-	ServiceImportVIP string
-	XBackend         types.NamespacedName
-	XBackendPort     int
-	XBackendUsesH2C  bool
-	Port             *corev1.ServicePort
-	Endpoints        []Endpoint
-	Diagnostic       *Diagnostic
-	BackendTLS       backendtls.Selection
+	Reference                 gatewayv1.HTTPBackendRef
+	Weight                    int32
+	Authorization             BackendAuthorization
+	State                     BackendState
+	Service                   types.NamespacedName
+	ServiceUID                types.UID
+	ServiceImport             types.NamespacedName
+	ServiceImportDestinations []netip.AddrPort
+	XBackend                  types.NamespacedName
+	XBackendPort              int
+	XBackendUsesH2C           bool
+	Port                      *corev1.ServicePort
+	Endpoints                 []Endpoint
+	Diagnostic                *Diagnostic
+	BackendTLS                backendtls.Selection
 
 	RouteSessionPersistence *RouteSessionPersistence
 

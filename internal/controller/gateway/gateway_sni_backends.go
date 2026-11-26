@@ -76,7 +76,7 @@ func (r *Reconciler) observeSNIService(ctx context.Context, route *gatewayv1.TLS
 	return &service, port, nil, nil
 }
 
-const sniServiceImportInventoryPending = "Waiting for a live ServiceImport and ReferenceGrant inventory"
+const sniServiceImportInventoryPending = "Waiting for a live ServiceImport, EndpointSlice and ReferenceGrant inventory"
 
 func (r *Reconciler) observeSNIServiceImport(ctx context.Context, route *gatewayv1.TLSRoute, key types.NamespacedName, ref gatewayv1.BackendRef) (cloud.TLSSNIBackendPool, *model.Diagnostic, error) {
 	pool := cloud.TLSSNIBackendPool{Weight: int(ptr.Deref(ref.Weight, 1))}
@@ -94,10 +94,11 @@ func (r *Reconciler) observeSNIServiceImport(ctx context.Context, route *gateway
 	if err != nil {
 		return pool, nil, err
 	}
-	port, address, diagnostic := observation.Destination(ref.Port, tlsRouteKind, false)
-	if diagnostic == nil && pool.Weight > 0 {
+	port, destinations, diagnostic := observation.Destinations(ref.Port, tlsRouteKind, false)
+	// A resolved reference without members reserves its weight as rejection.
+	if diagnostic == nil && pool.Weight > 0 && len(destinations) > 0 {
 		pool.ServiceUID, pool.ServicePort = string(observation.UID), int(port.Port)
-		pool.Members = []cloud.Member{{Address: address, Port: pool.ServicePort, RoutedExternal: true}}
+		pool.Members = routebackend.ServiceImportMembers(destinations)
 	}
 	return pool, diagnostic, nil
 }
@@ -114,6 +115,9 @@ func (r *Reconciler) resolveSingleSNIServiceImport(ctx context.Context, snapshot
 	entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend ServiceImport reference is resolved"
 	if pool.Weight == 0 {
 		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "The TLSRoute has no positive-weight backend"}
+		return nil
+	}
+	if len(pool.Members) == 0 {
 		return nil
 	}
 	appendSNIForwardingTargets(entry, cloud.TLSSNIRoute{

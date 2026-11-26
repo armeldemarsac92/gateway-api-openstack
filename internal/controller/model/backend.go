@@ -258,15 +258,23 @@ func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 	return endpoints
 }
 
-// EndpointSliceOwnerMatchesService checks the identity of a controlling core
-// Service when the backend Service has a UID. Other slices rely on the Service label.
+// EndpointSliceOwnerMatchesService keeps an imported slice for a homonymous
+// ServiceImport separate and checks the UID of any controlling core Service.
 func EndpointSliceOwnerMatchesService(slice *discoveryv1.EndpointSlice, service *corev1.Service) bool {
+	if hasServiceImportOwner(slice, service.Name) ||
+		ServiceImportEndpointSliceKey(slice).Name == service.Name && isMCSEndpointSlice(slice) {
+		return false
+	}
 	owner := endpointSliceServiceOwner(slice)
 	return service.UID == "" || owner == nil || (owner.UID == service.UID && owner.Name == service.Name)
 }
 
-// EndpointSliceServiceOwnerChanged compares the controller identity used to select members.
+// EndpointSliceServiceOwnerChanged compares ownership that can change core Service membership.
 func EndpointSliceServiceOwnerChanged(oldSlice, newSlice *discoveryv1.EndpointSlice) bool {
+	if hasServiceImportOwner(oldSlice, oldSlice.Labels[discoveryv1.LabelServiceName]) !=
+		hasServiceImportOwner(newSlice, newSlice.Labels[discoveryv1.LabelServiceName]) {
+		return true
+	}
 	oldOwner, newOwner := endpointSliceServiceOwner(oldSlice), endpointSliceServiceOwner(newSlice)
 	if oldOwner == nil || newOwner == nil {
 		return oldOwner != newOwner

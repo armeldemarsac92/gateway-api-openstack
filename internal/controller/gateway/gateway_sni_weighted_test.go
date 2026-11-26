@@ -276,6 +276,51 @@ func TestWeightedSNIRouteAvailability(t *testing.T) {
 	}
 }
 
+func TestHeadlessServiceImportReservesAnEmptySNIBackendShare(t *testing.T) {
+	cfg := testConfig()
+	cfg.MulticlusterServiceImports, cfg.TLSSNIPassthrough = true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway"}}
+	listener := testSNIListener()
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener}
+	route := testSNIRoute(gateway, "app", gateway.Namespace, "api.example.test")
+	local, localSlice := testSNIBackend(gateway.Namespace, "local", "192.0.2.10")
+	imported := &mcs.ServiceImport{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: local.Name, UID: "import-uid"},
+		Spec: mcs.ServiceImportSpec{Type: mcs.Headless, Ports: []mcs.ServicePort{{Name: "tls", Port: 8443}}},
+	}
+	remote := localSlice.DeepCopy()
+	remote.Name = "remote"
+	remote.Labels = map[string]string{mcs.LabelServiceName: imported.Name, mcs.LabelSourceCluster: "east", discoveryv1.LabelManagedBy: "mcs.example.test"}
+	remote.OwnerReferences = nil
+	remote.Endpoints[0].Addresses = []string{"192.0.2.20"}
+	serviceRef := route.Spec.Rules[0].BackendRefs[0]
+	serviceRef.Weight = ptr.To(int32(2))
+	importRef := serviceRef
+	importRef.Group, importRef.Kind = ptr.To(gatewayv1.Group(mcs.GroupName)), ptr.To(gatewayv1.Kind("ServiceImport"))
+	importRef.Weight = ptr.To(int32(3))
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{serviceRef, importRef}
+	scheme := testScheme(t)
+	require.NoError(t, mcs.Install(scheme))
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(route, local, localSlice, imported, remote).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	observe := func() cloud.TLSSNIRoute {
+		t.Helper()
+		observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.Len(t, observation, 1)
+		require.Equal(t, gatewayv1.RouteReasonResolvedRefs, observation[0].resolvedReason)
+		require.Len(t, observation[0].targets, 1)
+		return observation[0].targets[0]
+	}
+	active := observe()
+	require.Contains(t, active.Members, cloud.Member{Address: "192.0.2.20", Port: 9443, Weight: 3, RoutedExternal: true})
+	require.NoError(t, kube.Delete(t.Context(), remote))
+	withdrawn := observe()
+	require.Equal(t, []cloud.TLSSNIBackendPool{
+		{Weight: 2, ServiceUID: "local", ServicePort: 8443, Members: []cloud.Member{{Address: "192.0.2.10", Port: 9443}}},
+		{Weight: 3},
+	}, withdrawn.BackendPools)
+}
+
 func TestZeroWeightServiceImportLeavesPositiveSNIBackendsUnchanged(t *testing.T) {
 	cfg := testConfig()
 	cfg.MulticlusterServiceImports, cfg.TLSSNIPassthrough, cfg.TCPConnectionRejection = true, true, true

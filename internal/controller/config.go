@@ -84,7 +84,7 @@ type Config struct {
 	ResponseHeaderModifier bool
 	// BackendH2C enables h2c for HTTP backends that explicitly request it.
 	BackendH2C bool
-	// MulticlusterServiceImports enables Gateway routes to IPv4 ClusterSetIP ServiceImports.
+	// MulticlusterServiceImports enables Gateway routes to IPv4 ClusterSetIP and Headless ServiceImports.
 	MulticlusterServiceImports bool
 	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
 	BackendTLSPolicy bool

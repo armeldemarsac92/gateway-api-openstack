@@ -599,9 +599,13 @@ func (r *Reconciler) patchSNIRouteStatus(ctx context.Context, base, target *gate
 }
 
 func (r *Reconciler) gatewayRequestsForSNIServiceImport(ctx context.Context, object client.Object) []reconcile.Request {
+	return r.gatewayRequestsForSNIServiceImportKey(ctx, client.ObjectKeyFromObject(object))
+}
+
+func (r *Reconciler) gatewayRequestsForSNIServiceImportKey(ctx context.Context, key client.ObjectKey) []reconcile.Request {
 	value := controller.ServiceImportIndexAll
-	if object.GetName() != "" {
-		value = controller.ObjectKeyString(client.ObjectKeyFromObject(object))
+	if key.Name != "" {
+		value = controller.ObjectKeyString(key)
 	}
 	var routes gatewayv1.TLSRouteList
 	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByServiceImport: value}); err != nil {
@@ -617,11 +621,21 @@ func (r *Reconciler) gatewayRequestsForSNIServiceImport(ctx context.Context, obj
 }
 
 func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, dependency client.Object) []reconcile.Request {
+	keys := make(map[client.ObjectKey]struct{})
+	if slice, ok := dependency.(*discoveryv1.EndpointSlice); ok {
+		if key := model.ServiceImportEndpointSliceKey(slice); r.Config.MulticlusterServiceImports && key.Name != "" {
+			for _, request := range r.gatewayRequestsForSNIServiceImportKey(ctx, key) {
+				keys[request.NamespacedName] = struct{}{}
+			}
+		}
+		if slice.Labels[discoveryv1.LabelServiceName] == "" {
+			return controller.SortedRequests(keys)
+		}
+	}
 	var routes gatewayv1.TLSRouteList
 	if err := r.List(ctx, &routes); err != nil {
-		return nil // The periodic live observation also checks these inputs.
+		return controller.SortedRequests(keys) // The periodic live observation also checks these inputs.
 	}
-	keys := make(map[client.ObjectKey]struct{})
 	for i := range routes.Items {
 		route := &routes.Items[i]
 		affected := false
