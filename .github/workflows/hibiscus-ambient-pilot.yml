@@ -1,0 +1,74 @@
+name: Publish Hibiscus ambient pilot
+
+on:
+  push:
+    branches: [hibiscus/publish-istio-329c846d3de8]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hibiscus-istio-pilot-329c846d3de8
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'armeldemarsac92/gateway-api-openstack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify and publish the opt-in Istio pilot
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config=integrations/istio-ambient/consumer-routes-pilot-publication.json
+          revision=$(jq -er '.sourceCommit | select(test("^[a-f0-9]{40}$"))' "$config")
+          checksum=$(jq -er '.ociArchiveSHA256 | select(test("^[a-f0-9]{64}$"))' "$config")
+          campaign=$(jq -er '.campaignSHA256 | select(test("^[a-f0-9]{64}$"))' "$config")
+          short=${revision:0:12}
+          repository="ghcr.io/$GITHUB_REPOSITORY"
+          image=$(jq -er '.image' "$config")
+          tag="$repository:istio-pilot-$short"
+          asset="istio-pilot-1.31.0-hibiscus-$short-linux-amd64.oci.tar"
+          receipt="mesh-http-grpc-service-consumers-$short.json"
+          gh release download "hibiscus-istio-$short" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --pattern "$receipt" --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/$asset" "$campaign" "$RUNNER_TEMP/$receipt" | sha256sum --check --strict -
+          source="oci-archive:$RUNNER_TEMP/$asset"
+          digest="sha256:$(skopeo inspect --raw "$source" | sha256sum | cut -d' ' -f1)"
+          test "$image" = "$repository@$digest"
+          skopeo inspect --config "$source" | jq -e '.os=="linux" and .architecture=="amd64"' >/dev/null
+
+          authfile="$RUNNER_TEMP/hibiscus-pilot-registry.json"
+          empty="$RUNNER_TEMP/hibiscus-pilot-anonymous.json"
+          error="$RUNNER_TEMP/hibiscus-pilot-inspect.log"
+          trap 'rm -f "$authfile" "$empty" "$error"' EXIT
+          printf '{"auths":{}}\n' > "$empty"
+          printf '%s' "$GH_TOKEN" | skopeo login --authfile "$authfile" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          if actual=$(skopeo inspect --authfile "$authfile" --raw "docker://$tag" 2>"$error" | sha256sum); then
+            test "sha256:${actual%% *}" = "$digest"
+          elif grep -Fq 'manifest unknown' "$error"; then
+            skopeo copy --preserve-digests --dest-authfile "$authfile" "$source" "docker://$tag"
+          else
+            cat "$error" >&2
+            exit 1
+          fi
+
+          for ref in "$tag" "$image"; do
+            for delay in 0 4 8 12; do
+              sleep "$delay"
+              if actual=$(skopeo inspect --no-creds --authfile "$empty" --raw "docker://$ref" | sha256sum); then
+                test "sha256:${actual%% *}" = "$digest"
+                break
+              fi
+              test "$delay" != 12
+            done
+          done
+          printf 'Verified anonymous GHCR access to %s and %s\n' "$tag" "$image" >> "$GITHUB_STEP_SUMMARY"
