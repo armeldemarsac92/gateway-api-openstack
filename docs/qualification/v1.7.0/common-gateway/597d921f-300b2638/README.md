@@ -58,6 +58,10 @@ The three full Extended runs on this pair failed `BackendTLSPolicyInvalidKind`. 
 
 The isolated run completed cleanup. Its final grouped observation could not be decoded, so the exact instant at which Kubernetes stopped returning the HTTPRoute is unknown. The cause of the longer delay during the full suites remains open.
 
+## gRPC, TCP and TLS on the same revisions
+
+On Standard and Experimental, all 17 Core and 13 Extended gRPC cases passed. TCP passed all 20 Core and 11 Extended cases on each channel. Standard TLS Core passed all 21 cases. In each of the four gRPC and TCP Extended runs, the suite exited with 0 and the fixture exited with 1. The fixture did not record an allocation attempt for the unusable IP in `GatewayStaticAddresses`. [Original protocol reports and address checks](protocols.md)
+
 ## Environment and scope
 
 Each run used a disposable kind cluster in a VM, echo Pods, and the controller executable extracted from its OCI archive. It exercised Octavia's installed WSGI API with SQLite, its Amphora driver and renderer, native patched HAProxy 3.0.19, and the stock Barbican WSGI API served locally over HTTPS for certificate enrollment and readback. The fixture supplied Keystone identity and Barbican authentication context, Neutron discovery and VIP allocation, worker dispatch and status completion, and the Amphora agent transport. It invoked the installed conditional policy removal endpoint synchronously. HAProxy served traffic from the rendered configuration to the Kubernetes backends.

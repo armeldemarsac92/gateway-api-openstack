@@ -1,0 +1,65 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-26T07:22:32+01:00"
+gatewayAPIChannel: experimental
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 597d921fd083bb71f9ad3fc024f5f6bf0891e0ba
+kind: ConformanceReport
+mode: local-octavia-amphora-signed
+profiles:
+- core:
+    result: partial
+    skippedTests:
+    - GRPCExactMethodMatching
+    - GRPCRouteHeaderMatching
+    - GRPCRouteListenerHostnameMatching
+    - GRPCRouteMultipleGateways
+    - GRPCRouteWeight
+    - GatewayClassObservedGenerationBump
+    - GatewayInvalidRouteKind
+    - GatewayInvalidTLSConfiguration
+    - GatewayListenerUnsupportedProtocol
+    - GatewayModifyListeners
+    - GatewayNameMaximumLength
+    - GatewayObservedGenerationBump
+    - GatewayPreserveForeignConditions
+    - GatewaySecretInvalidReferenceGrant
+    - GatewaySecretMissingReferenceGrant
+    - GatewaySecretReferenceGrantAllInNamespace
+    - GatewaySecretReferenceGrantSpecific
+    statistics:
+      Failed: 0
+      Passed: 0
+      Skipped: 17
+  extended:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 13
+      Skipped: 0
+    supportedFeatures:
+    - BackendTLSPolicy
+    - GatewayAddressEmpty
+    - GatewayInfrastructure
+    - GatewayRouteHostnameIntersectionPrecedence
+    - GatewayStaticAddresses
+    - ListenerSet
+    unsupportedFeatures:
+    - BackendTLSPolicySANValidation
+    - ClusterTrustBundle
+    - GatewayAddressRoutability
+    - GatewayAddressRoutabilityCluster
+    - GatewayBackendClientCertificate
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayHTTPListenerIsolation
+    - GatewayHTTPSListenerDetectMisdirectedRequests
+    - GatewayListenerFilters
+    - GatewayPort8080
+  name: GATEWAY-GRPC
+  summary: Core tests partially succeeded with 17 test skips. Extended tests succeeded.

@@ -27,6 +27,8 @@ The signed controller `597d921f` and Octavia `300b2638` source pair passed all 4
 
 The same revisions passed 40/40 Experimental GATEWAY-HTTP Core cases and 53/64 Experimental Extended cases. [Experimental reports](../common-gateway/597d921f-300b2638/README.md#experimental-http-with-default-parallelism)
 
+On Standard and Experimental, all 17 Core and 13 Extended gRPC cases passed. TCP passed all 20 Core and 11 Extended cases on each channel. Standard TLS Core passed all 21 cases. In each of the four gRPC and TCP Extended runs, the suite exited with 0 and the fixture exited with 1. The fixture did not record an allocation attempt for the unusable IP in `GatewayStaticAddresses`. [Per-channel results](../common-gateway/597d921f-300b2638/protocols.md)
+
 With the newer signed source pair, the isolated redirect-port-and-scheme case passed on both channels with revision-checked cleanup enabled. [Redirect traffic and policy removal](../provider/closed-listener-policy-removal/README.md)
 
 With signed Git source revisions `13a6870cb63a` for the controller and `e62a57c49177` for Octavia, the upstream v1.7.0 HTTP Core profile passed 39/40 (0 skipped) on Standard and 40/40 (0 skipped) on Experimental. HTTP Extended passed 39/63 (0 skipped) on Standard and 40/64 (0 skipped) on Experimental. The Extended reports name 21 failed cases in common. All 33 request assertions passed in the Standard Core hostname-intersection case. The case failed when the suite could not confirm deletion of its HTTPRoute within 30 seconds. These runs used a local Kubernetes and Octavia environment. [Original reports and per-case results](../common-gateway/13a6870c-e62a57c4/README.md)
