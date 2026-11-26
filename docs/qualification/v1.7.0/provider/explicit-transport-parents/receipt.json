@@ -1,0 +1,43 @@
+{
+  "sourceRevision": "555f5f4e0557b83f55e24eb134f6edde7dc1f9cb",
+  "sourceTree": "60c3cef8b71ffb9be08a859b13d6d82b00142050",
+  "manifestDigest": "sha256:0a3c030ec4f71e617a4b2b9f708eb5cb377e6ee6539fdd5a1eb7bade5d7706f6",
+  "managerSHA256": "c8d709955bcc72fdd3f7ce4352546f68ad8bb0fd8966592d9c33ae1b651272d7",
+  "gatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "providers": {
+    "octavia": {
+      "source": "11eb511cf3763e345df640ed00cd9eecba3c1cf8",
+      "tree": "0a19a51abb20b128e5ca0dd1910531d0a208e266",
+      "wheelSHA256": "3529e9b85fe86b271339ddf17095004f4116360aafb3f87551a122189f6045d9"
+    },
+    "octaviaLib": {
+      "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "tree": "503a73ff7e5e70fd4cd60dbb97c3c71e28f42060",
+      "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+    }
+  },
+  "haproxySHA256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+  "scope": "Targeted local routing and parent withdrawal through real Kind clusters, a native HAProxy for TCP and TLS, and guest Keepalived/IPVS for UDP. Octavia API and SQL ran locally. Cloud identity, networking, remote worker operations and Amphora infrastructure used fixtures.",
+  "transportHarness": "TCP/UDP Standard completed before the first VM stopped during preparation for Experimental. A separate VM ran the Experimental TCP/UDP case. Both TLS cases ran in a third VM.",
+  "signedSourceRegressions": [
+    "TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors",
+    "TestGatewayCountsUnreportedExplicitUDPParentAtRouteStatusLimit",
+    "TestGatewayTransportRouteFailureRefreshesAttachments",
+    "TestMixedTLSRouteParentUsesMatchingListenerModeAndServicePort",
+    "TestScopedTransportRetainsOnlyEdgesWithAnUnchangedBackend",
+    "TestSingletonTransportPreservesAnObservedPoolUntilReadbackChanges",
+    "TestTLSRouteDefaultGatewayAttachments",
+    "TestTLSRouteExplicitGatewayAttachments",
+    "TestTransportExplicitGatewayParents",
+    "TestUDPPacketDropRetainsOnlyTheObservedWeightedPool",
+    "TestUDPRouteRejectsAChangedElectionBeforeReportingProgrammed"
+  ],
+  "officialConformanceCasesRunInThisCampaign": 0,
+  "regionalProfilesRun": 0,
+  "reports": {
+    "tcp-udp-experimental.json": "ee1887b1e0ab258ce030c43d2375071e52128fbb86f7099d95387a9e0ec3fa66",
+    "tcp-udp-standard.json": "9fbace0292319b4db1cd63292fd4f586955399d2e7a7e62fefe6e5d9a7c64fa8",
+    "tls-experimental.json": "0b4c0fa0feab835b533d82ba6880489af97955227050676dcc1ebc20a048fdfc",
+    "tls-standard.json": "b89694eb126accf0acfbf2eba7ef813dcb54b2792a4b058d4d01299e3cbcb0cc"
+  }
+}

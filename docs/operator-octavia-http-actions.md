@@ -18,6 +18,8 @@ Install the Octavia database migration and compatible Octavia API, workers and A
 
 The option supports Gateway API `Exact` and `PathPrefix` paths up to 1024 ASCII bytes on HTTP and terminated HTTPS. The controller sends `HTTP_PATH_LITERAL` when a stock rule would exceed Octavia's 255-character value limit or the legacy renderer would change the path, such as when it contains an apostrophe or ampersand. Octavia compares the raw path. The path match itself leaves the forwarded path unchanged. `PathPrefix` matches whole segments and ignores a trailing slash in the configured prefix. A higher-priority path can also exclude its matching requests from a redirect.
 
+To return HTTP 404 when every path misses, enable `--octavia-fixed-http-responses` and the regional `fixed_http_responses_v1` capability. The Standard and Experimental trials returned HTTP 404 for each unmatched path and forwarded each match with its original bytes. [Traffic results](qualification/v1.7.0/provider/literal-http-paths/README.md)
+
 The controller reports `UnsupportedValue` for a route that needs literal path rules while the option is off. A listener that depends on an installed literal path rule stays closed while the opt-in or the regional capability is unavailable. Other physical listeners can keep serving. Before retiring the extension, replace or remove the affected matches and wait for the full Gateway reconciliation to reopen the listener. Verify that its owned Octavia policies no longer contain `HTTP_PATH_LITERAL` rules, including inverted redirect exclusions.
 
 ## Enable forwarding URL rewrites
@@ -40,7 +42,7 @@ The affected physical listener stays closed while Octavia's regional capability 
 
 Enable `--octavia-response-header-modifier` and `--octavia-weighted-http-targets` on the controller. Enroll Amphora in `enabled_weighted_target_response_header_providers` alongside the response-header and weighted-target provider settings in Octavia's `[api_settings]`. Verify `weighted_http_target_response_headers_v1` on the effective regional provider. Response modifiers on their own require no backend request filter opt-in.
 
-Add `type: ResponseHeaderModifier` under the selected HTTPRoute or GRPCRoute `backendRef.filters`. A single filtered backend also uses a weighted policy. Octavia applies the selected backend's operations before the rule's response operations. References to the same Service can carry different modifiers. A weight-zero or unresolved reference contributes no target response operations. CORS-owned response headers and gRPC transport and status metadata remain reserved. For comma-separated binary gRPC response metadata, the native gRPC Content-Type predicate and `grpc_binary_response_metadata_v1` are required.
+Add `type: ResponseHeaderModifier` under the selected HTTPRoute or GRPCRoute `backendRef.filters`. A single filtered backend also uses a weighted policy. The qualified controller and Amphora release include the per-target REST field, its database migration and gRPC metadata validation. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-421558c9513aaaeaa8b0791939ad0005b96149c8) · [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-response-headers-bb8bf986b57a) · [Traffic and permission changes](qualification/v1.7.0/provider/backend-response-header-evidence/receipt.json) Octavia applies the selected backend's operations before the rule's response operations. References to the same Service can carry different modifiers. A weight-zero or unresolved reference contributes no target response operations. CORS-owned response headers and gRPC transport and status metadata remain reserved. For comma-separated binary gRPC response metadata, the native gRPC Content-Type predicate and `grpc_binary_response_metadata_v1` are required.
 
 The controller keeps the affected physical listener closed while it cannot verify the regional capability or the applied target operations. Check the route's `Programmed` condition and the policy's `targets[].response_header_operations` before retiring the extension.
 
@@ -88,6 +90,8 @@ For an HTTP or terminated HTTPS policy, the controller can create the disabled p
 
 ## Activate prepared HTTP policies together
 
+The signed manager submitted a group to the Octavia API. The installed worker applied it, HAProxy activated the resulting configuration, and the manager read the policies back as enabled and active. [Local Standard results](qualification/v1.7.0/provider/initial-http-predicates/receipt.json)
+
 The controller can enable two to 64 forwarding policies on one HTTP listener in a single Amphora refresh. Each policy must have been created with its initial matching rules and have a ready HTTP backend and a positive path match. A hostname and exact header matches are optional. For exact headers, enable `--octavia-http-header-exact` and check that the region advertises `http_header_exact_v1`. The controller checks the listener's policy order, the predicates, the pools and their members, and the current Kubernetes references before it submits the group. A concurrent change causes a fresh read.
 
 Apply Octavia migration `cc7a1218b24e`, upgrade the regional API and workers, and set `enabled_l7policy_batch_activation_providers = amphora` in `[api_settings]`. Workers must use the same database writer for the per-load-balancer render lock. When `GET /v2/lbaas/providers/amphora/gateway_capabilities` lists `l7policy_batch_activation_v1`, add `--octavia-l7policy-batch-activation` to the controller arguments.
@@ -96,11 +100,15 @@ HTTP 204 acknowledges submission. Follow the provisioning status of the listener
 
 ## Remove a retiring route policy and its rules together
 
+The conditional worker uses database row locking with `FOR UPDATE SKIP LOCKED`. Enable this option on a database that supports that operation. [Signed Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-l7policy-conditional-removal-041a2becdc07)
+
+On both local Gateway API channels the retiring HTTPRoute returned 404 after the policy was disabled. Its finalizer remained until the controller read both the listener and policy inventories. The neighboring route continued serving its origin through withdrawal. [Controller, Octavia and HAProxy observations](qualification/v1.7.0/provider/conditional-l7-removal/receipt.json)
+
 Upgrade the regional Octavia API and Amphora workers to builds that support conditional L7 policy removal. Set `enabled_l7policy_conditional_removal_providers = amphora` in Octavia's `[api_settings]`. Once the effective provider advertises `l7policy_conditional_removal_v1` on the controller's regional load-balancer endpoint, add `--octavia-l7policy-conditional-removal` to the controller arguments. The option defaults to off and is independent of grouped creation and activation.
 
 For a retiring route binding on an HTTP or terminated HTTPS listener, the controller normally waits for the policy to be disabled and settled. It compares the full policy and rule snapshot with the owned inventory and rechecks the Kubernetes binding before submitting that revision. Octavia accepts the request with HTTP 202 and applies the removal and quota release together. The controller confirms policy absence through the normal inventory on a later reconcile before completing cleanup. A conflict or an interrupted request is followed by fresh inventory reads.
 
-After Amphora confirms that it has applied the current listener closure, the region can remove a retiring policy and its rules in one call. Upgrade the regional Octavia API and workers, then add `enabled_l7policy_closed_listener_removal_providers = amphora` alongside the existing removal setting. The controller requires the regional `l7policy_closed_listener_removal_v1` capability, an administratively down `ACTIVE` listener, and `listener_closure_confirmed: true` in the policy snapshot. The worker rechecks the revision before removing the policy. A listener with an unconfirmed closure follows the ordinary policy-disable path. Other policies on that listener keep their configuration.
+After Amphora confirms that it has applied the current listener closure, the region can remove a retiring policy and its rules in one call. Apply the Octavia database migration through `0e79b45b8674` and upgrade all regional API processes and workers before enabling the capability. Then add `enabled_l7policy_closed_listener_removal_providers = amphora` alongside the existing removal setting. The controller requires the regional `l7policy_closed_listener_removal_v1` capability, an administratively down `ACTIVE` listener, and `listener_closure_confirmed: true` in the policy snapshot. The worker rechecks the revision before removing the policy. A listener with an unconfirmed closure follows the ordinary policy-disable path. Other policies on that listener keep their configuration. [Local redirect and sibling policy tests](qualification/v1.7.0/provider/closed-listener-policy-removal/README.md)
 
 The controller uses individual rule deletion with the option off or if the regional provider explicitly lacks the original removal capability. Wait for in-flight removals to settle before rolling back the regional API or workers.
 
@@ -146,6 +154,8 @@ HTTP authorization and backend TLS hostname validation. Amphora sends
 the authorization request using HTTP/1.1 and checks the peer against the
 policy. Regional support determines the available trust sources, SANs
 and Gateway client identity. [Backend TLS policy setup](operator-octavia-backend-tls-policy.md)
+
+[Local grant and CA withdrawal results](qualification/v1.7.0/provider/gateway-http-route-http-authorizer-tls/README.md)
 
 An authorization response of HTTP 200 allows the request to reach the origin.
 The rule can specify an authorization path prefix and request and response header allowlists.

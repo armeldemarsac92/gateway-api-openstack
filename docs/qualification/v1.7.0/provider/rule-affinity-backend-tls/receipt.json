@@ -1,0 +1,129 @@
+{
+  "channel": "experimental",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "kubernetesVersion": "v1.36.2",
+  "startedAt": "2026-11-25T22:34:08.507+00:00",
+  "completedAt": "2026-11-25T22:34:55.176+00:00",
+  "regionalCapabilities": {
+    "backend_tls_hostname_v1": true,
+    "http_cookie_name_v1": true
+  },
+  "controller": {
+    "sourceRevision": "3b7ad5dccd7d48abaded6e4f95737e37bc3306a8",
+    "managerSHA256": "6bc70ed07bfb9e86260156a941cf1ad86cb5ec8ea4cfe3bd1f5c271a73787849",
+    "manifestDigest": "sha256:36b9573fd0a7da946a53b0ed57a78a18bf65947492a237c3713dde6e41fb6b0c",
+    "ociArchiveSHA256": "03716b841b810a606a7e3956ae1bba437263662d5666b8b432244c9a9ca7b98c"
+  },
+  "octavia": {
+    "revision": "592e32f88b0a11ef3526ba544a3bf1aac9718deb",
+    "version": "19.0.1.dev106",
+    "sha256": "200e06b5d8e567ba847e90eb5cb1550190d19d330be4843e0dbc2e2ff774231c"
+  },
+  "octaviaLib": {
+    "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+    "version": "3.12.1.dev22",
+    "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+    "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+  },
+  "scenario": "HTTPRoute rule Cookie, primary Service with two EndpointSlice endpoints, BackendTLSPolicy on its named port",
+  "regionalDeploymentVerified": false,
+  "phases": {
+    "trusted": {
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+        "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+      },
+      "routeGeneration": 1,
+      "policyConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "policyGeneration": 1,
+      "ordinarySiblingHTTP": 200,
+      "tlsPoolFingerprint": "40c70e386f6dbf8ee522115b95daf507c37167c3179300b645da1eadc061b622",
+      "caPEMSHA256": "1b82e428dfbe94c95c6828726ca986506a1f0873ef03618a088d407830613d9e",
+      "verifiedEndpoints": 2,
+      "applicationRequests": 8,
+      "cleartextAttempts": 0,
+      "cookieIssued": true,
+      "selectedEndpoint": "peer-a",
+      "cookieReplays": 3,
+      "replaysByEndpoint": {
+        "peer-a": 3
+      },
+      "freshClientsByEndpoint": {
+        "peer-b": 2,
+        "peer-a": 2
+      },
+      "applicationTLSVersions": {
+        "TLSv1.3": 8
+      }
+    },
+    "different_root": {
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+        "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+      },
+      "routeGeneration": 1,
+      "policyConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "policyGeneration": 2,
+      "ordinarySiblingHTTP": 200,
+      "tlsPoolFingerprint": "40c70e386f6dbf8ee522115b95daf507c37167c3179300b645da1eadc061b622",
+      "caPEMSHA256": "f99b1f9757d1d1aa4f661642cdc3d8b853fd15b634b920b9aaea6a310afc845b",
+      "verifiedEndpoints": 2,
+      "applicationRequests": 0,
+      "cleartextAttempts": 0,
+      "clientHTTP": [
+        503,
+        503
+      ],
+      "peerTLSAlerts": {
+        "TLSV1_ALERT_UNKNOWN_CA": 8
+      }
+    },
+    "restored": {
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+        "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+      },
+      "routeGeneration": 1,
+      "policyConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "policyGeneration": 3,
+      "ordinarySiblingHTTP": 200,
+      "tlsPoolFingerprint": "40c70e386f6dbf8ee522115b95daf507c37167c3179300b645da1eadc061b622",
+      "caPEMSHA256": "1b82e428dfbe94c95c6828726ca986506a1f0873ef03618a088d407830613d9e",
+      "verifiedEndpoints": 2,
+      "applicationRequests": 8,
+      "cleartextAttempts": 0,
+      "cookieIssued": true,
+      "selectedEndpoint": "peer-a",
+      "cookieReplays": 3,
+      "replaysByEndpoint": {
+        "peer-a": 3
+      },
+      "freshClientsByEndpoint": {
+        "peer-b": 2,
+        "peer-a": 2
+      },
+      "applicationTLSVersions": {
+        "TLSv1.3": 8
+      }
+    }
+  }
+}

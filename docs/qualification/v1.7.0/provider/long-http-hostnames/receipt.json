@@ -1,0 +1,301 @@
+{
+  "previousStandard": {
+    "channel": "standard",
+    "controller": {
+      "sourceRevision": "3b7ad5dccd7d48abaded6e4f95737e37bc3306a8",
+      "managerSHA256": "6bc70ed07bfb9e86260156a941cf1ad86cb5ec8ea4cfe3bd1f5c271a73787849",
+      "manifestDigest": "sha256:36b9573fd0a7da946a53b0ed57a78a18bf65947492a237c3713dde6e41fb6b0c",
+      "ociArchiveSHA256": "03716b841b810a606a7e3956ae1bba437263662d5666b8b432244c9a9ca7b98c"
+    },
+    "octaviaRevision": "592e32f88b0a11ef3526ba544a3bf1aac9718deb",
+    "sourceReceiptSHA256": "ef2dae7a69f1e2a2bb6f53d118b1d18cacb1ceb984ce2c6b991057c0130b68ee",
+    "admittedExactHostnameBytes": 253,
+    "accepted": "False/UnsupportedValue",
+    "reportedEncodedLimit": true,
+    "exactHTTP": 503,
+    "exactOriginRequests": 0,
+    "shortHTTP": 200
+  },
+  "enrolled": {
+    "standard": {
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kubernetesVersion": "v1.36.2",
+      "startedAt": "2026-11-25T23:01:11.775+00:00",
+      "completedAt": "2026-11-25T23:01:46.346+00:00",
+      "regionalDeploymentVerified": false,
+      "regionalCapability": {
+        "http_long_hostname_v1": true
+      },
+      "controller": {
+        "sourceRevision": "bb7d9e7f72ab5fa9c4d745f228ca0c39c30cad66",
+        "managerSHA256": "fcc448cf0218df32d512f42dc68e32b34db5ae6a3ec1b8c4acec762ff4e60278",
+        "manifestDigest": "sha256:5692862452e373797b30f967b00ccb7ad1de2be40f3fecd9fb43a12994a64f59",
+        "ociArchiveSHA256": "341d28bf2bcc0777a209825fc1a0fba91c39389fc51ed4b276752a9d52cf5ac8"
+      },
+      "octavia": {
+        "revision": "b4e94843a37ea1d69bf883df9a1ce2eb5f314f64",
+        "version": "19.0.1.dev107",
+        "sha256": "4aaea5af4d2afdec3ed108f3c352b219549e1d4e7d84f732d31ab169c3be44ff"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+      },
+      "routes": {
+        "exact-long": {
+          "hostnameBytes": 253,
+          "hostnameSHA256": "dab6b0c3397cd0b8595ff12122052ba165264c863b246718d5b610efcffcac46",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "type": "HOST_NAME",
+          "compareType": "REGEX",
+          "regexpBytes": 269,
+          "regexpSHA256": "03e892d85531bc8c1cab9dc98eda35cfb2b0157444c1eb34a407b02a83ff4adb",
+          "nativeACL": true,
+          "nativePool": true
+        },
+        "short-control": {
+          "hostnameBytes": 18,
+          "hostnameSHA256": "f4492fd046170fb810b4d67387744c3248664ceb9ad0a61b784598def7c8f272",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "type": "HOST_NAME",
+          "compareType": "REGEX",
+          "regexpBytes": 32,
+          "regexpSHA256": "a069885734e7e7c18bae81c908b076ee4c65d9ef286884c4a46491cf6c9ab159",
+          "nativeACL": true,
+          "nativePool": true
+        },
+        "wildcard-long": {
+          "hostnameBytes": 242,
+          "hostnameSHA256": "7150f5af6e32ba1e4d82b469b6c49c1f9f894aa40e27aa4458f74abe7b2a64c0",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "type": "HOST_NAME",
+          "compareType": "REGEX",
+          "regexpBytes": 295,
+          "regexpSHA256": "27d433822416fee9eb2f90bad1ef6b356a6aa21aafd08789307343512af2b1f3",
+          "nativeACL": true,
+          "nativePool": true
+        }
+      },
+      "responses": {
+        "short": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 18
+        },
+        "exact-bare": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 253
+        },
+        "exact-case": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 253
+        },
+        "exact-numeric-port": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": true,
+          "authorityBytes": 258
+        },
+        "wildcard-one-label": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 243
+        },
+        "wildcard-two-labels": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": true,
+          "authorityBytes": 251
+        },
+        "wildcard-apex": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "hostPreserved": false,
+          "numericPortIncluded": false,
+          "authorityBytes": 240
+        },
+        "exact-neighbor": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "hostPreserved": false,
+          "numericPortIncluded": false,
+          "authorityBytes": 253
+        }
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kubernetesVersion": "v1.36.2",
+      "startedAt": "2026-11-25T23:01:12.053+00:00",
+      "completedAt": "2026-11-25T23:01:50.165+00:00",
+      "regionalDeploymentVerified": false,
+      "regionalCapability": {
+        "http_long_hostname_v1": true
+      },
+      "controller": {
+        "sourceRevision": "bb7d9e7f72ab5fa9c4d745f228ca0c39c30cad66",
+        "managerSHA256": "fcc448cf0218df32d512f42dc68e32b34db5ae6a3ec1b8c4acec762ff4e60278",
+        "manifestDigest": "sha256:5692862452e373797b30f967b00ccb7ad1de2be40f3fecd9fb43a12994a64f59",
+        "ociArchiveSHA256": "341d28bf2bcc0777a209825fc1a0fba91c39389fc51ed4b276752a9d52cf5ac8"
+      },
+      "octavia": {
+        "revision": "b4e94843a37ea1d69bf883df9a1ce2eb5f314f64",
+        "version": "19.0.1.dev107",
+        "sha256": "4aaea5af4d2afdec3ed108f3c352b219549e1d4e7d84f732d31ab169c3be44ff"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+      },
+      "routes": {
+        "exact-long": {
+          "hostnameBytes": 253,
+          "hostnameSHA256": "dab6b0c3397cd0b8595ff12122052ba165264c863b246718d5b610efcffcac46",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "type": "HOST_NAME",
+          "compareType": "REGEX",
+          "regexpBytes": 269,
+          "regexpSHA256": "03e892d85531bc8c1cab9dc98eda35cfb2b0157444c1eb34a407b02a83ff4adb",
+          "nativeACL": true,
+          "nativePool": true
+        },
+        "short-control": {
+          "hostnameBytes": 18,
+          "hostnameSHA256": "f4492fd046170fb810b4d67387744c3248664ceb9ad0a61b784598def7c8f272",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "type": "HOST_NAME",
+          "compareType": "REGEX",
+          "regexpBytes": 32,
+          "regexpSHA256": "a069885734e7e7c18bae81c908b076ee4c65d9ef286884c4a46491cf6c9ab159",
+          "nativeACL": true,
+          "nativePool": true
+        },
+        "wildcard-long": {
+          "hostnameBytes": 242,
+          "hostnameSHA256": "7150f5af6e32ba1e4d82b469b6c49c1f9f894aa40e27aa4458f74abe7b2a64c0",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "type": "HOST_NAME",
+          "compareType": "REGEX",
+          "regexpBytes": 295,
+          "regexpSHA256": "27d433822416fee9eb2f90bad1ef6b356a6aa21aafd08789307343512af2b1f3",
+          "nativeACL": true,
+          "nativePool": true
+        }
+      },
+      "responses": {
+        "short": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 18
+        },
+        "exact-bare": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 253
+        },
+        "exact-case": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 253
+        },
+        "exact-numeric-port": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": true,
+          "authorityBytes": 258
+        },
+        "wildcard-one-label": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": false,
+          "authorityBytes": 243
+        },
+        "wildcard-two-labels": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "hostPreserved": true,
+          "numericPortIncluded": true,
+          "authorityBytes": 251
+        },
+        "wildcard-apex": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "hostPreserved": false,
+          "numericPortIncluded": false,
+          "authorityBytes": 240
+        },
+        "exact-neighbor": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "hostPreserved": false,
+          "numericPortIncluded": false,
+          "authorityBytes": 253
+        }
+      }
+    }
+  }
+}

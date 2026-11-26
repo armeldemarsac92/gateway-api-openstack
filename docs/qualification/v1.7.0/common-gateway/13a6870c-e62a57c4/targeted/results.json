@@ -1,0 +1,340 @@
+{
+  "inputs": {
+    "upstream": {
+      "bundles": {
+        "experimental": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "standard": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1"
+      },
+      "conformanceSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+      "registrySHA256": "9e636e9da4db8ba2cb7058860786b5f55442db792b0dbe872ce2c348c81632e0",
+      "source": "e26d183dbbc1bb782b78addbd26faba03955c152"
+    },
+    "controller": {
+      "configDigest": "sha256:5cc100ea9ef23981ca42f1f583343d267863035347b43316aede92fba33500ec",
+      "entrypoint": "/openstack-gateway-controller",
+      "managerSHA256": "503fb37ac7f738c3e1fe55853423472bff8966c67c0fd44ca6a203e9c7dcb3f1",
+      "manifestDigest": "sha256:3c4eb3b1be49b95133f447be47b107a56730d3046b1dd995895108bf5e5f713b",
+      "ociArchiveSHA256": "70ac3cde8b42981aac14c41edfea4ae75b092ae2e01e47a282310478bb98b24d",
+      "ociSignatureVerified": false,
+      "platform": "linux/amd64",
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "13a6870cb63abafa131527b7b1b67048d962cd57",
+      "tree": "4794552a3ece9e1a6ee009751c8c46f60eb8678a",
+      "user": "65532:65532"
+    },
+    "octavia": {
+      "source": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543",
+      "tree": "145c9243a903117e4cdc6707bd5c0ffcd0184896",
+      "wheelSHA256": "33cc7ef8de6f0372e711ce4a7b1f23bf6a8b07a34c30808b7ff442e9b4c82f90"
+    },
+    "octaviaLib": {
+      "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "tree": "503a73ff7e5e70fd4cd60dbb97c3c71e28f42060",
+      "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+    },
+    "haproxy": {
+      "luaSHA256": "7427a714f36548c20f426d28ee45938e05854c08e4cf6b38fb52680a70a2f6d1",
+      "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+    }
+  },
+  "reports": [
+    {
+      "profile": "GATEWAY-HTTP",
+      "channel": "standard",
+      "subset": "extended",
+      "selectedCases": {
+        "BackendTLSPolicyConflictResolution": "PASS",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "40a53975328545156604866ad932fe90a32f0af47e629f2b5fe20b55897577c1",
+      "sourceReceiptSHA256": "7bbbf00706da0ba473369b71ba7d529a79e55949317949a9790d3204f8b8da33",
+      "suiteLogSHA256": "c8e6768b699a3e58ade390b23c139a0e9e8a36164541da74350c8263aa479412",
+      "selectionSHA256": "c30fa69b4b8db049098d8b03d1c0bef5c214a708090515e7e626f5d63c323ce6",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 2,
+        "Skipped": 61
+      },
+      "selection": "backendtls-standard",
+      "batch": 1,
+      "report": "backendtls-standard-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-GRPC",
+      "channel": "experimental",
+      "subset": "extended",
+      "selectedCases": {
+        "BackendTLSPolicyGRPCRoute": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "2e4f6a897d128e4237b6dd046a2d0666276d0ffb7f25795c8d203b15ff25cbb2",
+      "sourceReceiptSHA256": "6ee4faa8a1e16ad9b1a4546376bb96bbe546e2ee16a3cf1a06642ddd10fcf490",
+      "suiteLogSHA256": "a230bc06e976199cbd591ef3f834ae28258bcb76e5a1629a8116d9d5fd94be7b",
+      "selectionSHA256": "b46ee747671c91004298500aa3539c4187d4b187fb6c80bb3ef981cd6c6a48d4",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 12
+      },
+      "selection": "grpc-backendtls-experimental",
+      "batch": 1,
+      "report": "grpc-backendtls-experimental-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-GRPC",
+      "channel": "experimental",
+      "subset": "core",
+      "selectedCases": {
+        "GRPCRouteHeaderMatching": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "ce8b334a50b38e8ddb306fb5214935c040cbc43855b659adbd1e51234efae777",
+      "sourceReceiptSHA256": "42291465a5d168af2006b67dd4037596ee9833499bd3abfbd497c6181d5662b2",
+      "suiteLogSHA256": "768dc3b41cf0675bee31059fe81ea982daa62402908808b22e26c99aecc4c0d1",
+      "selectionSHA256": "aacbdb4bc4dfc164a04cc869c885a2a63f2ff33fb994975eed2cae1c97353032",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 16
+      },
+      "selection": "grpc-cleanup-experimental",
+      "batch": 1,
+      "report": "grpc-cleanup-experimental-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-TLS",
+      "channel": "experimental",
+      "subset": "extended",
+      "selectedCases": {
+        "BackendTLSPolicyTLSRouteTerminate": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "3638d0a53e4c8a2b92a840c66b60d8ae1b01ced7e9c05fac447a782f154eb366",
+      "sourceReceiptSHA256": "3a6ea5d04bd5753879efa8c67c85c71608a173c03082fe06cda44d57c64b9ffc",
+      "suiteLogSHA256": "7299faabe4fd2a11c2dcc4291bbd6a6d36dca3061cf6f01f4ee463434eb4cdf0",
+      "selectionSHA256": "93261e855ab0d09e949a4414b97119545f0045ef93ef768059fcb3397bbbfb3f",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 17
+      },
+      "selection": "tls-backendtls-experimental",
+      "batch": 1,
+      "report": "tls-backendtls-experimental-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-TLS",
+      "channel": "standard",
+      "subset": "extended",
+      "selectedCases": {
+        "BackendTLSPolicyTLSRouteTerminate": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "6dea287dc5e45f5a674295197942cf64b76e17ecea9dd159f68ce5525f478127",
+      "sourceReceiptSHA256": "5bc14595affb85b311745870a267574cc359bb265fc0b0c1c709731cbc622e9e",
+      "suiteLogSHA256": "d8df98ed8d1b62ea0162c64c70e32c6a753f1f2dacc2ad38dc1492b908619a47",
+      "selectionSHA256": "7647b50580926e3560b8341b0c3b3ba79e2c3368df7ddae6f68771d61313b681",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 17
+      },
+      "selection": "tls-backendtls-standard",
+      "batch": 1,
+      "report": "tls-backendtls-standard-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-TLS",
+      "channel": "experimental",
+      "subset": "core",
+      "selectedCases": {
+        "TLSRouteHostnameIntersection": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "4be4b245a0abc9b1e9a5192ac96e16ed04db5cfb0ebe352f5d6e8e98f2770ce1",
+      "sourceReceiptSHA256": "b798a66cc31895e9fe6ff110483dfd6aae42f3e32245e4dded17666afecfa6fd",
+      "suiteLogSHA256": "8c0f3275904dee00a948975c9948bb2f356a765be89b33f769852abcfab6561e",
+      "selectionSHA256": "16b8218fd9817bc07ad3080771ab640cec7c66c44668705786d7116642b481d5",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 20
+      },
+      "selection": "tls-hostname-experimental",
+      "batch": 1,
+      "report": "tls-hostname-experimental-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-UDP",
+      "channel": "standard",
+      "subset": "core",
+      "selectedCases": {
+        "UDPRouteParentRefAttachAllListeners": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "42c617576a96864aac7be468df04f5d6cebf1460af83426843fcafb246babb60",
+      "sourceReceiptSHA256": "af9706e310987c6da6046e7412f0eee75e8fd85d357600f6c97f576aea1922d5",
+      "suiteLogSHA256": "cd240fa4179ef5bc987c34758bd24410bf55c2ee717ff3d6f60c45c98f9ceb3f",
+      "selectionSHA256": "6d0b26464d38db914e02d35653f31ea2275a9ebdf2f035b733d24f458ff92ab9",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 20
+      },
+      "selection": "udp-standard",
+      "batch": 1,
+      "report": "udp-standard-1.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-HTTP",
+      "channel": "experimental",
+      "subset": "extended",
+      "selectedCases": {
+        "BackendTLSPolicyConflictResolution": "FAIL",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "PASS"
+      },
+      "upstreamExit": 1,
+      "upstreamReportSHA256": "8206c814752293a51786ced3a9ad9f48e5e79fd41a3aa7b02cf26113094b67a0",
+      "sourceReceiptSHA256": "d474385abec094d50c6e745b2e10f1c1f908fb907820382995340033f291a946",
+      "suiteLogSHA256": "f08e30a3e022f16017ccd86002f12f008dc0f423091b9c505d349230fae66be7",
+      "selectionSHA256": "c41d879ec980d51ef60d21017af6e622a3e1d5d2688125ca77914cf6046b8b75",
+      "officialStatistics": {
+        "Failed": 1,
+        "Passed": 1,
+        "Skipped": 62
+      },
+      "selection": "backendtls-experimental",
+      "batch": 3,
+      "report": "backendtls-experimental-3.yaml",
+      "workerExit": 1,
+      "fixtureExit": 1,
+      "caseLauncherExit": 1
+    },
+    {
+      "profile": "GATEWAY-HTTP",
+      "channel": "standard",
+      "subset": "core",
+      "selectedCases": {
+        "HTTPRouteHostnameIntersection": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "1d59ad877895b37b3feb28fb25db4085881eeb2ec42941bfe424fb62f929057a",
+      "sourceReceiptSHA256": "ac085243d0ddc47bce76c114199b927c924f8a4884a74e78837bb79cf9698a58",
+      "suiteLogSHA256": "9bed9b455115e288dbc671056ff94310a899048c639ba0a601205b41a8d4324a",
+      "selectionSHA256": "5139dba110472a92647c708b2e58acf0498022f1600df37b6dfe48e1d4d8a3f3",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 39
+      },
+      "selection": "http-hostname-standard",
+      "batch": 3,
+      "report": "http-hostname-standard-3.yaml",
+      "workerExit": 0,
+      "fixtureExit": 0,
+      "caseLauncherExit": 0
+    },
+    {
+      "profile": "GATEWAY-HTTP",
+      "channel": "standard",
+      "subset": "extended",
+      "selectedCases": {
+        "HTTPRouteRequestMirror": "PASS",
+        "HTTPRouteRequestMultipleMirrors": "PASS",
+        "HTTPRouteRequestPercentageMirror": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "56a258d3970742ace711ca35f136434068e15e330f5e92691a94fc86a6e366ab",
+      "sourceReceiptSHA256": "51188764f329851713cbe8e5eb340d9ffa495f6ebe18a999b2636cdb84d38765",
+      "suiteLogSHA256": "e7a22131cedda23fe3377ad35f6d87b9480bbd1399ebbcd588cfc72472b15966",
+      "selectionSHA256": "5344bf338ac0d6655457a288eac3026b625674e46f37f6e334b6c1cc6bd6854c",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 3,
+        "Skipped": 60
+      },
+      "selection": "request-mirror",
+      "report": "request-mirror-standard.yaml",
+      "fixtureExit": 0
+    },
+    {
+      "profile": "GATEWAY-HTTP",
+      "channel": "experimental",
+      "subset": "extended",
+      "selectedCases": {
+        "HTTPRouteRequestMirror": "PASS",
+        "HTTPRouteRequestMultipleMirrors": "PASS",
+        "HTTPRouteRequestPercentageMirror": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamReportSHA256": "44618c0225d2d2ecce11d7b8bc51cbd208134274297834a79835c783c27b17a6",
+      "sourceReceiptSHA256": "b26c6637b4ca662ffd01f67689a0040d1ce60b78e7e7dcf64f31c61787581b25",
+      "suiteLogSHA256": "17874655eee895e78ff047b3c6f906a110f5dda051eea70f4f69c6002a755cfa",
+      "selectionSHA256": "5420ccb020d33cac68c4b102273a03f9f6e3064b54187308c74ebe7aab5e423c",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 3,
+        "Skipped": 61
+      },
+      "selection": "request-mirror",
+      "report": "request-mirror-experimental.yaml",
+      "fixtureExit": 0
+    }
+  ],
+  "attemptsWithoutReport": [
+    {
+      "batch": 1,
+      "selection": "backendtls-experimental",
+      "outcome": "scratch-capacity",
+      "workerExit": 1
+    },
+    {
+      "batch": 1,
+      "selection": "http-hostname-standard",
+      "outcome": "No upstream report",
+      "workerExit": 1
+    },
+    {
+      "batch": 1,
+      "selection": "udp-experimental",
+      "outcome": "No replay selected",
+      "workerExit": 0
+    },
+    {
+      "batch": 2,
+      "selection": "backendtls-experimental",
+      "outcome": "machine-lock",
+      "workerExit": 1
+    },
+    {
+      "batch": 2,
+      "selection": "http-hostname-standard",
+      "outcome": "machine-lock",
+      "workerExit": 1
+    }
+  ],
+  "scope": "Scoped local replays with the same product revisions and pinned upstream executable. Original full-profile outcomes remain recorded separately."
+}

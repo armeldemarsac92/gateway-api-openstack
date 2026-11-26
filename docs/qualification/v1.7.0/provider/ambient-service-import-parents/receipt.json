@@ -1,0 +1,1326 @@
+{
+  "gatewayAPIVersion": "v1.7.0",
+  "mcsVersion": "v0.5.2",
+  "istioVersion": "1.31.0",
+  "controller": {
+    "sourceRevision": "be7ec0bd26c5d4c1ebd9ccbda2ee6fe663f42455",
+    "manifestDigest": "sha256:30b8d641b7aa902aee7fd7e6e25396eca9eb3d655a593f116f6f346f913c29f5",
+    "managerSHA256": "d066bf7af7399a5aa560138fdf53e2bb53f3528694b5266c968fb6c6a9f3ec87"
+  },
+  "pilot": {
+    "sourcePackage": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+    "istioTree": "0a438180e12df1f42a81cab18364956addbc5e6e",
+    "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
+    "manifestDigest": "sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+    "archiveSHA256": "45aaf310b52740321d479c67ec204231da805a84a1fe214f6dce3637711b6bd5",
+    "build": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45743103190"
+  },
+  "channels": {
+    "standard": {
+      "published": {
+        "passed": true,
+        "pilotSource": "953e8af367342ea0b230f6f98e99f919aa82372e",
+        "pilotImage": {
+          "image": "localhost/hibiscus-pilot:953e8af36734",
+          "imageID": "sha256:405f70c7e95d72ed6d7c1a06ea37ec3cf293b70038cbf090c96f2192ed814127",
+          "ready": true
+        },
+        "calls": {
+          "beforeRoute": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "unenrolled": {
+            "core": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                },
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                }
+              ]
+            }
+          },
+          "withRoute": {
+            "redirect": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "default": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          }
+        },
+        "gatewayAPIBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "projection": {
+          "ownerUIDMatches": true,
+          "ownerVersion": "multicluster.x-k8s.io/v1beta1",
+          "hosts": [
+            "catalog.mcs-producer.svc.clusterset.local"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "number": 80,
+              "protocol": "HTTP"
+            }
+          ],
+          "waypoint": "service-waypoint",
+          "provider": "mcs-qualification",
+          "actualEndpoints": 1
+        },
+        "cloudCatalogRequests": {
+          "identity": 1,
+          "versionDiscovery": 2,
+          "unexpected": 0
+        },
+        "guestToolsSHA256": {
+          "probe.py": "3c63fc503eca47c2c0a6633c47c21a1352e84e1420fd5f2c6c04ed46333b971a",
+          "cloud_catalog.py": "8641374bd52b95fbb4be71e9a295d845b6e4d98fbf7320fe5a67cc8c3f5d1a97",
+          "guest-run.sh": "ee72ca9004525cfac8d7d50440d1a988146dbf34f44ff8d9b70179d4eae4a956"
+        },
+        "importParent": null,
+        "originalSHA256": "85df0623610df4c8ed9bf75a8323048c855a59594eaabe8bfaed151d6b5ee3f0"
+      },
+      "candidate": {
+        "passed": true,
+        "pilotSource": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+        "pilotImage": {
+          "image": "localhost/hibiscus-pilot:82213f2b4cf5",
+          "imageID": "sha256:623dd3ef54556775a470f5b0605daf586688d7dfc20fe8d33a48623118f0ccaa",
+          "ready": true
+        },
+        "calls": {
+          "beforeRoute": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "unenrolled": {
+            "core": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                },
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                }
+              ]
+            }
+          },
+          "withRoute": {
+            "redirect": {
+              "expectedOrigin": "override-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "override-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "override-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "default": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterRouteDeletion": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterSliceDeletion": {
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [
+                    "503"
+                  ],
+                  "origin": [],
+                  "host": [],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "503"
+                  ],
+                  "origin": [],
+                  "host": [],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterSliceRestoration": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterOptOut": {
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                },
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          }
+        },
+        "gatewayAPIBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "projection": {
+          "ownerUIDMatches": true,
+          "ownerVersion": "multicluster.x-k8s.io/v1beta1",
+          "hosts": [
+            "catalog.mcs-producer.svc.clusterset.local"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "number": 80,
+              "protocol": "HTTP"
+            }
+          ],
+          "waypoint": "service-waypoint",
+          "provider": "mcs-qualification",
+          "actualEndpoints": 1
+        },
+        "cloudCatalogRequests": {
+          "identity": 1,
+          "versionDiscovery": 2,
+          "unexpected": 0
+        },
+        "guestToolsSHA256": {
+          "probe.py": "3c63fc503eca47c2c0a6633c47c21a1352e84e1420fd5f2c6c04ed46333b971a",
+          "cloud_catalog.py": "8641374bd52b95fbb4be71e9a295d845b6e4d98fbf7320fe5a67cc8c3f5d1a97",
+          "guest-run.sh": "ee72ca9004525cfac8d7d50440d1a988146dbf34f44ff8d9b70179d4eae4a956"
+        },
+        "importParent": {
+          "controller": "istio.io/gateway-controller",
+          "parentRef": {
+            "group": "multicluster.x-k8s.io",
+            "kind": "ServiceImport",
+            "name": "catalog",
+            "port": 80
+          },
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "ResolvedWaypoints": "True/ResolvedWaypoints"
+          }
+        },
+        "originalSHA256": "fb68b42a356e20789d740ed194c00306c2e4110b52986dbd2b058ec92e5fd356"
+      }
+    },
+    "experimental": {
+      "published": {
+        "passed": true,
+        "pilotSource": "953e8af367342ea0b230f6f98e99f919aa82372e",
+        "pilotImage": {
+          "image": "localhost/hibiscus-pilot:953e8af36734",
+          "imageID": "sha256:405f70c7e95d72ed6d7c1a06ea37ec3cf293b70038cbf090c96f2192ed814127",
+          "ready": true
+        },
+        "calls": {
+          "beforeRoute": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "unenrolled": {
+            "core": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                },
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                }
+              ]
+            }
+          },
+          "withRoute": {
+            "redirect": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "default": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          }
+        },
+        "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "projection": {
+          "ownerUIDMatches": true,
+          "ownerVersion": "multicluster.x-k8s.io/v1beta1",
+          "hosts": [
+            "catalog.mcs-producer.svc.clusterset.local"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "number": 80,
+              "protocol": "HTTP"
+            }
+          ],
+          "waypoint": "service-waypoint",
+          "provider": "mcs-qualification",
+          "actualEndpoints": 1
+        },
+        "cloudCatalogRequests": {
+          "identity": 1,
+          "versionDiscovery": 2,
+          "unexpected": 0
+        },
+        "guestToolsSHA256": {
+          "probe.py": "3c63fc503eca47c2c0a6633c47c21a1352e84e1420fd5f2c6c04ed46333b971a",
+          "cloud_catalog.py": "8641374bd52b95fbb4be71e9a295d845b6e4d98fbf7320fe5a67cc8c3f5d1a97",
+          "guest-run.sh": "ee72ca9004525cfac8d7d50440d1a988146dbf34f44ff8d9b70179d4eae4a956"
+        },
+        "importParent": null,
+        "originalSHA256": "100af2b3e542896bee0ba3648624603f2de6a3bbf1d9f04a1ab026dc122fc01b"
+      },
+      "candidate": {
+        "passed": true,
+        "pilotSource": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+        "pilotImage": {
+          "image": "localhost/hibiscus-pilot:82213f2b4cf5",
+          "imageID": "sha256:623dd3ef54556775a470f5b0605daf586688d7dfc20fe8d33a48623118f0ccaa",
+          "ready": true
+        },
+        "calls": {
+          "beforeRoute": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "unenrolled": {
+            "core": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                },
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                }
+              ]
+            }
+          },
+          "withRoute": {
+            "redirect": {
+              "expectedOrigin": "override-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "override-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "override-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "default": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterRouteDeletion": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterSliceDeletion": {
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [
+                    "503"
+                  ],
+                  "origin": [],
+                  "host": [],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "503"
+                  ],
+                  "origin": [],
+                  "host": [],
+                  "transportError": null
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterSliceRestoration": {
+            "import": {
+              "expectedOrigin": "import-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "import-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          },
+          "afterOptOut": {
+            "import": {
+              "expectedOrigin": null,
+              "observations": [
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                },
+                {
+                  "code": [],
+                  "origin": [],
+                  "host": [],
+                  "transportError": "timed out"
+                }
+              ]
+            },
+            "homonymousService": {
+              "expectedOrigin": "core-origin",
+              "observations": [
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                },
+                {
+                  "code": [
+                    "200"
+                  ],
+                  "origin": [
+                    "core-origin"
+                  ],
+                  "host": [
+                    "catalog.mcs-producer.svc.clusterset.local"
+                  ],
+                  "transportError": null
+                }
+              ]
+            }
+          }
+        },
+        "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "projection": {
+          "ownerUIDMatches": true,
+          "ownerVersion": "multicluster.x-k8s.io/v1beta1",
+          "hosts": [
+            "catalog.mcs-producer.svc.clusterset.local"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "number": 80,
+              "protocol": "HTTP"
+            }
+          ],
+          "waypoint": "service-waypoint",
+          "provider": "mcs-qualification",
+          "actualEndpoints": 1
+        },
+        "cloudCatalogRequests": {
+          "identity": 1,
+          "versionDiscovery": 2,
+          "unexpected": 0
+        },
+        "guestToolsSHA256": {
+          "probe.py": "3c63fc503eca47c2c0a6633c47c21a1352e84e1420fd5f2c6c04ed46333b971a",
+          "cloud_catalog.py": "8641374bd52b95fbb4be71e9a295d845b6e4d98fbf7320fe5a67cc8c3f5d1a97",
+          "guest-run.sh": "ee72ca9004525cfac8d7d50440d1a988146dbf34f44ff8d9b70179d4eae4a956"
+        },
+        "importParent": {
+          "controller": "istio.io/gateway-controller",
+          "parentRef": {
+            "group": "multicluster.x-k8s.io",
+            "kind": "ServiceImport",
+            "name": "catalog",
+            "port": 80
+          },
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "ResolvedWaypoints": "True/ResolvedWaypoints"
+          }
+        },
+        "originalSHA256": "95434f816e2e32391215754c34a935c235a3f9328211eab5ee714a1545a3a1dc"
+      }
+    }
+  }
+}

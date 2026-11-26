@@ -1,0 +1,547 @@
+{
+  "case": "ListenerSetAllowedRoutesNamespaces",
+  "channel": "standard",
+  "limits": [
+    "The official report and exit are unchanged. A later API observation cannot determine the official verdict.",
+    "The single post-DELETED GET is the first observer confirmation, with no polling to find the exact deletion time.",
+    "Policy links require exact UID and namespace, and publication timestamps witness activated graphs.",
+    "Sparse sibling HTTP samples cover only the observed overlap. The final sample can be in flight at withdrawal.",
+    "Isolated native fixture evidence only, with opt-in enabled for this single run."
+  ],
+  "official": {
+    "controllerSource": "0e729b171594b058f09783aede6b7221eb62e85d",
+    "eligible": [
+      "ListenerSetAllowedRoutesNamespaces"
+    ],
+    "fixtureExit": 0,
+    "observedCases": {
+      "ListenerSetAllowedRoutesNamespaces": "PASS"
+    },
+    "officialSubset": {
+      "result": "partial",
+      "skippedTests": [
+        "BackendTLSPolicy",
+        "BackendTLSPolicyConflictResolution",
+        "BackendTLSPolicyInvalidCACertificateRef",
+        "BackendTLSPolicyInvalidKind",
+        "BackendTLSPolicyObservedGenerationBump",
+        "BackendTLSPolicyPreserveForeignStatus",
+        "BackendTLSPolicySANValidation",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayFrontendInvalidDefaultClientCertificateValidation",
+        "GatewayHTTPListenerIsolation",
+        "GatewayInfrastructureMetadata",
+        "GatewayInvalidFrontendClientCertificateValidation",
+        "GatewayInvalidParametersRef",
+        "GatewayInvalidTLSBackendConfiguration",
+        "GatewayOptionalAddressValue",
+        "GatewayStaticAddresses",
+        "GatewayTLSBackendClientCertificate",
+        "GatewayWithAttachedRoutesWithPort8080",
+        "HTTPRoute303Redirect",
+        "HTTPRoute307Redirect",
+        "HTTPRoute308Redirect",
+        "HTTPRouteBackendProtocolH2C",
+        "HTTPRouteBackendProtocolWebSocket",
+        "HTTPRouteBackendRequestHeaderModifier",
+        "HTTPRouteBackendURLRewrite",
+        "HTTPRouteCORS",
+        "HTTPRouteHTTPSListenerDetectMisdirectedRequests",
+        "HTTPRouteInvalidParentRefSectionNameNotMatchingPort",
+        "HTTPRouteListenerPortMatching",
+        "HTTPRouteMethodMatching",
+        "HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection",
+        "HTTPRouteNamedRule",
+        "HTTPRouteQueryParamMatching",
+        "HTTPRouteRedirectPath",
+        "HTTPRouteRedirectPort",
+        "HTTPRouteRedirectPortAndScheme",
+        "HTTPRouteRedirectScheme",
+        "HTTPRouteRequestHeaderModifierBackendWeights",
+        "HTTPRouteRequestMirror",
+        "HTTPRouteRequestMultipleMirrors",
+        "HTTPRouteRequestPercentageMirror",
+        "HTTPRouteResponseHeaderModifier",
+        "HTTPRouteRetry",
+        "HTTPRouteRetryConnectionError",
+        "HTTPRouteRetryWithBackendTimeout",
+        "HTTPRouteRetryWithRequestTimeout",
+        "HTTPRouteRewriteHost",
+        "HTTPRouteRewritePath",
+        "HTTPRouteTimeoutBackendRequest",
+        "HTTPRouteTimeoutRequest",
+        "ListenerSetAllowedNamespaceNone",
+        "ListenerSetAllowedNamespaceSame",
+        "ListenerSetAllowedNamespaceSelector",
+        "ListenerSetDefaultNotAllowed",
+        "ListenerSetDualParentRefIndependence",
+        "ListenerSetGatewayParentSectionNameNotFound",
+        "ListenerSetHTTPRouting",
+        "ListenerSetHostnameConflict",
+        "ListenerSetProtocolConflict",
+        "ListenerSetReferenceGrant",
+        "ListenerSetRouteStatusScopedToParentRef"
+      ],
+      "statistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 62
+      },
+      "supportedFeatures": [
+        "BackendTLSPolicy",
+        "BackendTLSPolicySANValidation",
+        "GatewayAddressEmpty",
+        "GatewayBackendClientCertificate",
+        "GatewayFrontendClientCertificateValidation",
+        "GatewayFrontendClientCertificateValidationInsecureFallback",
+        "GatewayHTTPListenerIsolation",
+        "GatewayHTTPSListenerDetectMisdirectedRequests",
+        "GatewayInfrastructure",
+        "GatewayPort8080",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "GatewayStaticAddresses",
+        "HTTPRoute303RedirectStatusCode",
+        "HTTPRoute307RedirectStatusCode",
+        "HTTPRoute308RedirectStatusCode",
+        "HTTPRouteBackendProtocolH2C",
+        "HTTPRouteBackendProtocolWebSocket",
+        "HTTPRouteBackendRequestHeaderModification",
+        "HTTPRouteBackendTimeout",
+        "HTTPRouteBackendURLRewrite",
+        "HTTPRouteCORS",
+        "HTTPRouteHostRewrite",
+        "HTTPRouteMethodMatching",
+        "HTTPRouteNamedRouteRule",
+        "HTTPRouteParentRefPort",
+        "HTTPRoutePathRedirect",
+        "HTTPRoutePathRewrite",
+        "HTTPRoutePortRedirect",
+        "HTTPRouteQueryParamMatching",
+        "HTTPRouteRequestMirror",
+        "HTTPRouteRequestMultipleMirrors",
+        "HTTPRouteRequestPercentageMirror",
+        "HTTPRouteRequestTimeout",
+        "HTTPRouteResponseHeaderModification",
+        "HTTPRouteRetryCodes",
+        "HTTPRouteRetryConnectionError",
+        "HTTPRouteSchemeRedirect",
+        "ListenerSet"
+      ],
+      "unsupportedFeatures": [
+        "ClusterTrustBundle",
+        "GatewayAddressRoutability",
+        "GatewayAddressRoutabilityCluster",
+        "GatewayListenerFilters",
+        "HTTPRouteDestinationPortMatching"
+      ]
+    },
+    "providerSource": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+    "receiptSHA256": "a2b54afce37256ae720838ce59aed3e7819006101bcb26770ca6fffc013ffab2",
+    "reportProduced": true,
+    "reportSHA256": "efecbbd92a757ef83e7be8f1d6fcc1245f96a1b08311417563da7a7471c0c1fa",
+    "upstreamExit": 0
+  },
+  "provenance": {
+    "closedListenerOptIn": true,
+    "controller": "0e729b171594b058f09783aede6b7221eb62e85d",
+    "observedCapability": true,
+    "octavia": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+    "octaviaLib": "735564bb8701e13495cc79554170ab65ceb1a811",
+    "rawEvidenceSHA256": {
+      "cell.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "inputs.json": "9d0dcf60b8adf14676b0728d5e4e24fe9371238c3dc0735cfe6e54a59aea8d67",
+      "official-result.json": "662b1546b65c92fc2997215a68964ee4fdaeedda69e7e5cdd943ecc46582d917",
+      "preflight.json": "5e8b18402066d8f878c7d6d308e2a11de188f6cf6a3c58dd32f28390656721e1",
+      "selection.json": "b95b6db4962e38a37fa175fbb6972fa7c4c2c7cd05ed0f86362c52e69544218f",
+      "standard/extended-report.yaml": "efecbbd92a757ef83e7be8f1d6fcc1245f96a1b08311417563da7a7471c0c1fa",
+      "standard/extended.log": "4f0e06446500706be9884fb27d0c60fc6967c127c4ed0663eb8b3f936cccd2c8",
+      "standard/listenerset-watch.json": "c23b72396ff93603c7606a15ce24ddd60f8ad438fd0a97ba44bc2511af030bd2",
+      "standard/native-mutations.json": "40b5230fcd1a56ca338b1160ebfe0d167b6f745ee3579a58af209313fa25f8b7",
+      "standard/native-reloads.json": "c76ee3199e44bdb3ed003da3f8158bc6a7e11d5cbc3bdf6a1b4891a6563e05dc",
+      "standard/receipt.json": "a2b54afce37256ae720838ce59aed3e7819006101bcb26770ca6fffc013ffab2",
+      "standard/regional-requests.json": "2bb16f304582a66701e6a3a88921112dc6f92113d73d45eeaff8435fae45531d"
+    },
+    "upstream": {
+      "bundles": {
+        "experimental": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "standard": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1"
+      },
+      "conformanceSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+      "registrySHA256": "9e636e9da4db8ba2cb7058860786b5f55442db792b0dbe872ce2c348c81632e0",
+      "source": "e26d183dbbc1bb782b78addbd26faba03955c152"
+    }
+  },
+  "provider": {
+    "lastPublishedBeforeDelete": [
+      {
+        "at": "2026-11-26T06:53:08.322+00:00",
+        "enabled": true,
+        "listener": "ccd704138a068c3a",
+        "loadBalancer": "e488c8b5dcd0f405",
+        "port": 80,
+        "sibling": [
+          {
+            "enabled": true,
+            "id": "342e7f0f3647b53f",
+            "status": "PENDING_UPDATE"
+          },
+          {
+            "enabled": true,
+            "id": "655d9384eaa73af2",
+            "status": "PENDING_UPDATE"
+          }
+        ],
+        "status": "PENDING_UPDATE",
+        "target": [
+          {
+            "enabled": true,
+            "id": "036686f06b167dcf",
+            "status": "PENDING_UPDATE"
+          }
+        ]
+      }
+    ],
+    "matchedConditionalRemovalCount": 1,
+    "matchedConditionalRemovals": [
+      {
+        "at": "2026-11-26T06:53:14.931+00:00",
+        "listener": "ccd704138a068c3a",
+        "loadBalancer": "e488c8b5dcd0f405",
+        "policy": "036686f06b167dcf",
+        "policyExists": false,
+        "projectMatchesFixture": true,
+        "requireListenerDisabled": false,
+        "rulesExist": false
+      }
+    ],
+    "matchedRequestCount": 2,
+    "matchedRequests": [
+      {
+        "at": "2026-11-26T06:53:14.040176+00:00",
+        "method": "PUT",
+        "path": "/octavia/v2.0/lbaas/l7policies/@036686f06b167dcf",
+        "status": 200
+      },
+      {
+        "at": "2026-11-26T06:53:14.931432+00:00",
+        "method": "POST",
+        "path": "/octavia/v2.0/lbaas/l7policies/@036686f06b167dcf/conditional_removal",
+        "status": 202
+      }
+    ],
+    "matchingMethod": "exact route namespace and UID in active native graph, scoped to the test Gateway",
+    "publicationTransitionCount": 3,
+    "publishedDuringDelete": [
+      {
+        "at": "2026-11-26T06:53:09.397+00:00",
+        "enabled": true,
+        "listener": "ccd704138a068c3a",
+        "loadBalancer": "e488c8b5dcd0f405",
+        "port": 80,
+        "sibling": [
+          {
+            "enabled": true,
+            "id": "342e7f0f3647b53f",
+            "status": "ACTIVE"
+          },
+          {
+            "enabled": true,
+            "id": "655d9384eaa73af2",
+            "status": "ACTIVE"
+          }
+        ],
+        "status": "ACTIVE",
+        "target": [
+          {
+            "enabled": true,
+            "id": "036686f06b167dcf",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "at": "2026-11-26T06:53:14.334+00:00",
+        "enabled": true,
+        "listener": "ccd704138a068c3a",
+        "loadBalancer": "e488c8b5dcd0f405",
+        "port": 80,
+        "sibling": [
+          {
+            "enabled": true,
+            "id": "342e7f0f3647b53f",
+            "status": "ACTIVE"
+          },
+          {
+            "enabled": true,
+            "id": "655d9384eaa73af2",
+            "status": "ACTIVE"
+          }
+        ],
+        "status": "ACTIVE",
+        "target": [
+          {
+            "enabled": false,
+            "id": "036686f06b167dcf",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "at": "2026-11-26T06:53:15.826+00:00",
+        "enabled": true,
+        "listener": "ccd704138a068c3a",
+        "loadBalancer": "e488c8b5dcd0f405",
+        "port": 80,
+        "sibling": [
+          {
+            "enabled": true,
+            "id": "342e7f0f3647b53f",
+            "status": "ACTIVE"
+          },
+          {
+            "enabled": true,
+            "id": "655d9384eaa73af2",
+            "status": "ACTIVE"
+          }
+        ],
+        "status": "ACTIVE",
+        "target": []
+      }
+    ],
+    "sharedHTTP80ListenerIDs": [
+      "ccd704138a068c3a"
+    ],
+    "siblingPolicyIDs": [
+      "342e7f0f3647b53f",
+      "655d9384eaa73af2"
+    ],
+    "targetHTTP80ListenerIDs": [
+      "ccd704138a068c3a"
+    ],
+    "targetPolicyIDs": [
+      "036686f06b167dcf"
+    ]
+  },
+  "sibling": {
+    "apiDeletionTimestamp": "2026-11-26T06:53:45Z",
+    "deletedWatchEvent": {
+      "deletingAt": "2026-11-26T06:53:45Z",
+      "event": "DELETED",
+      "finalizers": [
+        "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d",
+        "gateway-api-openstack.github.io/httproute-binding-9c0d66d4745d-4954a9c99b73-h-400ad814ccd7"
+      ],
+      "observedAt": "2026-11-26T06:53:48.675403+00:00",
+      "parentConditions": [
+        {
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        },
+        {
+          "observedGeneration": 1,
+          "reason": "ResolvedRefs",
+          "status": "True",
+          "type": "ResolvedRefs"
+        }
+      ],
+      "revision": "1370",
+      "uid": "cdf84adb-2c6f-4ab4-a376-6389cce840db"
+    },
+    "firstFinalizersClearedEvent": null,
+    "firstReadAfterDeletedEvent": null,
+    "firstTerminatingEvent": {
+      "deletingAt": "2026-11-26T06:53:45Z",
+      "event": "MODIFIED",
+      "finalizers": [
+        "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d",
+        "gateway-api-openstack.github.io/httproute-binding-9c0d66d4745d-4954a9c99b73-h-400ad814ccd7"
+      ],
+      "observedAt": "2026-11-26T06:53:45.430385+00:00",
+      "parentConditions": [
+        {
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        },
+        {
+          "observedGeneration": 1,
+          "reason": "ResolvedRefs",
+          "status": "True",
+          "type": "ResolvedRefs"
+        }
+      ],
+      "revision": "1349",
+      "uid": "cdf84adb-2c6f-4ab4-a376-6389cce840db"
+    },
+    "lastParentConditionsBeforeDelete": [
+      {
+        "observedGeneration": 1,
+        "reason": "Accepted",
+        "status": "True",
+        "type": "Accepted"
+      },
+      {
+        "observedGeneration": 1,
+        "reason": "ResolvedRefs",
+        "status": "True",
+        "type": "ResolvedRefs"
+      }
+    ],
+    "observedAfterOfficialDeadline": null,
+    "observedUIDs": [
+      "cdf84adb-2c6f-4ab4-a376-6389cce840db"
+    ],
+    "secondsFromLoggedDeleteToObservedNotFound": null,
+    "uid": "cdf84adb-2c6f-4ab4-a376-6389cce840db",
+    "upstreamDeleteLoggedAt": null,
+    "watchError": null,
+    "watchStoppedAt": "2026-11-26T06:53:48.675436+00:00"
+  },
+  "siblingTraffic": {
+    "backend": "infra-backend-v1",
+    "expectedBackendWithinObservedOverlap": 3,
+    "host": "listener-set-listener-allowed-routes-all.com",
+    "path": "/route-in-same-namespace",
+    "samples": [
+      {
+        "end": "2026-11-26T06:53:08.611632+00:00",
+        "expectedBackend": true,
+        "siblingUID": "cdf84adb-2c6f-4ab4-a376-6389cce840db",
+        "start": "2026-11-26T06:53:08.609039+00:00",
+        "status": 200
+      },
+      {
+        "end": "2026-11-26T06:53:13.616569+00:00",
+        "expectedBackend": true,
+        "siblingUID": "cdf84adb-2c6f-4ab4-a376-6389cce840db",
+        "start": "2026-11-26T06:53:13.612253+00:00",
+        "status": 200
+      },
+      {
+        "end": "2026-11-26T06:53:18.629479+00:00",
+        "expectedBackend": true,
+        "siblingUID": "cdf84adb-2c6f-4ab4-a376-6389cce840db",
+        "start": "2026-11-26T06:53:18.619594+00:00",
+        "status": 200
+      }
+    ],
+    "samplesWithinObservedOverlap": 3
+  },
+  "target": {
+    "apiDeletionTimestamp": "2026-11-26T06:53:08Z",
+    "deletedWatchEvent": {
+      "deletingAt": "2026-11-26T06:53:08Z",
+      "event": "DELETED",
+      "finalizers": [
+        "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d",
+        "gateway-api-openstack.github.io/httproute-binding-9c0d66d4745d-4954a9c99b73-h-e4b651396fe4"
+      ],
+      "observedAt": "2026-11-26T06:53:20.214005+00:00",
+      "parentConditions": [
+        {
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        },
+        {
+          "observedGeneration": 1,
+          "reason": "ResolvedRefs",
+          "status": "True",
+          "type": "ResolvedRefs"
+        }
+      ],
+      "revision": "1263",
+      "uid": "17b65261-d111-4b08-87f1-2ac6b736e667"
+    },
+    "firstFinalizersClearedEvent": null,
+    "firstReadAfterDeletedEvent": {
+      "end": "2026-11-26T06:53:20.288002+00:00",
+      "exit": 1,
+      "notFound": true,
+      "start": "2026-11-26T06:53:20.214110+00:00",
+      "uid": "17b65261-d111-4b08-87f1-2ac6b736e667"
+    },
+    "firstTerminatingEvent": {
+      "deletingAt": "2026-11-26T06:53:08Z",
+      "event": "MODIFIED",
+      "finalizers": [
+        "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d",
+        "gateway-api-openstack.github.io/httproute-binding-9c0d66d4745d-4954a9c99b73-h-e4b651396fe4"
+      ],
+      "observedAt": "2026-11-26T06:53:08.528643+00:00",
+      "parentConditions": [
+        {
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        },
+        {
+          "observedGeneration": 1,
+          "reason": "ResolvedRefs",
+          "status": "True",
+          "type": "ResolvedRefs"
+        }
+      ],
+      "revision": "1228",
+      "uid": "17b65261-d111-4b08-87f1-2ac6b736e667"
+    },
+    "lastParentConditionsBeforeDelete": [
+      {
+        "observedGeneration": 1,
+        "reason": "Accepted",
+        "status": "True",
+        "type": "Accepted"
+      },
+      {
+        "observedGeneration": 1,
+        "reason": "ResolvedRefs",
+        "status": "True",
+        "type": "ResolvedRefs"
+      }
+    ],
+    "observedAfterOfficialDeadline": false,
+    "observedUIDs": [
+      "17b65261-d111-4b08-87f1-2ac6b736e667"
+    ],
+    "secondsFromLoggedDeleteToObservedNotFound": 11.819,
+    "uid": "17b65261-d111-4b08-87f1-2ac6b736e667",
+    "upstreamDeleteLoggedAt": "2026-11-26T07:53:08.468828323+01:00",
+    "watchError": null,
+    "watchStoppedAt": "2026-11-26T06:53:20.288047+00:00"
+  },
+  "upstreamDeleteTimeoutSeconds": 30,
+  "upstreamReportedTargetStillPresent": false,
+  "upstreamRequests": {
+    "Cross-namespace_ListenerSet": {
+      "expected": 2,
+      "passed": 2,
+      "reported": 2,
+      "requestVerdicts": {
+        "0": "PASS",
+        "1": "PASS"
+      }
+    },
+    "Same-namespace_ListenerSet": {
+      "expected": 9,
+      "passed": 9,
+      "reported": 9,
+      "requestVerdicts": {
+        "0": "PASS",
+        "1": "PASS",
+        "2": "PASS",
+        "3": "PASS",
+        "4": "PASS",
+        "5": "PASS",
+        "6": "PASS",
+        "7": "PASS",
+        "8": "PASS"
+      }
+    }
+  }
+}
