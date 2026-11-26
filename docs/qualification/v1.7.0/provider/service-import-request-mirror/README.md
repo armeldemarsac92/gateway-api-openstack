@@ -17,6 +17,8 @@ An HTTPRoute sent its primary request to a core Service and used a rule-level Re
 | Experimental | Restored | HTTP | 8 | 4 | 4 | True/ResolvedRefs |
 | Experimental | Restored | GRPC | 8 | 4 | 4 | True/ResolvedRefs |
 
+The controller also checks the provenance of EndpointSlices shared by name with a core Service. A regression test removed the manager label from an ownerless imported slice while its import name and source cluster stayed in place. Backend resolution kept its remote address out of the local Service pool. The table records traffic in the separate grant lifecycle on the corrected build.
+
 With both grants present, each request reached its primary application once and exactly one imported endpoint received a copy. The HTTP grant withdrawal removed the HTTP mirror pool from the active policy. The primary continued replying and the independently authorized gRPC copy continued. Recreating the grant restored HTTP copies without editing either route.
 
 The signed Standard baseline returned all primary replies and recorded zero imported copies for either route. Both routes reported InvalidKind for the mirror destination.

@@ -401,12 +401,12 @@
             "ports": [
               {
                 "name": "http",
-                "port": 38417,
+                "port": 42843,
                 "protocol": "TCP"
               },
               {
                 "name": "grpc",
-                "port": 39835,
+                "port": 35509,
                 "protocol": "TCP"
               }
             ]
@@ -432,12 +432,12 @@
             "ports": [
               {
                 "name": "http",
-                "port": 37433,
+                "port": 35005,
                 "protocol": "TCP"
               },
               {
                 "name": "grpc",
-                "port": 42713,
+                "port": 34345,
                 "protocol": "TCP"
               }
             ]
@@ -463,12 +463,12 @@
             "ports": [
               {
                 "name": "http",
-                "port": 33031,
+                "port": 35079,
                 "protocol": "TCP"
               },
               {
                 "name": "grpc",
-                "port": 36043,
+                "port": 41379,
                 "protocol": "TCP"
               }
             ]
@@ -508,7 +508,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  39835
+                  35509
                 ]
               ],
               "mirrors": [
@@ -520,11 +520,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      42713
+                      34345
                     ],
                     [
                       "198.51.100.7",
-                      36043
+                      41379
                     ]
                   ]
                 }
@@ -536,7 +536,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  38417
+                  42843
                 ]
               ],
               "mirrors": [
@@ -548,11 +548,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      37433
+                      35005
                     ],
                     [
                       "198.51.100.7",
-                      33031
+                      35079
                     ]
                   ]
                 }
@@ -560,7 +560,7 @@
             }
           },
           "HAProxy": {
-            "configSHA256": "2bcd2b2ac544b6242f23a156e56aa9b12e7163d9c10ccd28eb166007f11b1e88",
+            "configSHA256": "618075c2cd74a676ecb267ed1cf62e02f3c357ce47e16861bef7ea8ae47d9a0e",
             "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
             "mirrorSocket": true
           },
@@ -613,7 +613,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  39835
+                  35509
                 ]
               ],
               "mirrors": [
@@ -625,11 +625,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      42713
+                      34345
                     ],
                     [
                       "198.51.100.7",
-                      36043
+                      41379
                     ]
                   ]
                 }
@@ -641,14 +641,14 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  38417
+                  42843
                 ]
               ],
               "mirrors": []
             }
           },
           "HAProxy": {
-            "configSHA256": "e535a827504ff033c7641dfad71338741b7dde15f84159776a08e0fedadb0da0",
+            "configSHA256": "920eff1fe58c29bb8ba8c5cb6f1b48d486209eab5ddef6a15688f474b439db48",
             "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
             "mirrorSocket": true
           },
@@ -701,7 +701,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  39835
+                  35509
                 ]
               ],
               "mirrors": [
@@ -713,11 +713,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      42713
+                      34345
                     ],
                     [
                       "198.51.100.7",
-                      36043
+                      41379
                     ]
                   ]
                 }
@@ -729,7 +729,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  38417
+                  42843
                 ]
               ],
               "mirrors": [
@@ -741,11 +741,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      37433
+                      35005
                     ],
                     [
                       "198.51.100.7",
-                      33031
+                      35079
                     ]
                   ]
                 }
@@ -753,7 +753,7 @@
             }
           },
           "HAProxy": {
-            "configSHA256": "993803cdaaab7eafba9cb4d68e5fc2c287e2176cd9604ebff1c452a393cd6bf8",
+            "configSHA256": "bb1a7115a705a4e1956e418b743028eb71ec2013f67ba5d3cfc82040e900c23a",
             "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
             "mirrorSocket": true
           },
@@ -880,12 +880,12 @@
         "GRPCRoute": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
       },
       "controller": {
-        "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
-        "configDigest": "sha256:fb3e591e05d8f909f210b57d4492af18bbb42700ab377cd216246fcd0a6331e4",
-        "ociArchiveSHA256": "0054b977d4f0bcfceacafe920c6a0fd508c11b582372ce4f343ac1462f8026ee",
-        "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede",
+        "manifestDigest": "sha256:1ec8120fec157962cb92c415aa71465c6be5559078f794ff00bc1c8e87480a0e",
+        "configDigest": "sha256:307c5b90e12f39f3c0278cece6b52af0c4c7e6ae45a6ac54595e37f5102182b0",
+        "ociArchiveSHA256": "4cef1f8f5902db919feb1dabf4f5c876b49cf24e1699ab393dc4ad9f67ae39c2",
+        "managerSHA256": "b15f07ef21909f499a0eea3fd35f6fe8237abd2d6364a74a86388655f7061669",
         "platform": "linux/amd64",
-        "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d"
+        "sourceRevision": "19258c824a1c2660d551a01335f8aeb836e2be7e"
       },
       "provider": {
         "octavia": {
@@ -899,7 +899,7 @@
           "installedFilesVerified": 24
         }
       },
-      "rawReceiptSHA256": "ba4309c0278e25eb8dd3e6a653c12a1887c884dc0737498484625ea276c68420"
+      "rawReceiptSHA256": "53614f5661f042ff072a7bfd780e4640ed3465cfb64bfe0f4bfb1a363db801a6"
     },
     "experimental": {
       "channel": "experimental",
@@ -965,12 +965,12 @@
             "ports": [
               {
                 "name": "http",
-                "port": 43115,
+                "port": 43647,
                 "protocol": "TCP"
               },
               {
                 "name": "grpc",
-                "port": 38123,
+                "port": 38139,
                 "protocol": "TCP"
               }
             ]
@@ -996,12 +996,12 @@
             "ports": [
               {
                 "name": "http",
-                "port": 44573,
+                "port": 44071,
                 "protocol": "TCP"
               },
               {
                 "name": "grpc",
-                "port": 42981,
+                "port": 32875,
                 "protocol": "TCP"
               }
             ]
@@ -1027,12 +1027,12 @@
             "ports": [
               {
                 "name": "http",
-                "port": 41019,
+                "port": 40821,
                 "protocol": "TCP"
               },
               {
                 "name": "grpc",
-                "port": 38539,
+                "port": 34927,
                 "protocol": "TCP"
               }
             ]
@@ -1072,7 +1072,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  38123
+                  38139
                 ]
               ],
               "mirrors": [
@@ -1084,11 +1084,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      42981
+                      32875
                     ],
                     [
                       "198.51.100.7",
-                      38539
+                      34927
                     ]
                   ]
                 }
@@ -1100,7 +1100,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  43115
+                  43647
                 ]
               ],
               "mirrors": [
@@ -1112,11 +1112,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      44573
+                      44071
                     ],
                     [
                       "198.51.100.7",
-                      41019
+                      40821
                     ]
                   ]
                 }
@@ -1124,7 +1124,7 @@
             }
           },
           "HAProxy": {
-            "configSHA256": "cb14f5cb3d1e414a532222a950c727b6bf70c07535779f85d5d8df13e04cf9cf",
+            "configSHA256": "1909498e75ca687b61df554d2ea6fb78e8e725b01433422955b816403423698d",
             "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
             "mirrorSocket": true
           },
@@ -1177,7 +1177,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  38123
+                  38139
                 ]
               ],
               "mirrors": [
@@ -1189,11 +1189,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      42981
+                      32875
                     ],
                     [
                       "198.51.100.7",
-                      38539
+                      34927
                     ]
                   ]
                 }
@@ -1205,14 +1205,14 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  43115
+                  43647
                 ]
               ],
               "mirrors": []
             }
           },
           "HAProxy": {
-            "configSHA256": "dc3e6cbb0c0f814b1482ed614a202821e2324799cef89868f74d81ddfccc4b18",
+            "configSHA256": "114be61820f10dea4bb7f6935fe07294444952bde56657319e8f08b12476cd63",
             "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
             "mirrorSocket": true
           },
@@ -1265,7 +1265,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  38123
+                  38139
                 ]
               ],
               "mirrors": [
@@ -1277,11 +1277,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      42981
+                      32875
                     ],
                     [
                       "198.51.100.7",
-                      38539
+                      34927
                     ]
                   ]
                 }
@@ -1293,7 +1293,7 @@
               "primaryMembers": [
                 [
                   "198.51.100.5",
-                  43115
+                  43647
                 ]
               ],
               "mirrors": [
@@ -1305,11 +1305,11 @@
                   "members": [
                     [
                       "198.51.100.6",
-                      44573
+                      44071
                     ],
                     [
                       "198.51.100.7",
-                      41019
+                      40821
                     ]
                   ]
                 }
@@ -1317,7 +1317,7 @@
             }
           },
           "HAProxy": {
-            "configSHA256": "a04784e2f864ac871fadc6274be8dd5ad184d689632bdfc424eccc50b5adcf0c",
+            "configSHA256": "ec66e915aa17c38049be2017223fe1f7fc607a6bd44cab0f7c23869b62aa0dbb",
             "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
             "mirrorSocket": true
           },
@@ -1444,12 +1444,12 @@
         "GRPCRoute": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
       },
       "controller": {
-        "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
-        "configDigest": "sha256:fb3e591e05d8f909f210b57d4492af18bbb42700ab377cd216246fcd0a6331e4",
-        "ociArchiveSHA256": "0054b977d4f0bcfceacafe920c6a0fd508c11b582372ce4f343ac1462f8026ee",
-        "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede",
+        "manifestDigest": "sha256:1ec8120fec157962cb92c415aa71465c6be5559078f794ff00bc1c8e87480a0e",
+        "configDigest": "sha256:307c5b90e12f39f3c0278cece6b52af0c4c7e6ae45a6ac54595e37f5102182b0",
+        "ociArchiveSHA256": "4cef1f8f5902db919feb1dabf4f5c876b49cf24e1699ab393dc4ad9f67ae39c2",
+        "managerSHA256": "b15f07ef21909f499a0eea3fd35f6fe8237abd2d6364a74a86388655f7061669",
         "platform": "linux/amd64",
-        "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d"
+        "sourceRevision": "19258c824a1c2660d551a01335f8aeb836e2be7e"
       },
       "provider": {
         "octavia": {
@@ -1463,7 +1463,42 @@
           "installedFilesVerified": 24
         }
       },
-      "rawReceiptSHA256": "5ff6b066f6d2f32224a7e69e969d37499b15d88ad5354b7bb1adc5f23a58ce75"
+      "rawReceiptSHA256": "1ef2b675970d1687cd1fa64153980c9f035df8af2b868998121cbac9ad1987d6"
+    }
+  },
+  "earlierMirrorCandidate": {
+    "controller": "b38312581f186c83a0f2969326dbc1191178a74d",
+    "qualificationSHA256": "85db893bc52fd97d39ad8587d469e92b7fcb0b721241fd050fb61f7dc6e6ffc2"
+  },
+  "sliceProvenance": {
+    "confirmedAt": "controller backend resolution and route reconciliation",
+    "partialInput": "An ownerless slice retains the MCS import name and source cluster but loses its manager label.",
+    "expectedLocalMembership": "Only the local Service endpoint remains in its pool.",
+    "regressionCases": {
+      "model": {
+        "logSHA256": "40743ddb3953a0a89ae819608d9a73df699b2621ad0769459f83b7b3796bf52d",
+        "scope": "recording provider or model"
+      },
+      "standardMirrorAndTLS": {
+        "logSHA256": "6f7bca71b9150c85b8b809f4925257f43e86aa21a8814fdaa680cdee4cf96697",
+        "scope": "recording provider or model",
+        "observed": "Removing the manager label kept the local Service pool isolated; restoring it restored the imported target."
+      },
+      "legacyStandardMirror": {
+        "logSHA256": "d86adce080563b83e538ec61d033b234e2cd99c7f14c9d0d254b48dd85bf60e8",
+        "scope": "recording provider or model",
+        "observed": "Removing the manager label stopped mirroring and added a second address to the old core Service graph."
+      },
+      "experimentalWithTransportImports": {
+        "logSHA256": "e56e62640eca4bb701d69bccafd8b68110b2c45074da2a0c301b6177d171ba58",
+        "scope": "recording provider or model",
+        "tree": "fde73339b2b0525b14d4005c9ffc623052421dd4"
+      },
+      "l4Independent": {
+        "logSHA256": "de2712fb85fe567a9534b0c0e1749433498c6d031aad6d48f9bed4c6406f1799",
+        "scope": "recording provider or model"
+      },
+      "fixTree": "e49aa9b20d8c02ca35c22e0cb318d36cd9b30ea6"
     }
   }
 }

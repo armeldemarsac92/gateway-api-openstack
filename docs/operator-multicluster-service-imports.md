@@ -33,7 +33,7 @@ On both local release channels, removing and restoring the HTTP import grant pre
 
 ## Mirror HTTPRoute and GRPCRoute requests
 
-The local grant cycle recorded one primary reply per request and the copies received at each remote endpoint. [HTTP and gRPC counts and conditions](qualification/v1.7.0/provider/service-import-request-mirror/README.md)
+An ownerless EndpointSlice retaining the same MCS import name and source cluster stays outside the homonymous core Service when its manager label disappears. The local grant cycle recorded one primary reply per request and the copies received at each remote endpoint. [HTTP and gRPC counts and conditions](qualification/v1.7.0/provider/service-import-request-mirror/README.md)
 
 Enable `--octavia-http-request-mirror` alongside `--multicluster-service-imports`. A mirror in a `backendRefs[].filters` list also requires `--octavia-weighted-http-targets`. Use a region that advertises the [HTTP request mirroring capabilities](qualification/v1.7.0/provider/http-request-mirror.md) or [gRPC request mirroring capabilities](getting-started.md#grpc-request-mirroring) for the route protocol. The same IPv4 Endpoint and unmanaged backend security prerequisites apply.
 
