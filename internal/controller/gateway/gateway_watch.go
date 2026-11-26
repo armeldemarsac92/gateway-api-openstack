@@ -115,7 +115,7 @@ func (r *Reconciler) gatewayRequestsForGatewayClass(ctx context.Context, object 
 }
 
 // SetupWithManager registers Gateway reconciliation and dependency watches.
-func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
+func (r *Reconciler) SetupWithManager(manager ctrl.Manager, imports *controller.ServiceImportWatch) error {
 	if r.Coordinator == nil {
 		return graph.ErrCoordinatorRequired
 	}
@@ -157,6 +157,9 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 			builder.WithPredicates(controller.NodePredicate("")))
 	}
 	if r.Config.TLSRoutesEnabled() {
+		if imports != nil {
+			gatewayController.WatchesRawSource(imports.Subscribe(r.gatewayRequestsForSNIServiceImport))
+		}
 		gatewayController.Watches(&gatewayv1.TLSRoute{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
 		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &corev1.Namespace{}, &gatewayv1.ReferenceGrant{}} {

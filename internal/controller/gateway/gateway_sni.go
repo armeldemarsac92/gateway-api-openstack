@@ -598,6 +598,24 @@ func (r *Reconciler) patchSNIRouteStatus(ctx context.Context, base, target *gate
 	return client.IgnoreNotFound(r.Status().Patch(ctx, target, controller.OptimisticMergeFrom(base)))
 }
 
+func (r *Reconciler) gatewayRequestsForSNIServiceImport(ctx context.Context, object client.Object) []reconcile.Request {
+	value := controller.ServiceImportIndexAll
+	if object.GetName() != "" {
+		value = controller.ObjectKeyString(client.ObjectKeyFromObject(object))
+	}
+	var routes gatewayv1.TLSRouteList
+	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByServiceImport: value}); err != nil {
+		return nil // The periodic live observation also checks these inputs.
+	}
+	keys := make(map[client.ObjectKey]struct{})
+	for i := range routes.Items {
+		for _, request := range r.gatewayRequestsForRoute(ctx, &routes.Items[i]) {
+			keys[request.NamespacedName] = struct{}{}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
+
 func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, dependency client.Object) []reconcile.Request {
 	var routes gatewayv1.TLSRouteList
 	if err := r.List(ctx, &routes); err != nil {
@@ -613,6 +631,11 @@ func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, depend
 		default:
 			for _, rule := range route.Spec.Rules {
 				for _, ref := range rule.BackendRefs {
+					if grant, ok := dependency.(*gatewayv1.ReferenceGrant); ok && r.Config.MulticlusterServiceImports {
+						key, imported := model.ServiceImportReference(route.Namespace, ref.BackendObjectReference)
+						affected = affected || imported && key.Namespace == grant.Namespace && key.Namespace != route.Namespace &&
+							model.ServiceImportReferenceAllowed(tlsRouteKind, route.Namespace, key, []gatewayv1.ReferenceGrant{*grant})
+					}
 					key, ok := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
 					if !ok || key.Namespace != dependency.GetNamespace() {
 						continue

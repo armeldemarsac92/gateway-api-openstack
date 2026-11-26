@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -273,6 +274,76 @@ func TestWeightedSNIRouteAvailability(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestZeroWeightServiceImportLeavesPositiveSNIBackendsUnchanged(t *testing.T) {
+	cfg := testConfig()
+	cfg.MulticlusterServiceImports, cfg.TLSSNIPassthrough, cfg.TCPConnectionRejection = true, true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway"}}
+	listener := testSNIListener()
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener}
+	route := testSNIRoute(gateway, "app", gateway.Namespace, "api.example.test")
+	plain, plainEndpoints := testSNIBackend(gateway.Namespace, "plain", "192.0.2.10")
+	protected, protectedEndpoints := testSNIBackend("partner", "protected", "192.0.2.20")
+	policy := &gatewayv1.BackendTLSPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: protected.Namespace, Name: "require-tls"},
+		Spec: gatewayv1.BackendTLSPolicySpec{TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{
+			{LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(protected.Name)}},
+		}},
+	}
+	grant := &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: protected.Namespace, Name: "allow"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: tlsRouteKind, Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(protected.Name))}},
+		},
+	}
+	imported := &mcs.ServiceImport{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "backend", UID: "import-uid"},
+		Spec: mcs.ServiceImportSpec{Type: mcs.ClusterSetIP, IPs: []string{"10.4.0.21"}, Ports: []mcs.ServicePort{{Port: 8443, Protocol: corev1.ProtocolTCP}}},
+	}
+	ordinary := route.Spec.Rules[0].BackendRefs[0]
+	authenticated := ordinary
+	authenticated.Namespace = ptr.To(gatewayv1.Namespace(protected.Namespace))
+	zero := ordinary
+	zero.Weight = ptr.To(int32(0))
+	zero.Group, zero.Kind = ptr.To(gatewayv1.Group(mcs.GroupName)), ptr.To(gatewayv1.Kind("ServiceImport"))
+	scheme := testScheme(t)
+	require.NoError(t, mcs.Install(scheme))
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(route, plain, plainEndpoints, protected, protectedEndpoints, policy, grant, imported).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	observe := func(refs ...gatewayv1.BackendRef) sniRouteStatus {
+		t.Helper()
+		route.Spec.Rules[0].BackendRefs = refs
+		require.NoError(t, kube.Update(t.Context(), route))
+		observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.Len(t, observation, 1)
+		require.Equal(t, gatewayv1.RouteReasonAccepted, observation[0].acceptedReason)
+		return observation[0]
+	}
+	weighted := observe(ordinary, authenticated)
+	require.Empty(t, weighted.targets)
+	require.NotNil(t, weighted.programmingDiagnostic)
+	withZero := observe(ordinary, authenticated, zero)
+	require.Empty(t, withZero.targets)
+	require.Equal(t, weighted.programmingDiagnostic, withZero.programmingDiagnostic)
+
+	single := observe(ordinary)
+	require.Len(t, single.targets, 1)
+	require.Equal(t, single.targets, observe(ordinary, zero).targets)
+	zero.Name = "missing"
+	missing := observe(ordinary, zero)
+	require.Equal(t, gatewayv1.RouteReasonBackendNotFound, missing.resolvedReason)
+	require.Equal(t, single.targets, missing.targets)
+
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	r.Config.TCPTLSTermination, r.Config.BackendTLSPolicy = true, true
+	r.Config.TCPConnectionRejection = false
+	zero.Name = gatewayv1.ObjectName(imported.Name)
+	terminating := observe(ordinary, authenticated)
+	require.Empty(t, terminating.targets)
+	require.NotNil(t, terminating.programmingDiagnostic)
+	terminatingWithZero := observe(ordinary, authenticated, zero)
+	require.Empty(t, terminatingWithZero.targets)
+	require.Equal(t, terminating.programmingDiagnostic, terminatingWithZero.programmingDiagnostic)
 }
 
 func TestWeightedTerminatingSNIRouteResolvesEachBackendTLSIdentity(t *testing.T) {

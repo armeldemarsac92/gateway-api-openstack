@@ -330,7 +330,7 @@ func ObserveServiceImport(ctx context.Context, reader client.Reader, key types.N
 	err := reader.Get(ctx, key, &backend)
 	switch {
 	case err == nil:
-		if backend.DeletionTimestamp.IsZero() {
+		if backend.DeletionTimestamp.IsZero() && backend.UID != "" {
 			observation.UID, observation.Generation, observation.Spec = backend.UID, backend.Generation, &backend.Spec
 			observation.ReadyIssue = model.ServiceImportReadiness(&backend)
 		}

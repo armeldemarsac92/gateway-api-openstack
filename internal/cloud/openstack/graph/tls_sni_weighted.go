@@ -316,7 +316,7 @@ func (p *Provider) replaceSNITCPMembers(ctx context.Context, step sniMutation, t
 	slices.Sort(tags)
 	members := make([]pools.BatchUpdateMemberOpts, 0, len(route.Members))
 	for _, member := range route.Members {
-		members = append(members, sniBatchMember(member.Address, member.Port, route.BackendSubnetID, member.Weight, tags))
+		members = append(members, sniBatchMember(member.Address, member.Port, sniMemberSubnet(route, member), member.Weight, tags))
 	}
 	return p.octavia.ReplaceTCPMembersAndRejection(ctx, step.parentID, members, route.TCPConnectionRejection)
 }

@@ -265,6 +265,86 @@ func TestTLSRouteBackendTLSStagesNativeAuthenticationBeforeActivation(t *testing
 	require.False(t, protected.pool.AdminStateUp)
 }
 
+func TestSNIServiceImportDoesNotInheritRetiredServiceAuthentication(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := cloud.TLSSNIRoute{Identity: id.Value(), Hostname: "app.example.test", ServiceUID: "import-uid", ServicePort: 443,
+		Members: []cloud.Member{{Address: "10.128.0.5", Port: 443, RoutedExternal: true}}}
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	desired, actual := weightedSNITestGraph(id, targets)
+	desired.protocol = cloud.ListenerProtocolTLSTerminate
+
+	service := route
+	service.ServiceUID, service.BackendSubnetID = "service-uid", "class-member-subnet"
+	service.Members = []cloud.Member{{Address: "192.0.2.11", Port: 8443}}
+	prior, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{service})
+	require.NoError(t, err)
+	old := activeSNIFragment(prior[0], "retired")
+	old.pool.TLSEnabled = true
+	old.pool.Tags = append(old.pool.Tags, sniBackendServiceTag(service))
+	actual.sni[prior[0].key] = old
+	require.NoError(t, (&Provider{}).prepareSNIRouteBackendTLS(t.Context(), &desired, actual))
+	require.Len(t, desired.sni, 1)
+	require.Equal(t, targets[0].key, desired.sni[0].key)
+	require.Empty(t, desired.sniHeldClosed)
+}
+
+func TestSNIWeightedImportRetiresUnrelatedAuthenticatedService(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := weightedSNITestRoute(id)
+	route.BackendServices[1].UID = "z-import-uid"
+	route.Members[1].RoutedExternal = true
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+
+	oldService := cloud.TLSSNIRoute{Identity: id.Value(), Hostname: route.Hostname, ServiceUID: "retired-service", ServicePort: 443,
+		Members: []cloud.Member{{Address: "192.0.2.30", Port: 8443}}}
+	prior, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{oldService})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name        string
+		tags        []string
+		wantBlocked bool
+	}{
+		{name: "different Service and port identity", tags: []string{sniBackendServiceTag(oldService)}},
+		{name: "still selected Service port", tags: []string{sniTLSBackendServiceTag("service-a", 443)}, wantBlocked: true},
+		{name: "legacy identity unknown", wantBlocked: true},
+		{name: "identity ambiguous", tags: []string{sniBackendServiceTag(oldService), sniTLSBackendServiceTag("previous-service", 443)}, wantBlocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired, actual := weightedSNITestGraph(id, targets)
+			desired.protocol, actual.protocol = cloud.ListenerProtocolTLSTerminate, cloud.ListenerProtocolTLSTerminate
+			actual.rawTLSVerified, actual.rawTLSCapabilityVerified = true, true
+			old := activeSNIFragment(prior[0], "retired")
+			old.pool.TLSEnabled, old.backendTLS.AdminObserved = true, true
+			old.pool.Tags = tc.tags
+			actual.sni[prior[0].key] = old
+			provider := &Provider{}
+			require.NoError(t, provider.prepareSNIRouteBackendTLS(t.Context(), &desired, actual))
+			if tc.wantBlocked {
+				require.Empty(t, desired.sni)
+				require.True(t, desired.sniHeldClosed[prior[0].key])
+				return
+			}
+			require.Len(t, desired.sni, 1)
+			require.Equal(t, targets[0].key, desired.sni[0].key)
+			require.Empty(t, desired.sniHeldClosed)
+			steps, _, err := provider.buildSNIGraphPlan(desired, actual)
+			require.NoError(t, err)
+			require.Len(t, steps, 1)
+			require.True(t, steps[0].isRestrictiveSNI())
+			require.Equal(t, gatewayDisableL7Policy, steps[0].deletion.resource)
+			require.Equal(t, old.policy.ID, steps[0].deletion.resourceID)
+			old.policy.AdminStateUp = false
+			steps, _, err = provider.buildSNIGraphPlan(desired, actual)
+			require.NoError(t, err)
+			require.Len(t, steps, 1)
+			require.Equal(t, sniDisableBackendTLSPool, steps[0].sni.kind)
+			require.Equal(t, old.pool.ID, steps[0].sni.parentID)
+		})
+	}
+}
+
 func TestTLSRouteBackendTLSRenamePreservesProtectionAcrossRestart(t *testing.T) {
 	id := safetyTestIdentity(t)
 	spec := completeGraphSpec(id)

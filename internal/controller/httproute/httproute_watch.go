@@ -286,7 +286,7 @@ func (r *Reconciler) nodeHasReadyEndpoint(ctx context.Context, serviceKey types.
 }
 
 // SetupWithManager registers HTTPRoute reconciliation and dependency watches.
-func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
+func (r *Reconciler) SetupWithManager(manager ctrl.Manager, imports *controller.ServiceImportWatch) error {
 	if r.Coordinator == nil {
 		return graph.ErrCoordinatorRequired
 	}
@@ -298,17 +298,6 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	}
 	if err := r.discoverBackendRetryPolicy(manager.GetRESTMapper()); err != nil {
 		return err
-	}
-	var imports *serviceImportWatch
-	if r.Config.MulticlusterServiceImports {
-		var err error
-		imports, err = newServiceImportWatch(manager)
-		if err != nil {
-			return err
-		}
-		if err := manager.Add(imports); err != nil {
-			return err
-		}
 	}
 	if err := r.setupRouteController(manager, &gatewayv1.HTTPRoute{}, "httproute", imports); err != nil {
 		return err
@@ -332,13 +321,13 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	return nil
 }
 
-func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Object, name string, imports *serviceImportWatch) error {
+func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Object, name string, imports *controller.ServiceImportWatch) error {
 	setup := ctrl.NewControllerManagedBy(manager).
 		For(object, builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config)))
 	if imports != nil {
-		setup.WatchesRawSource(imports.subscribe(r.enqueueRoutesForServiceImport))
+		setup.WatchesRawSource(imports.Subscribe(r.enqueueRoutesForServiceImport))
 		if r.kind() == model.HTTPRouteKind {
-			imports.watchCRD(setup)
+			imports.WatchCRD(setup)
 		}
 	}
 	// Watch both kinds while observing a shared routing graph, including peers

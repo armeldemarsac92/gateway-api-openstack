@@ -52,7 +52,7 @@ func TestServiceImportTransport(t *testing.T) {
 				Ports: []mcs.ServicePort{{Port: 8080, AppProtocol: ptr.To("kubernetes.io/h2c")}},
 			}
 			tc.change(&spec)
-			port, vip, diagnostic := serviceImportDestination(&spec, ptr.To(gatewayv1.PortNumber(8080)), tc.kind, true)
+			port, vip, diagnostic := (ServiceImportObservation{Spec: &spec}).Destination(ptr.To(gatewayv1.PortNumber(8080)), tc.kind, true)
 			require.NotNil(t, diagnostic)
 			require.Equal(t, string(tc.want), diagnostic.Reason)
 			require.Nil(t, port)

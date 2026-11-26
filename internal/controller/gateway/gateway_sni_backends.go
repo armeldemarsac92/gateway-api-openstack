@@ -28,6 +28,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -75,12 +76,111 @@ func (r *Reconciler) observeSNIService(ctx context.Context, route *gatewayv1.TLS
 	return &service, port, nil, nil
 }
 
+const sniServiceImportInventoryPending = "Waiting for a live ServiceImport and ReferenceGrant inventory"
+
+func (r *Reconciler) observeSNIServiceImport(ctx context.Context, route *gatewayv1.TLSRoute, key types.NamespacedName, ref gatewayv1.BackendRef) (cloud.TLSSNIBackendPool, *model.Diagnostic, error) {
+	pool := cloud.TLSSNIBackendPool{Weight: int(ptr.Deref(ref.Weight, 1))}
+	if key.Namespace != route.Namespace {
+		grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
+		if err != nil {
+			return pool, nil, err
+		}
+		grants = slices.DeleteFunc(grants, func(grant gatewayv1.ReferenceGrant) bool { return !grant.DeletionTimestamp.IsZero() })
+		if !model.ServiceImportReferenceAllowed(tlsRouteKind, route.Namespace, key, grants) {
+			return pool, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonRefNotPermitted), Message: "No ReferenceGrant authorizes this TLSRoute to use the ServiceImport"}, nil
+		}
+	}
+	observation, err := graph.ObserveServiceImport(ctx, r.APIReader, key)
+	if err != nil {
+		return pool, nil, err
+	}
+	port, address, diagnostic := observation.Destination(ref.Port, tlsRouteKind, false)
+	if diagnostic == nil && pool.Weight > 0 {
+		pool.ServiceUID, pool.ServicePort = string(observation.UID), int(port.Port)
+		pool.Members = []cloud.Member{{Address: address, Port: pool.ServicePort, RoutedExternal: true}}
+	}
+	return pool, diagnostic, nil
+}
+
+func (r *Reconciler) resolveSingleSNIServiceImport(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, key types.NamespacedName, ref gatewayv1.BackendRef, mixed bool) error {
+	pool, diagnostic, err := r.observeSNIServiceImport(ctx, entry.route, key, ref)
+	if err != nil {
+		return sniBackendReadPending(ctx, entry, sniServiceImportInventoryPending)
+	}
+	if diagnostic != nil {
+		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
+		return nil
+	}
+	entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend ServiceImport reference is resolved"
+	if pool.Weight == 0 {
+		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "The TLSRoute has no positive-weight backend"}
+		return nil
+	}
+	appendSNIForwardingTargets(entry, cloud.TLSSNIRoute{
+		Identity:    controller.RouteIdentity(r.Config, snapshot.gateway, entry.route),
+		Passthrough: mixed && !terminatesTLS(entry.listener),
+		ServiceUID:  pool.ServiceUID, ServicePort: pool.ServicePort, Members: pool.Members,
+	})
+	return nil
+}
+
 func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, tls *graph.BackendTLSObserver, mixed bool) error {
 	refs := entry.route.Spec.Rules[0].BackendRefs
-	if len(refs) > 1 {
+	if len(refs) == 1 {
+		return r.resolveSingleSNIBackend(ctx, snapshot, entry, refs[0], tls, mixed)
+	}
+	if !r.Config.MulticlusterServiceImports {
 		return r.resolveWeightedSNIBackends(ctx, snapshot, entry, tls, mixed)
 	}
-	service, port, diagnostic, err := r.observeSNIService(ctx, entry.route, refs[0])
+	// A zero-weight import must not turn a single-backend selector into a
+	// weighted pool. Leave the behavior of ordinary Service refs unchanged.
+	single := -1
+	for i, ref := range refs {
+		if _, imported := model.ServiceImportReference(entry.route.Namespace, ref.BackendObjectReference); imported && ptr.Deref(ref.Weight, 1) == 0 {
+			continue
+		}
+		if single >= 0 {
+			return r.resolveWeightedSNIBackends(ctx, snapshot, entry, tls, mixed)
+		}
+		single = i
+	}
+	if single < 0 {
+		return r.resolveWeightedSNIBackends(ctx, snapshot, entry, tls, mixed)
+	}
+	if err := r.resolveSingleSNIBackend(ctx, snapshot, entry, refs[single], tls, mixed); err != nil {
+		return err
+	}
+	var invalid []string
+	for i, ref := range refs {
+		if i == single {
+			continue
+		}
+		key, _ := model.ServiceImportReference(entry.route.Namespace, ref.BackendObjectReference)
+		_, diagnostic, err := r.observeSNIServiceImport(ctx, entry.route, key, ref)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			diagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: sniServiceImportInventoryPending}
+		}
+		if diagnostic != nil {
+			if len(invalid) == 0 && entry.resolvedReason != gatewayv1.RouteReasonResolvedRefs {
+				invalid = append(invalid, entry.resolvedMessage)
+			}
+			recordSNIRefDiagnostic(entry, &invalid, i, diagnostic)
+		}
+	}
+	if len(invalid) != 0 {
+		entry.resolvedMessage = strings.Join(invalid, ". ")
+	}
+	return nil
+}
+
+func (r *Reconciler) resolveSingleSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, ref gatewayv1.BackendRef, tls *graph.BackendTLSObserver, mixed bool) error {
+	if key, imported := model.ServiceImportReference(entry.route.Namespace, ref.BackendObjectReference); imported && r.Config.MulticlusterServiceImports {
+		return r.resolveSingleSNIServiceImport(ctx, snapshot, entry, key, ref, mixed)
+	}
+	service, port, diagnostic, err := r.observeSNIService(ctx, entry.route, ref)
 	if err != nil {
 		return sniBackendReadPending(ctx, entry, "Waiting for a live Service and ReferenceGrant inventory")
 	}
@@ -88,7 +188,7 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
 		return nil
 	}
-	if ptr.Deref(refs[0].Weight, 1) == 0 {
+	if ptr.Deref(ref.Weight, 1) == 0 {
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend Service reference is resolved"
 		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "The TLSRoute has no positive-weight backend"}
 		return nil
@@ -177,22 +277,36 @@ func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *g
 	pools := make([]cloud.TLSSNIBackendPool, 0, len(refs))
 	var total, rejected int
 	var invalid []string
-	var requiresBackendTLS bool
+	var requiresBackendTLS, hasPositiveImport bool
 	var inventoryPending string
 	authenticate := terminatesTLS(entry.listener) && r.Config.BackendTLSPolicy
 	for i, ref := range refs {
-		pool, applies, diagnostic := r.observeWeightedSNIBackend(ctx, snapshot, entry, ref, tls, authenticate)
+		var pool cloud.TLSSNIBackendPool
+		var applies bool
+		var diagnostic *model.Diagnostic
+		key, imported := model.ServiceImportReference(entry.route.Namespace, ref.BackendObjectReference)
+		usesImport := r.Config.MulticlusterServiceImports && imported
+		if usesImport {
+			var err error
+			pool, diagnostic, err = r.observeSNIServiceImport(ctx, entry.route, key, ref)
+			if err != nil {
+				diagnostic = &model.Diagnostic{Reason: "Pending", Message: sniServiceImportInventoryPending}
+			}
+		} else {
+			pool, applies, diagnostic = r.observeWeightedSNIBackend(ctx, snapshot, entry, ref, tls, authenticate)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		requiresBackendTLS = requiresBackendTLS || applies
 		if diagnostic != nil {
-			if !applies && diagnostic.Reason == string(gatewayv1.RouteReasonPending) && inventoryPending == "" {
+			if !usesImport && !applies && diagnostic.Reason == string(gatewayv1.RouteReasonPending) && inventoryPending == "" {
 				inventoryPending = diagnostic.Message
 			}
 			recordSNIRefDiagnostic(entry, &invalid, i, diagnostic)
 		}
 		if pool.Weight > 0 {
+			hasPositiveImport = hasPositiveImport || usesImport
 			total += pool.Weight
 			if len(pool.Members) == 0 {
 				rejected += pool.Weight
@@ -201,7 +315,7 @@ func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *g
 		}
 	}
 	if len(invalid) == 0 {
-		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend Service references are resolved"
+		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend references are resolved"
 	} else {
 		entry.resolvedMessage = strings.Join(invalid, ". ")
 	}
@@ -209,7 +323,7 @@ func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *g
 	switch {
 	case !authenticated && inventoryPending != "":
 		return sniBackendReadPending(ctx, entry, inventoryPending)
-	case !authenticate && requiresBackendTLS:
+	case !hasPositiveImport && !authenticate && requiresBackendTLS:
 		entry.programmingDiagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: sniWeightedBackendTLSUnsupported}
 		return nil
 	case len(entry.hostnames) == 0:
@@ -221,7 +335,7 @@ func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *g
 		return nil
 	}
 
-	if authenticated && rejected > 0 && !r.Config.TCPConnectionRejection {
+	if authenticated && rejected > 0 && !r.Config.TCPConnectionRejection && !hasPositiveImport {
 		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "Proportional TLSRoute rejection requires the TCP connection rejection controller option"}
 		return nil
 	}

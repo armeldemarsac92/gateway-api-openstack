@@ -87,6 +87,8 @@ const (
 	IndexL4RouteByBoundGateway = "metadata.l4RouteBoundGateway"
 	// IndexTLSRouteByGateway indexes declared and controller-owned status parents.
 	IndexTLSRouteByGateway = "tlsRouteGateway"
+	// IndexTLSRouteByServiceImport indexes primary TLSRoute import references.
+	IndexTLSRouteByServiceImport = "spec.tlsRouteServiceImport"
 	// IndexEndpointSliceByService indexes EndpointSlices by Service key.
 	IndexEndpointSliceByService = "metadata.service"
 	// NodeBackendIndexValue is the field value for routes that use Node backends.
@@ -339,6 +341,9 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			return slices.Compact(keys)
 		}})
 	}
+	if config.TLSRoutesEnabled() && config.MulticlusterServiceImports {
+		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.TLSRoute{}, field: IndexTLSRouteByServiceImport, extract: tlsServiceImportBackendKeys})
+	}
 	if config.DefaultGatewaysEnabled() {
 		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.Gateway{}, field: IndexGatewayByDefaultScope, extract: func(object client.Object) []string {
 			gateway := object.(*gatewayv1.Gateway)
@@ -486,6 +491,20 @@ func serviceImportBackendKeys(route *gatewayv1.HTTPRoute, namespacesOnly bool) [
 					keys[key.Namespace] = struct{}{}
 				}
 			} else {
+				keys[ServiceImportIndexAll] = struct{}{}
+				keys[ObjectKeyString(key)] = struct{}{}
+			}
+		}
+	}
+	return sortedIndexKeys(keys)
+}
+
+func tlsServiceImportBackendKeys(object client.Object) []string {
+	route := object.(*gatewayv1.TLSRoute)
+	keys := make(map[string]struct{})
+	for _, rule := range route.Spec.Rules {
+		for _, backend := range rule.BackendRefs {
+			if key, imported := model.ServiceImportReference(route.Namespace, backend.BackendObjectReference); imported && key.Namespace != "" && key.Name != "" {
 				keys[ServiceImportIndexAll] = struct{}{}
 				keys[ObjectKeyString(key)] = struct{}{}
 			}
