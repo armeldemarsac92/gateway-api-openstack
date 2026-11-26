@@ -70,6 +70,72 @@ func TestReconcileGatewayGraphConditionallyRemovesDisabledL7Policy(t *testing.T)
 	}
 }
 
+func TestRetiringEnabledPolicyOnClosedListener(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		advertised bool
+		status     int
+		wantWrites []string
+	}{
+		{"closed listener", true, http.StatusAccepted, []string{conditionalRemovalPath}},
+		{"ordinary disable without regional capability", false, http.StatusAccepted, []string{retiringPolicyPath}},
+		{"reobserve after conflict", true, http.StatusConflict, []string{conditionalRemovalPath}},
+		{"ordinary disable on unsupported write", true, http.StatusNotImplemented, []string{conditionalRemovalPath, retiringPolicyPath}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPolicyRemovalFixture(t)
+			f.listener["admin_state_up"], f.policy["admin_state_up"] = false, true
+			f.closedRemovalAdvertised, f.postStatus = tc.advertised, tc.status
+			result, err := f.reconcile()
+			if err != nil || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+				!slices.Equal(f.requests.mutationPaths(), tc.wantWrites) || f.neighbor["admin_state_up"] != true {
+				t.Fatalf("retirement = %+v, %v, writes %v", result, err, f.requests.mutationPaths())
+			}
+			if tc.status == http.StatusConflict {
+				f.listener["admin_state_up"] = true
+				_, err = f.reconcile()
+				if err != nil || !slices.Equal(f.requests.mutationPaths(), []string{conditionalRemovalPath, retiringPolicyPath}) {
+					t.Fatalf("reopened listener = %v, writes %v", err, f.requests.mutationPaths())
+				}
+			}
+			if tc.advertised && tc.status == http.StatusAccepted {
+				complete, err := f.reconcile()
+				if err != nil || complete.Routes[0].Result.Outcome.State != cloud.OutcomeReady ||
+					f.neighbor["admin_state_up"] != true || !slices.Equal(f.requests.mutationPaths(), tc.wantWrites) {
+					t.Fatalf("removal readback = %+v, %v, writes %v", complete, err, f.requests.mutationPaths())
+				}
+			}
+		})
+	}
+}
+
+func TestRetiringEnabledPolicyFallsBackWithoutClosureProof(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		provider      string
+		wantSnapshots int
+	}{
+		{"closure unconfirmed", "amphora", 1},
+		{"legacy provider alias disabled in region", "octavia", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPolicyRemovalFixture(t)
+			f.loadBalancer["provider"] = tc.provider
+			f.listener["admin_state_up"], f.policy["admin_state_up"] = false, true
+			f.closedRemovalAdvertised, f.closureConfirmed = true, false
+			checks := 0
+			f.spec.ValidateMutation = func(context.Context) error { checks++; return nil }
+			result, err := f.reconcile()
+			if err != nil || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || checks != 1 ||
+				f.requests.count(http.MethodGet, conditionalRemovalPath) != tc.wantSnapshots ||
+				!slices.Equal(f.requests.mutationPaths(), []string{retiringPolicyPath}) ||
+				f.policy["admin_state_up"] != false || f.neighbor["admin_state_up"] != true {
+				t.Fatalf("ordinary disable = %+v, %v, checks %d, writes %v", result.Outcome, err, checks, f.requests.mutationPaths())
+			}
+		})
+	}
+}
+
 func TestReconcileGatewayGraphReobservesConflictingL7Removal(t *testing.T) {
 	f := newPolicyRemovalFixture(t)
 	f.postStatus = http.StatusConflict
@@ -189,16 +255,18 @@ func TestReconcileGatewayGraphReadsBackLostL7RemovalResponse(t *testing.T) {
 }
 
 type policyRemovalFixture struct {
-	spec                  cloud.GatewayGraphSpec
-	provider              *Provider
-	requests              gatewayTransitionRequests
-	policy, neighbor      map[string]any
-	listener              map[string]any
-	noPolicyContent       bool
-	rules                 []map[string]any
-	advertised            bool
-	getStatus, postStatus int
-	changeSnapshot        func(map[string]any)
+	spec                    cloud.GatewayGraphSpec
+	provider                *Provider
+	requests                gatewayTransitionRequests
+	policy, neighbor        map[string]any
+	listener, loadBalancer  map[string]any
+	noPolicyContent         bool
+	rules                   []map[string]any
+	advertised              bool
+	closedRemovalAdvertised bool
+	closureConfirmed        bool
+	getStatus, postStatus   int
+	changeSnapshot          func(map[string]any)
 }
 
 func (f *policyRemovalFixture) reconcile() (cloud.GatewayGraphResult, error) {
@@ -222,6 +290,7 @@ func newPolicyRemovalFixture(t *testing.T) *policyRemovalFixture {
 	f.spec.Routes = append(f.spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.RouteSpec{Identity: peer}})
 
 	lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), "ACTIVE")
+	f.loadBalancer, f.closureConfirmed = lb, true
 	listener := map[string]any{
 		"id": "listener-1", "project_id": "project-a", "protocol": "HTTP", "protocol_port": 80,
 		"provisioning_status": "ACTIVE", "admin_state_up": true,
@@ -272,10 +341,15 @@ func newPolicyRemovalFixture(t *testing.T) *policyRemovalFixture {
 		case "PUT " + retiringPolicyPath:
 			f.policy["admin_state_up"] = false
 			safetyWriteJSON(t, w, map[string]any{"l7policy": f.policy})
+		case "GET /lbaas/providers/octavia/gateway_capabilities":
+			http.Error(w, "Provider 'octavia' is not enabled.", http.StatusBadRequest)
 		case "GET " + conditionalRemovalDiscovery:
 			caps := []string{}
 			if f.advertised {
 				caps = append(caps, octavia.GatewayCapabilityL7PolicyConditionalRemoval)
+			}
+			if f.closedRemovalAdvertised {
+				caps = append(caps, "l7policy_closed_listener_removal_v1")
 			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": caps})
 		case "GET " + conditionalRemovalPath:
@@ -288,14 +362,23 @@ func newPolicyRemovalFixture(t *testing.T) *policyRemovalFixture {
 			if f.changeSnapshot != nil {
 				f.changeSnapshot(snapshot)
 			}
-			safetyWriteJSON(t, w, map[string]any{"l7policy_removal": map[string]any{
+			removal := map[string]any{
 				"loadbalancer_id": lb["id"], "revision": revision, "policy": snapshot,
-			}})
+			}
+			if f.closureConfirmed && listener["admin_state_up"] == false {
+				removal["listener_closure_confirmed"] = true
+			}
+			safetyWriteJSON(t, w, map[string]any{"l7policy_removal": removal})
 		case "POST " + conditionalRemovalPath:
-			var body map[string]map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
-				body["l7policy_removal"]["expected_revision"] != revision || f.policy["admin_state_up"] != false {
-				t.Fatalf("unexpected removal payload %v, policy %v, decode error %v", body, f.policy, err)
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			removal := body["l7policy_removal"]
+			closed, present := removal["require_listener_disabled"]
+			if removal["expected_revision"] != revision || present != (f.policy["admin_state_up"] == true) ||
+				present && (closed != true || listener["admin_state_up"] != false || !f.closedRemovalAdvertised) {
+				t.Fatalf("unexpected removal payload %v for policy %v", body, f.policy)
 			}
 			if f.postStatus == http.StatusAccepted || f.postStatus == http.StatusBadGateway {
 				f.policy, f.rules = nil, nil

@@ -619,7 +619,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err != nil {
 		return result, err
 	}
-	removalRevision, err := p.preparePolicyRemoval(ctx, desired, actual, step)
+	removal, err := p.preparePolicyRemoval(ctx, desired, actual, step)
 	if err != nil {
 		return result, err
 	}
@@ -629,8 +629,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return cloud.GatewayGraphResult{}, err
 		}
 	}
-	if removalRevision != "" {
-		err := p.octavia.RemovePolicyRevision(ctx, step.route.parentID, removalRevision)
+	if removal != nil {
+		err := p.octavia.RemovePolicyRevision(ctx, *removal)
 		switch {
 		case err == nil:
 			outcome := p.progressingOutcome("Waiting for Octavia L7 policy removal readback")
