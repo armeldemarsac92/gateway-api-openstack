@@ -646,7 +646,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9f415c79e8ac6aaf0c62c10c9bf85c72
  		if !ports.InsertContains(port) && len(ctx.waypointGRPCConsumers.Fetch(ctx.Krt, waypointConsumerRouteKey(obj.Namespace, port, hostname, true))) > 0 {
  			conflicted.Insert(port)
 diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
-index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..724d5bcd74b3ac5d43fddc29108683f4d1963d6b 100644
+index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..a49dc1d9336c754ae6e6d0bfcaae8c26e6507037 100644
 --- a/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
 +++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
 @@ -20,6 +20,7 @@ import (
@@ -1197,7 +1197,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..724d5bcd74b3ac5d43fddc29108683f4
  				grpc == wantGRPC && waypoint == wantWaypoint && hasPartialConflict == partialConflict && hasForeign
  		}, true)
  		assert.EventuallyEqual(t, func() []uint32 {
-@@ -351,6 +760,75 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+@@ -351,6 +760,89 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
  	ambient.UpdateObject(info)
  	waitForStatus(conflicted, ok, resolved, true, []uint32{8080})
  
@@ -1253,14 +1253,28 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..724d5bcd74b3ac5d43fddc29108683f4
 +				Name: "main_internal",
 +				FilterChain: &istio.EnvoyFilter_ListenerMatch_FilterChainMatch{
 +					Name: "inbound-vip|9090|http|api.producer.svc.cluster.local",
-+					Filter: &istio.EnvoyFilter_ListenerMatch_FilterChainMatch_Filter{
++					Filter: &istio.EnvoyFilter_ListenerMatch_FilterMatch{
 +						Name: wellknown.HTTPConnectionManager,
 +					},
 +				},
 +			}}},
 +		Patch: &istio.EnvoyFilter_Patch{Operation: istio.EnvoyFilter_Patch_MERGE, Value: routeSource},
 +	}
-+	for _, ownerPatch := range []config.Config{ownerRoute, ownerSource} {
++	ownerDiscovery := ownerSource.DeepCopy()
++	ownerDiscovery.Name = "owner-discovered-manager"
++	discoveredFilter, err := structpb.NewStruct(map[string]any{
++		"name": "owner-http-connection-manager",
++		"config_discovery": map[string]any{
++			"config_source": map[string]any{"ads": map[string]any{}, "resource_api_version": "V3"},
++			"type_urls":     []any{"type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager"},
++		},
++	})
++	assert.NoError(t, err)
++	ownerDiscovery.Spec.(*istio.EnvoyFilter).ConfigPatches[0].Patch =
++		&istio.EnvoyFilter_Patch{Operation: istio.EnvoyFilter_Patch_REPLACE, Value: discoveredFilter}
++	_, err = collections.EnvoyFilter.ValidateConfig(ownerDiscovery)
++	assert.NoError(t, err)
++	for _, ownerPatch := range []config.Config{ownerRoute, ownerSource, ownerDiscovery} {
 +		_, err = policies.Create(ownerPatch)
 +		assert.NoError(t, err)
 +		waitForStatus(unsupported, unsupported, resolved, false, []uint32{8080})
@@ -1519,7 +1533,7 @@ index c2f926341370c4fe171e329be1d65b2465821ac1..18db57a7da9220e11cc92be5e76facc2
  		if policyName.Namespace == p.RootNamespace &&
  			p.IsWaypoint &&
 diff --git a/pilot/pkg/networking/core/envoyfilter/listener_patch.go b/pilot/pkg/networking/core/envoyfilter/listener_patch.go
-index 5cf833688deda9e0f0dd6a40e0549a9589708b14..140a4f0a0b58595d4a549eb9cb943a551bc068fa 100644
+index 5cf833688deda9e0f0dd6a40e0549a9589708b14..7cbd7be8138a237650db613d577a179859ef7f95 100644
 --- a/pilot/pkg/networking/core/envoyfilter/listener_patch.go
 +++ b/pilot/pkg/networking/core/envoyfilter/listener_patch.go
 @@ -34,6 +34,78 @@ import (
@@ -1577,9 +1591,10 @@ index 5cf833688deda9e0f0dd6a40e0549a9589708b14..140a4f0a0b58595d4a549eb9cb943a55
 +		switch patch.Operation {
 +		case networking.EnvoyFilter_Patch_MERGE:
 +		case networking.EnvoyFilter_Patch_REPLACE:
-+			if !hasNetworkFilterMatch(patch) {
-+				continue
++			if hasNetworkFilterMatch(patch) {
++				return true
 +			}
++			continue
 +		default:
 +			continue
 +		}
@@ -1590,8 +1605,7 @@ index 5cf833688deda9e0f0dd6a40e0549a9589708b14..140a4f0a0b58595d4a549eb9cb943a55
 +		}
 +		// A merge of an inline RouteConfiguration keeps the generated oneof
 +		// member. RDS and scoped routes switch to a different member.
-+		if manager.GetRds() != nil || manager.GetScopedRoutes() != nil ||
-+			patch.Operation == networking.EnvoyFilter_Patch_REPLACE && manager.GetRouteConfig() != nil {
++		if manager.GetRds() != nil || manager.GetScopedRoutes() != nil {
 +			return true
 +		}
 +	}
@@ -2096,7 +2110,7 @@ index 50ce52db0e509999833980bccd1fe0be1b90cae5..6dbdefa6115c589f90970b9aea664f22
  	// ConnectOriginate is the name for the resources associated with the origination of HTTP CONNECT.
  	ConnectOriginate = "connect_originate"
 diff --git a/pilot/pkg/xds/waypoint_test.go b/pilot/pkg/xds/waypoint_test.go
-index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..39604abe73d483ae1bf170bc68849b08b2f509ce 100644
+index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..5ee6989390212b1d1c4d621b5ab4add531f5d0a1 100644
 --- a/pilot/pkg/xds/waypoint_test.go
 +++ b/pilot/pkg/xds/waypoint_test.go
 @@ -25,30 +25,42 @@ import (
@@ -2803,7 +2817,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..39604abe73d483ae1bf170bc68849b08
 +				Name: "main_internal",
 +				FilterChain: &networking.EnvoyFilter_ListenerMatch_FilterChainMatch{
 +					Name: cluster,
-+					Filter: &networking.EnvoyFilter_ListenerMatch_FilterChainMatch_Filter{
++					Filter: &networking.EnvoyFilter_ListenerMatch_FilterMatch{
 +						Name: wellknown.HTTPConnectionManager,
 +					},
 +				},
