@@ -1,0 +1,79 @@
+name: Build the Hibiscus Istio ServiceImport pilot
+
+on:
+  push:
+    branches: [hibiscus/build-istio-serviceimport-parents]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CGO_ENABLED: '0'
+      GOOS: linux
+      GOARCH: amd64
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2 -trimpath'
+      GOMEMLIMIT: 2GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Verify source
+        run: |
+          set -euo pipefail
+          inputs="$PWD/istio-serviceimport-source.json"
+          git clone --depth 1 --branch 1.31.0 https://github.com/istio/istio.git istio
+          test "$(git -C istio rev-parse HEAD)" = "$(jq -r .istioBase "$inputs")"
+          jq -r '.patches[] | "\(.sha256)  \(.path)"' "$inputs" | sha256sum --check --strict
+          mapfile -t patches < <(jq -r '.patches[].path' "$inputs")
+          test "${#patches[@]}" = 2
+          git -C istio apply --index --binary --whitespace=nowarn "../${patches[0]}"
+          test "$(git -C istio write-tree)" = "$(jq -r .consumerTree "$inputs")"
+          git -C istio apply --index --binary --whitespace=error-all "../${patches[1]}"
+          test "$(git -C istio write-tree)" = "$(jq -r .istioTree "$inputs")"
+          git -C istio diff --exit-code
+          test "$(go env GOVERSION)" = go1.27.4
+          mkdir result
+          cp "$inputs" result/
+          printf '%s\n' "$GITHUB_SHA" > result/pilot-source.txt
+          git -C istio write-tree > result/pilot-tree.txt
+      - name: Validate HTTPRoute status and waypoint configuration
+        working-directory: istio
+        run: |
+          set -euo pipefail
+          export REPO_ROOT="$PWD"
+          go test -count=1 -v ./pilot/pkg/config/kube/gateway -run '^Test(ServiceImportRouteReconciliation|ServiceImportRouteOptOutPreservesForeignStatus|WaypointConsumerHTTPRouteContract)$' | tee ../result/gateway-tests.log
+          go test -count=1 -v ./pilot/pkg/xds -run '^Test(WaypointServiceImportProducerRoute|WaypointServiceConsumerRoute)$' | tee ../result/waypoint-tests.log
+          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointServiceImportProducerRoute; do
+            grep -F -- "--- PASS: Test$test (" ../result/*-tests.log
+          done
+      - name: Build pilot-discovery from the verified tree
+        working-directory: istio
+        run: |
+          set -euo pipefail
+          test "$(git write-tree)" = "$(cat ../result/pilot-tree.txt)"
+          git diff --exit-code
+          go build -buildvcs=false -ldflags "-s -w -X istio.io/istio/pkg/version.buildVersion=1.31.0 -X istio.io/istio/pkg/version.buildGitRevision=$GITHUB_SHA" -o ../result/pilot-discovery ./pilot/cmd/pilot-discovery
+          cd ../result
+          ./pilot-discovery version 2>&1 | tee pilot-version.txt
+          grep -F "$GITHUB_SHA" pilot-version.txt
+          go version -m ./pilot-discovery > pilot-go-build-info.txt
+          sha256sum pilot-discovery > pilot-binary-sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source-and-pilot-discovery
+          path: result/
+          if-no-files-found: error
+          retention-days: 2

@@ -1,0 +1,16 @@
+{
+  "istioRelease": "1.31.0",
+  "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
+  "consumerTree": "e78a45a81d6af0c93f83e08ef09f0c053fa2cab1",
+  "istioTree": "0a438180e12df1f42a81cab18364956addbc5e6e",
+  "patches": [
+    {
+      "path": "istio-1.31.0-service-consumer-http-route.patch",
+      "sha256": "5077b17868f951eabd4ce13648e307d5f497633ad82bfc2c2314d0315c43d1dd"
+    },
+    {
+      "path": "istio-1.31.0-serviceimport-parents.patch",
+      "sha256": "cdd2b8cf185e25c23871642c9e2acb9aa415f5e77f0bd57bfe9b35e25aa12c96"
+    }
+  ]
+}

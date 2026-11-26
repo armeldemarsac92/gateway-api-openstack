@@ -1,0 +1,2164 @@
+diff --git a/pilot/pkg/bootstrap/servicecontroller.go b/pilot/pkg/bootstrap/servicecontroller.go
+index 30e5930d667bc9c0cc9c5750dae9ee8d24291bcc..af92101d42c937a1443fe7fc0bf477638bfd8214 100644
+--- a/pilot/pkg/bootstrap/servicecontroller.go
++++ b/pilot/pkg/bootstrap/servicecontroller.go
+@@ -17,6 +17,9 @@ package bootstrap
+ import (
+ 	"fmt"
+ 
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
++
++	"istio.io/istio/pilot/pkg/config/kube/gateway"
+ 	"istio.io/istio/pilot/pkg/features"
+ 	"istio.io/istio/pilot/pkg/model"
+ 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
+@@ -24,6 +27,7 @@ import (
+ 	kubecontroller "istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
+ 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
+ 	"istio.io/istio/pilot/pkg/serviceregistry/serviceentry"
++	"istio.io/istio/pkg/kube/krt"
+ 	"istio.io/istio/pkg/log"
+ 	"istio.io/istio/pkg/util/sets"
+ )
+@@ -36,12 +40,18 @@ func (s *Server) ServiceController() *aggregate.Controller {
+ func (s *Server) initServiceControllers(args *PilotArgs) error {
+ 	serviceControllers := s.ServiceController()
+ 
++	gwc, _ := s.environment.GatewayAPIController.(*gateway.Controller)
++	var mcsImports krt.Collection[*unstructured.Unstructured]
++	if gwc != nil {
++		mcsImports = gwc.ServiceImports()
++	}
+ 	s.serviceEntryController = serviceentry.NewController(
+ 		s.configController,
+ 		s.XDSServer,
+ 		s.multiclusterController,
+ 		s.environment.Watcher,
+ 		serviceentry.WithClusterID(s.clusterID),
++		serviceentry.WithMCSImports(func() krt.Collection[*unstructured.Unstructured] { return mcsImports }),
+ 		serviceentry.WithKRTDebugger(s.krtDebugger),
+ 	)
+ 	serviceControllers.AddRegistry(s.serviceEntryController)
+@@ -73,6 +83,7 @@ func (s *Server) initServiceControllers(args *PilotArgs) error {
+ 
+ 	if features.EnableAmbient {
+ 		s.ambientIndex = ambient.New(ambient.Options{
++			MCSImports:             mcsImports,
+ 			SystemNamespace:        args.Namespace,
+ 			DomainSuffix:           args.RegistryOptions.KubeOptions.DomainSuffix,
+ 			ClusterID:              s.clusterID,
+@@ -87,7 +98,11 @@ func (s *Server) initServiceControllers(args *PilotArgs) error {
+ 				EnableK8SServiceSelectWorkloadEntries: features.EnableK8SServiceSelectWorkloadEntries,
+ 			},
+ 		})
++
+ 		s.environment.AmbientIndexes = s.ambientIndex
++		if gwc != nil {
++			gwc.SetAmbientServiceImportServices(s.ambientIndex.Services())
++		}
+ 
+ 		s.addStartFunc("ambient index", func(stop <-chan struct{}) error {
+ 			go s.ambientIndex.Run(stop)
+diff --git a/pilot/pkg/config/kube/gateway/conditions.go b/pilot/pkg/config/kube/gateway/conditions.go
+index 728fd1849df1b611cec0f8aca4437c647f5eba7e..803e62904a34363f43bdcf969dd3f171ab231c74 100644
+--- a/pilot/pkg/config/kube/gateway/conditions.go
++++ b/pilot/pkg/config/kube/gateway/conditions.go
+@@ -38,6 +38,7 @@ type RouteParentResult struct {
+ 	RouteError *ConfigError
+ 	// WaypointError, if present, indicates why the reference was does not have a waypoint
+ 	WaypointError *WaypointError
++	ServiceImport bool
+ }
+ 
+ func createRouteStatus(
+@@ -174,7 +175,12 @@ func createRouteStatus(
+ 				message: "All waypoints resolved",
+ 			}
+ 			if gw.WaypointError != nil {
+-				cond.message = gw.WaypointError.Message
++
++				if gw.ServiceImport {
++					cond.error = &ConfigError{Reason: string(gw.WaypointError.Reason), Message: gw.WaypointError.Message}
++				} else {
++					cond.message = gw.WaypointError.Message
++				}
+ 			}
+ 			conds[string(RouteConditionResolvedWaypoints)] = cond
+ 		}
+diff --git a/pilot/pkg/config/kube/gateway/controller.go b/pilot/pkg/config/kube/gateway/controller.go
+index 51e8ded6cd1f4076314f993e49c2cd11dab54a12..0b4b615c438ce03e453d6c2a72b085f49aff8d16 100644
+--- a/pilot/pkg/config/kube/gateway/controller.go
++++ b/pilot/pkg/config/kube/gateway/controller.go
+@@ -106,6 +106,7 @@ type Controller struct {
+ 	domainSuffix string // the domain suffix to use for generated resources
+ 
+ 	shadowServiceReconciler controllers.Queue
++	serviceImportInputs     *serviceImportInputs
+ }
+ 
+ type ParentInfo struct {
+@@ -209,6 +210,19 @@ func NewController(
+ 		ReferenceGrants: buildClient[*gateway.ReferenceGrant](c, kc, gvr.ReferenceGrant, opts, "informer/ReferenceGrants"),
+ 		ServiceEntries:  buildClient[*networkingclient.ServiceEntry](c, kc, gvr.ServiceEntry, opts, "informer/ServiceEntries"),
+ 	}
++
++	if features.EnableAmbientMCSHTTPRoute {
++		switch {
++		case !features.EnableGatewayAPI || !features.EnableAmbient || !features.EnableAmbientWaypoints || features.EnableAmbientMultiNetwork:
++			log.Warn("PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE requires single-network ambient waypoints")
++		case features.EnableMCSHost:
++			log.Warn("PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE requires ENABLE_MCS_HOST=false to avoid duplicate ClusterSetIP services")
++		case c.domainSuffix == "clusterset.local":
++			log.Warn("PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE requires a different DNS domain for Kubernetes Services")
++		default:
++			c.serviceImportInputs = newServiceImportInputs(kc, opts)
++		}
++	}
+ 	if features.EnableAlphaGatewayAPI {
+ 		inputs.BackendTrafficPolicy = buildClient[*gatewayx.XBackendTrafficPolicy](c, kc, gvr.XBackendTrafficPolicy, opts, "informer/XBackendTrafficPolicy")
+ 	} else {
+@@ -315,6 +329,8 @@ func NewController(
+ 		GatewayClasses:  inputs.GatewayClasses,
+ 		Gateways:        inputs.Gateways,
+ 		ServiceEntries:  inputs.ServiceEntries,
++		serviceImports:  c.serviceImportInputs,
++		meshConfig:      options.MeshWatcher,
+ 		InferencePools:  inputs.InferencePools,
+ 		internalContext: c.gatewayContext,
+ 	}
+diff --git a/pilot/pkg/config/kube/gateway/conversion.go b/pilot/pkg/config/kube/gateway/conversion.go
+index 95afe9765ea66ed63b3130743e1584353bb86a16..d02d3b6b39325c16978affcebfbcc92083fb0acd 100644
+--- a/pilot/pkg/config/kube/gateway/conversion.go
++++ b/pilot/pkg/config/kube/gateway/conversion.go
+@@ -51,6 +51,7 @@ import (
+ 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
+ 	"istio.io/istio/pkg/config"
+ 	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/host"
+ 	"istio.io/istio/pkg/config/protocol"
+ 	"istio.io/istio/pkg/config/schema/gvk"
+@@ -90,7 +91,9 @@ func sortRoutesByCreationTime(configs []RouteWithKey) {
+ 		if r := cmp.Compare(configs[i].Namespace, configs[j].Namespace); r != 0 {
+ 			return r == -1
+ 		}
+-		if _, consumer := configs[i].Extra[constants.ConfigExtraMeshConsumerService]; consumer {
++		_, consumer := configs[i].Extra[constants.ConfigExtraMeshConsumerService]
++		_, serviceImport := configs[i].Extra[constants.ConfigExtraMeshServiceImport]
++		if consumer || serviceImport {
+ 			// Generated names append "~<index>~<kind>". Compare the resource names
+ 			// so prefix-related names such as "foo" and "foo-bar" sort correctly.
+ 			iName, _, _ := strings.Cut(configs[i].Name, "~")
+@@ -111,7 +114,8 @@ func sortedConfigByCreationTime(configs []config.Config) []config.Config {
+ func convertHTTPRoute(ctx RouteContext, r k8s.HTTPRouteRule,
+ 	obj *k8s.HTTPRoute, pos int, mode routeConversionMode,
+ ) (*istio.HTTPRoute, *inferencePoolConfig, *ConfigError) {
+-	enforceRefGrant := mode == routeConversionGateway
++	ctx.serviceImportBackend = mode == routeConversionServiceImport
++	enforceRefGrant := mode == routeConversionGateway || ctx.serviceImportBackend
+ 	vs := &istio.HTTPRoute{}
+ 	if r.Name != nil {
+ 		vs.Name = string(*r.Name)
+@@ -779,7 +783,14 @@ func extractParentReferenceInfo(ctx RouteContext, parents RouteParents, obj cont
+ 	routeRefs, hostnames, kind := GetCommonRouteInfo(obj)
+ 	localNamespace := obj.GetNamespace()
+ 	parentRefs := []routeParentReference{}
++
+ 	for _, ref := range routeRefs {
++		if gatewaycommon.NormalizeReference(ref.Group, ref.Kind, gvk.KubernetesGateway) == mcsServiceImportGVK {
++			if kind == gvk.HTTPRoute && ctx.serviceImports != nil {
++				parentRefs = append(parentRefs, resolveServiceImportParent(ctx, ref, localNamespace))
++			}
++			continue
++		}
+ 		ir, err := toInternalParentReference(ref, localNamespace)
+ 		if err != nil {
+ 			// Cannot handle the reference. Maybe it is for another controller, so we just ignore it
+@@ -1150,6 +1161,10 @@ func buildDestination(ctx RouteContext, to k8s.BackendRef, ns string,
+ 	}
+ 
+ 	namespace := ptr.OrDefault((*string)(to.Namespace), ns)
++
++	if ctx.serviceImportBackend && ref == mcsServiceImportGVK {
++		return serviceImportDestination(ctx, namespace, string(to.Name), to.Port)
++	}
+ 	var invalidBackendErr *ConfigError
+ 	var hostname string
+ 	switch ref {
+@@ -1740,6 +1755,7 @@ type routeParentReference struct {
+ 	WaypointError *WaypointError
+ 	// WaypointConsumer indicates that the parent passed the ambient consumer route checks.
+ 	WaypointConsumer bool
++	ServiceImport    *configgateway.MeshServiceImport
+ }
+ 
+ func (r routeParentReference) IsMesh() bool {
+diff --git a/pilot/pkg/config/kube/gateway/route_collections.go b/pilot/pkg/config/kube/gateway/route_collections.go
+index f5b70b70d565a4ff8f9179acad98f05c396548ca..d5129fb9fd04e73b7cc98ed7345982a16302aaef 100644
+--- a/pilot/pkg/config/kube/gateway/route_collections.go
++++ b/pilot/pkg/config/kube/gateway/route_collections.go
+@@ -35,6 +35,7 @@ import (
+ 	"istio.io/istio/pkg/config/constants"
+ 	"istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/host"
++	"istio.io/istio/pkg/config/mesh/meshwatcher"
+ 	"istio.io/istio/pkg/config/schema/gvk"
+ 	"istio.io/istio/pkg/config/schema/kind"
+ 	"istio.io/istio/pkg/kube/controllers"
+@@ -123,6 +124,7 @@ func HTTPRouteCollection(
+ 
+ 		count := 0
+ 		virtualServices := []RouteWithKey{}
++		seenImports := sets.New[kube.MeshServiceImport]()
+ 		for _, parent := range filteredReferences(parentRefs) {
+ 			routes := conversions[parent.conversionMode()].routes
+ 			if parent.WaypointConsumer {
+@@ -134,7 +136,20 @@ func HTTPRouteCollection(
+ 			// for gateway routes, build one VS per gateway+host
+ 			routeKey := parent.InternalName
+ 			vsHosts := hostnameToStringList(route.Hostnames)
+-			if parent.IsMesh() {
++
++			if parent.ServiceImport != nil {
++				binding := *parent.ServiceImport
++				if seenImports.Contains(binding) {
++					continue
++				}
++				seenImports.Insert(binding)
++				vsHosts = []string{parent.Hostname}
++				routes = augmentPortMatch(routes, gatewayv1.PortNumber(binding.Port))
++				// Include the binding in the key so independently reconciled routes
++				// cannot merge across incarnations or with regular mesh parents.
++				routeKey = fmt.Sprintf("%s/mcs/%s/%s/%s/%d", obj.Namespace, binding.ImportUID,
++					binding.VIP, binding.Waypoint, binding.Port)
++			} else if parent.IsMesh() {
+ 				// for mesh routes, build one VS per namespace/port->host
+ 				routeKey = obj.Namespace
+ 				if parent.OriginalReference.Port != nil {
+@@ -176,7 +191,11 @@ func HTTPRouteCollection(
+ 				sortHTTPRoutes(routes)
+ 
+ 				// Populate Extra field for inference pool configs
++
+ 				extraData := make(map[string]any)
++				if parent.ServiceImport != nil {
++					extraData[constants.ConfigExtraMeshServiceImport] = *parent.ServiceImport
++				}
+ 				if parent.isMeshConsumerService(obj.Namespace) {
+ 					extraData[constants.ConfigExtraMeshConsumerService] = kube.MeshConsumerService{
+ 						Namespace: parent.ParentKey.Namespace, Name: parent.ParentKey.Name,
+@@ -212,6 +231,10 @@ func HTTPRouteCollection(
+ 					},
+ 					Extra: extraData,
+ 				}
++				if binding := parent.ServiceImport; binding != nil {
++					waypointNamespace, _, _ := strings.Cut(binding.Waypoint, "/")
++					cfg.Spec.(*istio.VirtualService).ExportTo = []string{waypointNamespace}
++				}
+ 				virtualServices = append(virtualServices, RouteWithKey{
+ 					Config: cfg,
+ 					Key:    routeKey + "/" + h,
+@@ -658,11 +681,14 @@ const (
+ 	routeConversionMesh routeConversionMode = iota
+ 	routeConversionGateway
+ 	routeConversionWaypointConsumer
++	routeConversionServiceImport
+ 	routeConversionModeCount
+ )
+ 
+ func (parent routeParentReference) conversionMode() routeConversionMode {
+ 	switch {
++	case parent.InternalKind == mcsServiceImportGVK:
++		return routeConversionServiceImport
+ 	case parent.WaypointConsumer:
+ 		return routeConversionWaypointConsumer
+ 	case parent.IsMesh():
+@@ -682,6 +708,7 @@ func computeRoute[T controllers.Object, O comparable](ctx RouteContext, obj T, t
+ 	var needed [routeConversionModeCount]bool
+ 	for i := range parentRefs {
+ 		configureWaypointConsumerParent(ctx, &parentRefs[i], obj)
++
+ 		needed[parentRefs[i].conversionMode()] = true
+ 	}
+ 
+@@ -713,6 +740,7 @@ func computeRoute[T controllers.Object, O comparable](ctx RouteContext, obj T, t
+ 			OriginalReference: r.OriginalReference,
+ 			DeniedReason:      r.DeniedReason,
+ 			RouteError:        conversions[r.conversionMode()].error,
++			ServiceImport:     r.InternalKind == mcsServiceImportGVK,
+ 		}
+ 		if r.IsMesh() {
+ 			res.WaypointError = r.WaypointError
+@@ -727,7 +755,8 @@ func computeRoute[T controllers.Object, O comparable](ctx RouteContext, obj T, t
+ // not shared outside of that.
+ // The embedded RouteContextInputs is typically based into a collection, then translated to a RouteContext with RouteContextInputs.WithCtx().
+ type RouteContext struct {
+-	Krt krt.HandlerContext
++	Krt                  krt.HandlerContext
++	serviceImportBackend bool
+ 	RouteContextInputs
+ }
+ 
+@@ -748,6 +777,8 @@ type RouteContextInputs struct {
+ 	Gateways        krt.Collection[*gatewayv1.Gateway]
+ 	ServiceEntries  krt.Collection[*networkingclient.ServiceEntry]
+ 	InferencePools  krt.Collection[*inferencev1.InferencePool]
++	serviceImports  *serviceImportInputs
++	meshConfig      meshwatcher.WatcherCollection
+ 	internalContext krt.RecomputeProtected[*atomic.Pointer[gatewaycommon.GatewayContext]]
+ }
+ 
+@@ -810,6 +841,7 @@ func gatewayRouteAttachmentCountCollection[T controllers.Object](
+ ) krt.Collection[RouteAttachment] {
+ 	return krt.NewManyCollection(col, func(krtctx krt.HandlerContext, obj T) []RouteAttachment {
+ 		ctx := inputs.WithCtx(krtctx)
++		ctx.serviceImports = nil // Only Gateway and ListenerSet attachments participate in these counts.
+ 		from := TypedResource{
+ 			Kind: kind,
+ 			Name: config.NamespacedName(obj),
+diff --git a/pilot/pkg/config/kube/gateway/serviceimport_collection.go b/pilot/pkg/config/kube/gateway/serviceimport_collection.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..beb2af931c535d8be08de927989dd163774433c1
+--- /dev/null
++++ b/pilot/pkg/config/kube/gateway/serviceimport_collection.go
+@@ -0,0 +1,172 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package gateway
++
++import (
++	"sync"
++
++	"go.uber.org/atomic"
++	extensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
++	extinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/types"
++	"k8s.io/client-go/dynamic/dynamicinformer"
++	"k8s.io/client-go/tools/cache"
++
++	"istio.io/istio/pilot/pkg/model"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
++	"istio.io/istio/pkg/kube"
++	"istio.io/istio/pkg/kube/controllers"
++	"istio.io/istio/pkg/kube/krt"
++)
++
++type serviceImportInputs struct {
++	imports         krt.Collection[*unstructured.Unstructured]
++	ambientServices krt.RecomputeProtected[*atomic.Pointer[krt.Collection[model.ServiceInfo]]]
++}
++
++func newServiceImportInputs(client kube.Client, opts krt.OptionsBuilder) *serviceImportInputs {
++	imports := krt.NewStaticCollection[*unstructured.Unstructured](nil, nil, opts.WithName("informer/ServiceImports")...)
++	watchServiceImports(client, imports, opts.Stop())
++	return &serviceImportInputs{
++		imports: imports,
++		ambientServices: krt.NewRecomputeProtected(atomic.NewPointer[krt.Collection[model.ServiceInfo]](nil),
++			true, opts.WithName("serviceImportAmbientServices")...),
++	}
++}
++
++// ServiceImports returns the shared opt-in Kubernetes input used by the mesh projection.
++func (c *Controller) ServiceImports() krt.Collection[*unstructured.Unstructured] {
++	if c.serviceImportInputs == nil {
++		return nil
++	}
++	return c.serviceImportInputs.imports
++}
++
++// SetAmbientServiceImportServices connects route reconciliation to the actual ambient service selection.
++func (c *Controller) SetAmbientServiceImportServices(services krt.Collection[model.ServiceInfo]) {
++	if c.serviceImportInputs != nil {
++		c.serviceImportInputs.ambientServices.Modify(func(p **atomic.Pointer[krt.Collection[model.ServiceInfo]]) {
++			(*p).Store(&services)
++		})
++	}
++}
++
++const serviceImportResource = "serviceimports"
++
++// The ordinary delayed informer reacts to CRD names once. For MCS, we need the served
++// version and must discard the previous informer's objects when the CRD changes.
++func watchServiceImports(client kube.Client, imports krt.StaticCollection[*unstructured.Unstructured], stop <-chan struct{}) {
++	factory := extinformers.NewSharedInformerFactoryWithOptions(client.Ext(), 0,
++		extinformers.WithTweakListOptions(func(opts *metav1.ListOptions) {
++			opts.FieldSelector = "metadata.name=" + serviceImportResource + "." + configgateway.MCSServiceImportGroup
++		}))
++	crds := factory.Apiextensions().V1().CustomResourceDefinitions()
++	informer := crds.Informer()
++
++	var mu sync.Mutex
++	var currentGVR schema.GroupVersionResource
++	var currentUID types.UID
++	var stopWatch chan struct{}
++	reconcile := func() {
++		mu.Lock()
++		defer mu.Unlock()
++
++		var gvr schema.GroupVersionResource
++		var uid types.UID
++		select {
++		case <-stop:
++		default:
++			crd, err := crds.Lister().Get(serviceImportResource + "." + configgateway.MCSServiceImportGroup)
++			if err == nil {
++				gvr = serviceImportGVR(crd)
++				uid = crd.UID
++			}
++		}
++		if currentGVR == gvr && currentUID == uid {
++			return
++		}
++		if stopWatch != nil {
++			close(stopWatch)
++			stopWatch = nil
++		}
++		// Withdraw data at a version/name reincarnation boundary before any new list can be read.
++		imports.Reset(nil)
++		currentGVR, currentUID = gvr, uid
++		if gvr.Empty() {
++			return
++		}
++		watchStop := make(chan struct{})
++		stopWatch = watchStop
++		dynamicFactory := dynamicinformer.NewDynamicSharedInformerFactory(client.Dynamic(), 0)
++		watch := dynamicFactory.ForResource(gvr).Informer()
++		change := func(obj any, deleted bool) {
++			mu.Lock()
++			defer mu.Unlock()
++			if stopWatch != watchStop {
++				return
++			}
++			imported := controllers.Extract[*unstructured.Unstructured](obj)
++			if imported == nil {
++				return
++			}
++			if deleted {
++				imports.DeleteObject(krt.GetKey(imported))
++			} else {
++				imports.UpdateObject(imported)
++			}
++		}
++		_, _ = watch.AddEventHandler(cache.ResourceEventHandlerFuncs{
++			AddFunc:    func(obj any) { change(obj, false) },
++			UpdateFunc: func(_, obj any) { change(obj, false) },
++			DeleteFunc: func(obj any) { change(obj, true) },
++		})
++		dynamicFactory.Start(watchStop)
++	}
++	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
++		AddFunc:    func(any) { reconcile() },
++		UpdateFunc: func(any, any) { reconcile() },
++		DeleteFunc: func(any) { reconcile() },
++	})
++	factory.Start(stop)
++	go func() {
++		<-stop
++		reconcile()
++	}()
++}
++
++func serviceImportGVR(crd *extensions.CustomResourceDefinition) schema.GroupVersionResource {
++	if crd.DeletionTimestamp != nil || crd.Spec.Group != configgateway.MCSServiceImportGroup ||
++		crd.Spec.Names.Kind != configgateway.MCSServiceImportKind ||
++		crd.Spec.Names.Plural != serviceImportResource || crd.Spec.Scope != extensions.NamespaceScoped {
++		return schema.GroupVersionResource{}
++	}
++	established := false
++	for _, cond := range crd.Status.Conditions {
++		established = established || cond.Type == extensions.Established && cond.Status == extensions.ConditionTrue
++	}
++	if established {
++		for _, candidate := range []string{"v1beta1", "v1alpha1"} {
++			for _, version := range crd.Spec.Versions {
++				if version.Served && version.Name == candidate {
++					return schema.GroupVersionResource{Group: crd.Spec.Group, Version: candidate, Resource: serviceImportResource}
++				}
++			}
++		}
++	}
++	return schema.GroupVersionResource{}
++}
+diff --git a/pilot/pkg/config/kube/gateway/serviceimport_route.go b/pilot/pkg/config/kube/gateway/serviceimport_route.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..68381f8ff51d4e31a87a9b28b19bf05ad9f33164
+--- /dev/null
++++ b/pilot/pkg/config/kube/gateway/serviceimport_route.go
+@@ -0,0 +1,115 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package gateway
++
++import (
++	"fmt"
++	"strings"
++
++	k8s "sigs.k8s.io/gateway-api/apis/v1"
++
++	istio "istio.io/api/networking/v1alpha3"
++	"istio.io/istio/pkg/config"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
++	"istio.io/istio/pkg/kube/krt"
++	"istio.io/istio/pkg/ptr"
++)
++
++var mcsServiceImportGVK = config.GroupVersionKind{
++	Group: configgateway.MCSServiceImportGroup, Kind: configgateway.MCSServiceImportKind,
++}
++
++func (ctx RouteContext) serviceImportBinding(namespace, name string) (*configgateway.MCSImport, *ParentError, *WaypointError) {
++	fail := func(reason ParentErrorReason, message string) (*configgateway.MCSImport, *ParentError, *WaypointError) {
++		return nil, &ParentError{Reason: reason, Message: message},
++			&WaypointError{Reason: WaypointErrorReason(reason), Message: message}
++	}
++	key := namespace + "/" + name
++	imported := ptr.Flatten(krt.FetchOne(ctx.Krt, ctx.serviceImports.imports, krt.FilterKey(key)))
++	if imported == nil || imported.GetDeletionTimestamp() != nil {
++		return fail(ParentErrorNotAccepted, fmt.Sprintf("ServiceImport %q not found", key))
++	}
++	binding, err := configgateway.ReadMCSImport(imported)
++	if err != nil {
++		return fail(ParentErrorUnsupportedValue, err.Error())
++	}
++	projection := ptr.Flatten(krt.FetchOne(ctx.Krt, ctx.ServiceEntries, krt.FilterKey(namespace+"/"+binding.Projection)))
++	if projection == nil || !binding.MatchesProjection(projection.ObjectMeta, &projection.Spec) {
++		return fail(ParentErrorNotAccepted, fmt.Sprintf("ServiceImport %q does not have a matching managed ServiceEntry", key))
++	}
++
++	// The service view is the one actually used to publish WDS. It includes the
++	// ready waypoint and its ownership, visibility and allowedRoutes checks.
++	services := ctx.serviceImports.ambientServices.Get(ctx.Krt).Load()
++	if services == nil {
++		return fail(ParentErrorNotAccepted, "Ambient service discovery is unavailable")
++	}
++	info := krt.FetchOne(ctx.Krt, *services, krt.FilterKey(namespace+"/"+binding.Host))
++	if !info.MatchesMCSProjection(binding.MeshServiceImport) {
++		if info != nil && info.MCSImportUID == binding.ImportUID && info.Waypoint.Error != nil {
++			return fail(ParentErrorNotAccepted, info.Waypoint.Error.Message)
++		}
++		return fail(ParentErrorNotAccepted, fmt.Sprintf("ServiceImport %q is not attached to its Istio service waypoint %q", key, binding.Waypoint))
++	}
++	return binding, nil, nil
++}
++
++func resolveServiceImportParent(ctx RouteContext, ref k8s.ParentReference, namespace string) routeParentReference {
++	parent := routeParentReference{
++		InternalName:      "mesh",
++		InternalKind:      mcsServiceImportGVK,
++		OriginalReference: ref,
++		ParentKey:         parentKey{Kind: mcsServiceImportGVK, Name: string(ref.Name), Namespace: defaultString(ref.Namespace, namespace)},
++	}
++	if parent.ParentKey.Namespace != namespace {
++		parent.DeniedReason = &ParentError{Reason: ParentErrorNotAllowed, Message: "ServiceImport parents must be in the HTTPRoute namespace"}
++		parent.WaypointError = &WaypointError{Reason: WaypointErrorReason(ParentErrorNotAllowed), Message: parent.DeniedReason.Message}
++		return parent
++	}
++	binding, denied, waypointError := ctx.serviceImportBinding(namespace, string(ref.Name))
++	parent.DeniedReason, parent.WaypointError = denied, waypointError
++	if binding == nil {
++		return parent
++	}
++	if (ref.Port != nil && uint32(*ref.Port) != binding.Port) ||
++		(ref.SectionName != nil && string(*ref.SectionName) != binding.PortName) {
++		parent.DeniedReason = &ParentError{Reason: ParentErrorNotAccepted, Message: "ServiceImport parent port or sectionName does not match"}
++		return parent
++	}
++	if ctx.meshConfig != nil {
++		mesh := krt.FetchOne(ctx.Krt, ctx.meshConfig.AsCollection())
++		waypointNamespace, _, _ := strings.Cut(binding.Waypoint, "/")
++		if mesh != nil && !configgateway.MCSExportVisible(mesh.GetDefaultVirtualServiceExportTo(), namespace, waypointNamespace) {
++			message := "The route exportTo policy does not permit its waypoint namespace"
++			parent.DeniedReason = &ParentError{Reason: ParentErrorNotAllowed, Message: message}
++			parent.WaypointError = &WaypointError{Reason: "WaypointCannotSeeHTTPRoute", Message: message}
++			return parent
++		}
++	}
++	parent.Hostname = binding.Host
++	parent.ServiceImport = &binding.MeshServiceImport
++	return parent
++}
++
++func serviceImportDestination(ctx RouteContext, namespace, name string, port *k8s.PortNumber) (*istio.Destination, *inferencePoolConfig, *ConfigError) {
++	binding, denied, _ := ctx.serviceImportBinding(namespace, name)
++	if binding == nil {
++		return &istio.Destination{}, nil, &ConfigError{Reason: InvalidDestinationNotFound, Message: denied.Message}
++	}
++	if port == nil || uint32(*port) != binding.Port {
++		return &istio.Destination{}, nil, &ConfigError{Reason: InvalidDestinationNotFound, Message: "ServiceImport backend port does not match"}
++	}
++	return &istio.Destination{Host: binding.Host, Port: &istio.PortSelector{Number: binding.Port}}, nil, nil
++}
+diff --git a/pilot/pkg/config/kube/gateway/serviceimport_route_test.go b/pilot/pkg/config/kube/gateway/serviceimport_route_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f7470ebb8a5bc4f884feeb74ab47a851dd045e84
+--- /dev/null
++++ b/pilot/pkg/config/kube/gateway/serviceimport_route_test.go
+@@ -0,0 +1,284 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package gateway
++
++import (
++	"context"
++	"net/netip"
++	"testing"
++
++	corev1 "k8s.io/api/core/v1"
++	extensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
++	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/types"
++	"k8s.io/client-go/dynamic"
++	dynamicfake "k8s.io/client-go/dynamic/fake"
++	k8s "sigs.k8s.io/gateway-api/apis/v1"
++
++	istio "istio.io/api/networking/v1alpha3"
++	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
++	"istio.io/istio/pilot/pkg/features"
++	"istio.io/istio/pilot/pkg/model"
++	"istio.io/istio/pilot/pkg/networking/core"
++	"istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
++	"istio.io/istio/pilot/pkg/status"
++	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
++	"istio.io/istio/pkg/config/schema/gvk"
++	"istio.io/istio/pkg/config/schema/kind"
++	"istio.io/istio/pkg/kube"
++	"istio.io/istio/pkg/kube/krt"
++	"istio.io/istio/pkg/ptr"
++	"istio.io/istio/pkg/test"
++	"istio.io/istio/pkg/test/util/assert"
++	"istio.io/istio/pkg/workloadapi"
++)
++
++type serviceImportFakeClient struct {
++	kube.CLIClient
++	dynamicClient dynamic.Interface
++}
++
++func (c serviceImportFakeClient) Dynamic() dynamic.Interface {
++	return c.dynamicClient
++}
++
++func TestServiceImportRouteReconciliation(t *testing.T) {
++	test.SetForTest(t, &features.EnableGatewayAPI, true)
++	test.SetForTest(t, &features.EnableAmbient, true)
++	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
++	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, true)
++	test.SetForTest(t, &features.EnableAmbientMultiNetwork, false)
++	test.SetForTest(t, &features.EnableMCSHost, false)
++
++	const namespace = "store"
++	const hostname = "api.store.svc.clusterset.local"
++	const coreHost = "api.store.svc.cluster.local"
++	const vip = "1.2.3.4"
++	ref := k8s.ParentReference{
++		Group: ptr.Of(k8s.Group(configgateway.MCSServiceImportGroup)), Kind: ptr.Of(k8s.Kind("ServiceImport")),
++		Name: "api", Port: ptr.Of(k8s.PortNumber(80)), SectionName: ptr.Of(k8s.SectionName("http")),
++	}
++	foreign := k8s.RouteParentStatus{
++		ParentRef: ref, ControllerName: "other.example/controller",
++		Conditions: []metav1.Condition{{Type: "Accepted", Status: metav1.ConditionTrue}},
++	}
++	route := &k8s.HTTPRoute{
++		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "producer", Generation: 3},
++		Spec: k8s.HTTPRouteSpec{
++			CommonRouteSpec: k8s.CommonRouteSpec{ParentRefs: []k8s.ParentReference{
++				ref, {Group: ptr.Of(k8s.Group("")), Kind: ptr.Of(k8s.Kind("Service")), Name: "api"},
++			}},
++			Rules: []k8s.HTTPRouteRule{{BackendRefs: []k8s.HTTPBackendRef{{BackendRef: k8s.BackendRef{
++				BackendObjectReference: k8s.BackendObjectReference{Name: "api", Port: ptr.Of(k8s.PortNumber(80))},
++			}}}}},
++		},
++		Status: k8s.HTTPRouteStatus{RouteStatus: k8s.RouteStatus{Parents: []k8s.RouteParentStatus{foreign}}},
++	}
++	alpha := schema.GroupVersionResource{Group: configgateway.MCSServiceImportGroup, Version: "v1alpha1", Resource: serviceImportResource}
++	beta := alpha
++	beta.Version = "v1beta1"
++	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
++		map[schema.GroupVersionResource]string{alpha: "ServiceImportList", beta: "ServiceImportList"})
++	client := serviceImportFakeClient{
++		CLIClient: kube.NewFakeClient(route,
++			&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "api"},
++				Spec: corev1.ServiceSpec{ClusterIP: "1.2.3.5"}},
++			&k8s.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "waypoint"},
++				Spec: k8s.GatewaySpec{GatewayClassName: "mesh"}},
++			&k8s.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "mesh"},
++				Spec: k8s.GatewayClassSpec{ControllerName: constants.ManagedGatewayMeshController}}),
++		dynamicClient: dynamicClient,
++	}
++	setupClientCRDs(t, client)
++	stop := test.NewStop(t)
++	c := NewController(client, func(schema.GroupVersionResource, <-chan struct{}) bool { return false },
++		controller.Options{DomainSuffix: "cluster.local"}, nil)
++	ambient := krt.NewStaticCollection[model.ServiceInfo](nil, nil, krt.WithStop(stop))
++	c.SetAmbientServiceImportServices(ambient)
++	client.RunAndWait(stop)
++	go c.Run(stop)
++	c.Reconcile(core.NewConfigGenTest(t, core.TestOptions{}).PushContext())
++
++	queue := &TestStatusQueue{state: map[status.Resource]any{}}
++	setAndWait(t, c, queue)
++	assertRoute := func(wantAccepted, wantWaypoint metav1.ConditionStatus, wantImports int) {
++		t.Helper()
++		assert.EventuallyEqual(t, func() int {
++			count := 0
++			for _, vs := range c.List(gvk.VirtualService, namespace) {
++				spec := vs.Spec.(*istio.VirtualService)
++				if spec.GetHosts()[0] == hostname {
++					count++
++					assert.Equal(t, spec.GetHttp()[0].GetRoute()[0].GetDestination().GetHost(), coreHost)
++					_, producer := vs.Extra[constants.ConfigExtraMeshServiceImport]
++					assert.Equal(t, producer, true)
++				}
++			}
++			return count
++		}, wantImports)
++		assert.EventuallyEqual(t, func() bool {
++			for _, st := range queue.Statuses() {
++				http, ok := st.(*k8s.HTTPRouteStatus)
++				if !ok {
++					continue
++				}
++				var accepted, resolvedWP *metav1.Condition
++				var other bool
++				for _, p := range http.Parents {
++					if p.ControllerName == foreign.ControllerName {
++						assert.Equal(t, p, foreign)
++						other = true
++					} else if p.ParentRef.Kind != nil && *p.ParentRef.Kind == *ref.Kind {
++						for i := range p.Conditions {
++							cond := &p.Conditions[i]
++							switch cond.Type {
++							case string(k8s.RouteConditionAccepted):
++								accepted = cond
++							case string(RouteConditionResolvedWaypoints):
++								resolvedWP = cond
++							}
++						}
++					}
++				}
++				return other && accepted != nil && resolvedWP != nil && accepted.Status == wantAccepted &&
++					accepted.ObservedGeneration == 3 && resolvedWP.Status == wantWaypoint
++			}
++			return false
++		}, true)
++	}
++	assertRoute(metav1.ConditionFalse, metav1.ConditionFalse, 0)
++	ctx := context.Background()
++	newImport := func(version, uid string) *unstructured.Unstructured {
++		return &unstructured.Unstructured{Object: map[string]any{
++			"apiVersion": configgateway.MCSServiceImportGroup + "/" + version,
++			"kind":       "ServiceImport",
++			"metadata": map[string]any{
++				"namespace": namespace, "name": "api", "uid": uid,
++				"labels":      map[string]any{"istio.io/use-waypoint": "waypoint"},
++				"annotations": map[string]any{configgateway.MCSProviderAnnotation: "mcs.example.io"},
++			},
++			"spec": map[string]any{
++				"type": "ClusterSetIP", "ips": []any{vip},
++				"ports": []any{map[string]any{"port": int64(80), "name": "http", "protocol": "TCP"}},
++			},
++			"status": map[string]any{"endpointSliceObjects": "Present"},
++		}}
++	}
++	alphaImports := dynamicClient.Resource(alpha).Namespace(namespace)
++	_, err := alphaImports.Create(ctx, newImport(alpha.Version, "old"), metav1.CreateOptions{})
++	assert.NoError(t, err)
++	crds := client.Ext().ApiextensionsV1().CustomResourceDefinitions()
++	crd, err := crds.Create(ctx, &extensions.CustomResourceDefinition{
++		ObjectMeta: metav1.ObjectMeta{Name: "serviceimports.multicluster.x-k8s.io", UID: "mcs-crd"},
++		Spec: extensions.CustomResourceDefinitionSpec{
++			Group: alpha.Group, Scope: extensions.NamespaceScoped,
++			Names: extensions.CustomResourceDefinitionNames{Kind: "ServiceImport", Plural: serviceImportResource},
++			Versions: []extensions.CustomResourceDefinitionVersion{
++				{Name: beta.Version, Served: false}, {Name: alpha.Version, Served: true, Storage: true},
++			},
++		},
++		Status: extensions.CustomResourceDefinitionStatus{Conditions: []extensions.CustomResourceDefinitionCondition{
++			{Type: extensions.Established, Status: extensions.ConditionTrue},
++		}},
++	}, metav1.CreateOptions{})
++	assert.NoError(t, err)
++
++	projection := &networkingclient.ServiceEntry{
++		ObjectMeta: metav1.ObjectMeta{
++			Name: configgateway.MCSProjectionName("api"), Namespace: namespace,
++			Labels:      map[string]string{configgateway.MCSProjectorLabel: configgateway.MCSProjectorName, "istio.io/use-waypoint": "waypoint"},
++			Annotations: map[string]string{configgateway.MCSProviderAnnotation: "mcs.example.io"},
++			OwnerReferences: []metav1.OwnerReference{
++				{APIVersion: alpha.GroupVersion().String(), Kind: "ServiceImport", Name: "api", UID: "old", Controller: ptr.Of(true)},
++			},
++		},
++		Spec: istio.ServiceEntry{
++			Hosts: []string{hostname}, Addresses: []string{vip}, Resolution: istio.ServiceEntry_STATIC, Location: istio.ServiceEntry_MESH_INTERNAL,
++			Ports: []*istio.ServicePort{{Name: "http", Number: 80, Protocol: "HTTP"}},
++		},
++	}
++	ses := client.Istio().NetworkingV1().ServiceEntries(namespace)
++	projection, err = ses.Create(ctx, projection, metav1.CreateOptions{})
++	assert.NoError(t, err)
++	setAmbient := func(uid string) {
++		ambient.UpdateObject(model.ServiceInfo{
++			Source:       model.TypedObject{Kind: kind.ServiceEntry, NamespacedName: types.NamespacedName{Namespace: namespace, Name: projection.Name}},
++			MCSImportUID: uid,
++			Waypoint:     model.WaypointBindingStatus{ResourceName: namespace + "/waypoint"},
++			Service: &workloadapi.Service{
++				Namespace: namespace, Name: projection.Name, Hostname: hostname,
++				Addresses: []*workloadapi.NetworkAddress{{Address: netip.MustParseAddr(vip).AsSlice()}},
++				Ports:     []*workloadapi.Port{{ServicePort: 80}},
++				Waypoint:  &workloadapi.GatewayAddress{},
++			},
++		})
++	}
++	setAmbient("old")
++	assertRoute(metav1.ConditionTrue, metav1.ConditionTrue, 1)
++
++	assert.NoError(t, ses.Delete(ctx, projection.Name, metav1.DeleteOptions{}))
++	assertRoute(metav1.ConditionFalse, metav1.ConditionFalse, 0)
++	projection.ResourceVersion = ""
++	projection, err = ses.Create(ctx, projection, metav1.CreateOptions{})
++	assert.NoError(t, err)
++	assertRoute(metav1.ConditionTrue, metav1.ConditionTrue, 1)
++
++	// Switch the served resource while the projection is still owned by the previous incarnation.
++	betaImports := dynamicClient.Resource(beta).Namespace(namespace)
++	_, err = betaImports.Create(ctx, newImport(beta.Version, "new"), metav1.CreateOptions{})
++	assert.NoError(t, err)
++	crd.Spec.Versions[0].Served = true
++	crd.Spec.Versions[1].Served = false
++	_, err = crds.Update(ctx, crd, metav1.UpdateOptions{})
++	assert.NoError(t, err)
++	assertRoute(metav1.ConditionFalse, metav1.ConditionFalse, 0)
++	projection.OwnerReferences[0].APIVersion = beta.GroupVersion().String()
++	projection.OwnerReferences[0].UID = "new"
++	_, err = ses.Update(ctx, projection, metav1.UpdateOptions{})
++	assert.NoError(t, err)
++	setAmbient("new")
++	assertRoute(metav1.ConditionTrue, metav1.ConditionTrue, 1)
++
++	assert.NoError(t, crds.Delete(ctx, crd.Name, metav1.DeleteOptions{}))
++	assertRoute(metav1.ConditionFalse, metav1.ConditionFalse, 0)
++}
++
++func TestServiceImportRouteOptOutPreservesForeignStatus(t *testing.T) {
++	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, false)
++	const namespace = "default"
++	ref := k8s.ParentReference{
++		Group: ptr.Of(k8s.Group(configgateway.MCSServiceImportGroup)), Kind: ptr.Of(k8s.Kind("ServiceImport")), Name: "api",
++	}
++	other := k8s.RouteParentStatus{ParentRef: ref, ControllerName: "other.example/controller"}
++	route := &k8s.HTTPRoute{
++		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "producer"},
++		Spec:       k8s.HTTPRouteSpec{CommonRouteSpec: k8s.CommonRouteSpec{ParentRefs: []k8s.ParentReference{ref}}},
++		Status: k8s.HTTPRouteStatus{RouteStatus: k8s.RouteStatus{Parents: []k8s.RouteParentStatus{
++			other, {ParentRef: ref, ControllerName: k8s.GatewayController(features.ManagedGatewayController)},
++		}}},
++	}
++	c := setupControllerWithoutGatewayClasses(t, route)
++	assert.Equal(t, c.serviceImportInputs, nil)
++	assert.Equal(t, len(c.List(gvk.VirtualService, namespace)), 0)
++	queue := &TestStatusQueue{state: map[status.Resource]any{}}
++	setAndWait(t, c, queue)
++	assert.Equal(t, queue.Statuses(), []any{&k8s.HTTPRouteStatus{RouteStatus: k8s.RouteStatus{
++		Parents: []k8s.RouteParentStatus{other},
++	}}})
++}
+diff --git a/pilot/pkg/features/experimental.go b/pilot/pkg/features/experimental.go
+index b620c067b43549aab731e2f630ab3d67bba450da..b6ad44c8bb568ad810f049980862585ca7e464cd 100644
+--- a/pilot/pkg/features/experimental.go
++++ b/pilot/pkg/features/experimental.go
+@@ -80,6 +80,12 @@ var (
+ 	MCSAPIVersion = env.Register("MCS_API_VERSION", "v1alpha1",
+ 		"The version to be used for the Kubernetes Multi-Cluster Services (MCS) API.").Get()
+ 
++	EnableAmbientMCSHTTPRoute = env.Register(
++		"PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE",
++		false,
++		"Enable producer HTTPRoutes on projected Kubernetes MCS ServiceImports in single-network ambient mode. Incompatible with ENABLE_MCS_HOST.",
++	).Get()
++
+ 	EnableMCSAutoExport = env.Register(
+ 		"ENABLE_MCS_AUTO_EXPORT",
+ 		false,
+diff --git a/pilot/pkg/model/push_context.go b/pilot/pkg/model/push_context.go
+index 4f81a76045a19bd2eee1af8697cf31e360818489..a4e06b52adb370a9f4d2f3c088d00bb6cda97570 100644
+--- a/pilot/pkg/model/push_context.go
++++ b/pilot/pkg/model/push_context.go
+@@ -1797,7 +1797,12 @@ func (ps *PushContext) initVirtualServices(env *Environment) {
+ 	for _, virtualService := range vservices {
+ 		ns := virtualService.Namespace
+ 		rule := virtualService.Spec.(*networking.VirtualService)
++
+ 		gwNames := getGatewayNames(rule)
++		_, ambientMCS := virtualService.Extra[constants.ConfigExtraMeshServiceImport]
++		if ambientMCS {
++			gwNames = []string{constants.IstioAmbientMCSGateway}
++		}
+ 		exportToSet := ps.exportToDefaults.virtualService
+ 		if len(virtualService.ExportTo) > 0 {
+ 			exportToSet = virtualService.ExportTo
+@@ -1831,7 +1836,7 @@ func (ps *PushContext) initVirtualServices(env *Environment) {
+ 			}
+ 		}
+ 
+-		if features.FilterGatewayClusterConfig {
++		if features.FilterGatewayClusterConfig && !ambientMCS {
+ 			for _, gw := range gwNames {
+ 				if gw == constants.IstioMeshGateway {
+ 					continue
+diff --git a/pilot/pkg/model/service.go b/pilot/pkg/model/service.go
+index 4f7390617a666c404b5bd9a51185b3e58bda6aa0..3ea52b6ce249ce793ea3bc7c51ac48707c512f68 100644
+--- a/pilot/pkg/model/service.go
++++ b/pilot/pkg/model/service.go
+@@ -47,6 +47,7 @@ import (
+ 	"istio.io/istio/pilot/pkg/util/protoconv"
+ 	"istio.io/istio/pkg/cluster"
+ 	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/host"
+ 	"istio.io/istio/pkg/config/labels"
+ 	"istio.io/istio/pkg/config/protocol"
+@@ -818,6 +819,9 @@ type K8sAttributes struct {
+ 	// ObjectName is the object name of the underlying object. This may differ from the Service.Attributes.Name for legacy semantics.
+ 	ObjectName string
+ 
++	// MCSImportUID identifies the ServiceImport that controls a managed ServiceEntry.
++	MCSImportUID string
++
+ 	// DNSConnectStrategy specifies the connection strategy for the service.
+ 	// When set to DNSConnectStrategyRaceFirstTCPConnect, DNS clusters will set DnsLookupFamily=ALL
+ 	// to enable Envoy's happy eyeballs algorithm.
+@@ -1257,6 +1261,8 @@ type ServiceInfo struct {
+ 	PortNames map[int32]ServicePortName
+ 	// Source is the type that introduced this service.
+ 	Source TypedObject
++	// MCSImportUID identifies the ServiceImport that controls a managed ServiceEntry.
++	MCSImportUID string
+ 	// Scope of the service - either local or global based on namespace or service label matching
+ 	Scope    ServiceScope
+ 	Waypoint WaypointBindingStatus
+@@ -1481,11 +1487,31 @@ func (i ServiceInfo) GetNamespace() string {
+ 	return i.Service.Namespace
+ }
+ 
++// MatchesMCSProjection checks the exact service and ready waypoint published to WDS.
++func (service *ServiceInfo) MatchesMCSProjection(binding configgateway.MeshServiceImport) bool {
++	if service == nil || service.Source.Kind != kind.ServiceEntry || service.Source.Namespace != binding.Namespace ||
++		service.Source.Name != binding.Projection || service.MCSImportUID != binding.ImportUID ||
++		service.Waypoint.ResourceName != binding.Waypoint || service.Service.GetWaypoint() == nil ||
++		len(service.Service.GetAddresses()) != 1 || len(service.Service.GetPorts()) != 1 ||
++		service.Service.GetPorts()[0].GetServicePort() != binding.Port {
++		return false
++	}
++	primary := service.Service.GetWaypoint()
++	for _, weighted := range service.Service.GetWeightedWaypoints() {
++		if weighted.GetWeight() > 0 && !proto.Equal(weighted.GetDestination(), primary) {
++			return false
++		}
++	}
++	address, ok := netip.AddrFromSlice(service.Service.GetAddresses()[0].GetAddress())
++	return ok && address.String() == binding.VIP
++}
++
+ func (i ServiceInfo) Equals(other ServiceInfo) bool {
+ 	return equalUsingPremarshaled(i.Service, i.MarshaledAddress, other.Service, other.MarshaledAddress) &&
+ 		maps.Equal(i.LabelSelector.Labels, other.LabelSelector.Labels) &&
+ 		maps.Equal(i.PortNames, other.PortNames) &&
+ 		i.Source == other.Source &&
++		i.MCSImportUID == other.MCSImportUID &&
+ 		i.DNSConnectStrategy == other.DNSConnectStrategy &&
+ 		i.Scope == other.Scope &&
+ 		i.Waypoint.Equals(other.Waypoint) &&
+diff --git a/pilot/pkg/networking/core/fake.go b/pilot/pkg/networking/core/fake.go
+index 026cf96987b359d5138615fee57737dbbe79cfb0..166b91d24565326e0d2440a9113f71aea43adce5 100644
+--- a/pilot/pkg/networking/core/fake.go
++++ b/pilot/pkg/networking/core/fake.go
+@@ -72,7 +72,8 @@ type TestOptions struct {
+ 	NetworksWatcher mesh.NetworksWatcher
+ 
+ 	// Additional service registries to use. A ServiceEntry and memory registry will always be created.
+-	ServiceRegistries []serviceregistry.Instance
++	ServiceRegistries   []serviceregistry.Instance
++	ServiceEntryOptions []serviceentry.Option
+ 
+ 	// Base ConfigController to use. If not set, a in-memory store will be used
+ 	ConfigController model.ConfigStoreController
+@@ -178,8 +179,8 @@ func NewConfigGenTest(t test.Failer, opts TestOptions) *ConfigGenTest {
+ 		xdsUpdater,
+ 		mc,
+ 		env.Watcher,
+-		serviceentry.WithClusterID(opts.ClusterID),
+-		serviceentry.WithKRTDebugger(krt.GlobalDebugHandler))
++		append([]serviceentry.Option{serviceentry.WithClusterID(opts.ClusterID), serviceentry.WithKRTDebugger(krt.GlobalDebugHandler)},
++			opts.ServiceEntryOptions...)...)
+ 	// TODO allow passing in registry, for k8s, mem registry
+ 	serviceDiscovery.AddRegistry(se)
+ 	msd := memregistry.NewServiceDiscovery(opts.Services...)
+diff --git a/pilot/pkg/networking/core/listener_waypoint.go b/pilot/pkg/networking/core/listener_waypoint.go
+index 2619a81245aa95e695f940c567224988834f348d..0a397af67cb3e73460ad51070163dab6830b5423 100644
+--- a/pilot/pkg/networking/core/listener_waypoint.go
++++ b/pilot/pkg/networking/core/listener_waypoint.go
+@@ -1133,6 +1133,10 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 	}
+ 
+ 	virtualServices := lb.node.SidecarScope.EgressListeners[0].VirtualServices()
++	if svc.Attributes.MCSImportUID != "" {
++		virtualServices = append(slices.Clone(virtualServices), lb.push.VirtualServicesForGateway(
++			lb.node.ConfigNamespace, constants.IstioAmbientMCSGateway)...)
++	}
+ 
+ 	// Typically we setup routes with the Host header match. However, for waypoint inbound we are actually using
+ 	// hostname purely to match to the Service VIP. So we only need a single VHost, with routes compute based on the VS.
+@@ -1143,6 +1147,10 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 	allowConsumers := lb.waypointAllowsServiceConsumers(svc)
+ 	for _, vs := range virtualServices {
+ 		spec := vs.Spec.(*networking.VirtualService)
++		if imported, found := vs.Extra[constants.ConfigExtraMeshServiceImport].(kube.MeshServiceImport); found &&
++			!lb.waypointMatchesMCSProjection(svc, cc.port.Port, imported) {
++			continue
++		}
+ 		if consumer, found := vs.Extra[constants.ConfigExtraMeshConsumerService].(kube.MeshConsumerService); found {
+ 			if allowConsumers && waypointConsumerParentMatches(consumer, spec, svc, cc.port.Port) {
+ 				if rules := lb.waypointConsumerHTTPRoutes(vs, cc); len(rules) != 0 {
+@@ -1255,6 +1263,20 @@ func waypointConsumerUsesPrimary(service *workloadapi.Service, key model.Waypoin
+ 	return primaryReceivesTraffic
+ }
+ 
++func (lb *ListenerBuilder) waypointMatchesMCSProjection(service *model.Service, port int, binding kube.MeshServiceImport) bool {
++	if service.Attributes.ServiceRegistry != provider.External || service.Attributes.Namespace != binding.Namespace ||
++		service.Attributes.ObjectName != binding.Projection || service.Attributes.MCSImportUID != binding.ImportUID ||
++		service.DefaultAddress != binding.VIP || uint32(port) != binding.Port {
++		return false
++	}
++	info := lb.push.ServiceInfo(binding.Namespace + "/" + service.Hostname.String())
++	if !info.MatchesMCSProjection(binding) {
++		return false
++	}
++	wp, ok := model.WaypointReferenceFromGatewayAddress(info.Service.GetWaypoint())
++	return ok && wp.Matches(model.WaypointKeyForProxy(lb.node))
++}
++
+ func waypointConsumerParentMatches(parent kube.MeshConsumerService, spec *networking.VirtualService, service *model.Service, port int) bool {
+ 	return service.Attributes.ServiceRegistry == provider.Kubernetes &&
+ 		parent.Port == uint32(port) && parent.Name == service.Attributes.Name &&
+diff --git a/pilot/pkg/networking/core/waypoint.go b/pilot/pkg/networking/core/waypoint.go
+index 3b190c99e6bdea38a1e6c20eb36b1896dab7b9ef..50ce52db0e509999833980bccd1fe0be1b90cae5 100644
+--- a/pilot/pkg/networking/core/waypoint.go
++++ b/pilot/pkg/networking/core/waypoint.go
+@@ -73,6 +73,13 @@ func findWaypointResources(node *model.Proxy, push *model.PushContext) ([]model.
+ 		if !ok {
+ 			continue
+ 		}
++
++		// A projected ServiceImport has one author. Keep the WDS and service registry views
++		// tied to that author through transient updates and conflicts.
++		if (s.MCSImportUID != "" || svc.Attributes.MCSImportUID != "") &&
++			(s.MCSImportUID != svc.Attributes.MCSImportUID || s.Source.Name != svc.Attributes.ObjectName) {
++			continue
++		}
+ 		// Exclude MESH_INTERNAL services with DYNAMIC_DNS resolution from waypoint.
+ 		if svc.Resolution == model.DynamicDNS && !svc.MeshExternal {
+ 			log.Warnf("DYNAMIC_DNS is supported only for MESH_EXTERNAL services; skipping waypoint service %s/%s", svc.Attributes.Namespace, svc.Hostname)
+diff --git a/pilot/pkg/serviceregistry/ambient/ambientindex.go b/pilot/pkg/serviceregistry/ambient/ambientindex.go
+index 51350d2aabe1c82674dde5b6aa5c53cc96f6e15f..6a1f81fb576e315617e91432ebd55ed377290e84 100644
+--- a/pilot/pkg/serviceregistry/ambient/ambientindex.go
++++ b/pilot/pkg/serviceregistry/ambient/ambientindex.go
+@@ -20,6 +20,7 @@ import (
+ 
+ 	corev1 "k8s.io/api/core/v1"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+ 	"k8s.io/apimachinery/pkg/types"
+ 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+ 
+@@ -34,6 +35,7 @@ import (
+ 	"istio.io/istio/pkg/cluster"
+ 	"istio.io/istio/pkg/config"
+ 	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/mesh/meshwatcher"
+ 	"istio.io/istio/pkg/config/schema/gvr"
+ 	"istio.io/istio/pkg/config/schema/kind"
+@@ -60,6 +62,7 @@ type Index interface {
+ 	Run(stop <-chan struct{})
+ 	HasSynced() bool
+ 	model.AmbientIndexes
++	Services() krt.Collection[model.ServiceInfo]
+ }
+ 
+ var _ Index = &index{}
+@@ -142,11 +145,17 @@ type Options struct {
+ 	Flags           FeatureFlags
+ 
+ 	MeshConfig meshwatcher.WatcherCollection
++	MCSImports krt.Collection[*unstructured.Unstructured]
+ 
+ 	Debugger               *krt.DebugHandler
+ 	MultiClusterController *multicluster.Controller
+ }
+ 
++func unmanagedAmbientServiceEntry(obj any) bool {
++	entry := controllers.Extract[*networkingclient.ServiceEntry](obj)
++	return entry != nil && !configgateway.IsMCSProjection(entry.ObjectMeta)
++}
++
+ func New(options Options) Index {
+ 	a := &index{
+ 		SystemNamespace: options.SystemNamespace,
+@@ -199,11 +208,23 @@ func New(options Options) Index {
+ 	gatewayClassClient.Start(a.stop)
+ 	GatewayClasses := krt.WrapClient[*gatewayv1.GatewayClass](gatewayClassClient, opts.WithName("informer/GatewayClasses")...)
+ 
++	serviceEntryFilter := configFilter
++	if options.MCSImports == nil {
++		serviceEntryFilter.ObjectFilter = kubetypes.ComposeFilters(configFilter.ObjectFilter, unmanagedAmbientServiceEntry)
++	}
+ 	serviceEntries := kclient.NewDelayedInformer[*networkingclient.ServiceEntry](client,
+-		gvr.ServiceEntry, kubetypes.StandardInformer, configFilter)
++		gvr.ServiceEntry, kubetypes.StandardInformer, serviceEntryFilter)
+ 	// Start with a.stop to ensure the informer respects the index's stop channel
+ 	serviceEntries.Start(a.stop)
+ 	ServiceEntries := krt.WrapClient[*networkingclient.ServiceEntry](serviceEntries, opts.WithName("informer/ServiceEntries")...)
++	if options.MCSImports != nil {
++		ServiceEntries = krt.NewCollection(ServiceEntries, func(ctx krt.HandlerContext, se *networkingclient.ServiceEntry) **networkingclient.ServiceEntry {
++			if configgateway.MCSProjectionCurrent(ctx, options.MCSImports, se.ObjectMeta, &se.Spec) {
++				return &se
++			}
++			return nil
++		}, opts.WithName("ServiceEntriesWithCurrentMCSProjection")...)
++	}
+ 
+ 	workloadEntries := kclient.NewDelayedInformer[*networkingclient.WorkloadEntry](client,
+ 		gvr.WorkloadEntry, kubetypes.StandardInformer, configFilter)
+@@ -780,6 +801,11 @@ func (a *index) WorkloadsForWaypoint(key model.WaypointKey) []model.WorkloadInfo
+ 	return model.SortWorkloadsByCreationTime(maps.Values(out))
+ }
+ 
++// Services exposes the ambient view used to bind producer routes to a ready waypoint.
++func (a *index) Services() krt.Collection[model.ServiceInfo] {
++	return a.services.Collection
++}
++
+ func (a *index) ServiceInfo(key string) *model.ServiceInfo {
+ 	if svc := a.lookupService(key); svc != nil {
+ 		return svc
+diff --git a/pilot/pkg/serviceregistry/ambient/mcsprojection_test.go b/pilot/pkg/serviceregistry/ambient/mcsprojection_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..4c176999c3002589373dccfb6b961dd95e1cd2f7
+--- /dev/null
++++ b/pilot/pkg/serviceregistry/ambient/mcsprojection_test.go
+@@ -0,0 +1,34 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package ambient
++
++import (
++	"testing"
++
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/client-go/tools/cache"
++
++	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
++	"istio.io/istio/pkg/test/util/assert"
++)
++
++func TestAmbientServiceEntryFilterHandlesDeleteTombstone(t *testing.T) {
++	entry := &networkingclient.ServiceEntry{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "service"}}
++	tombstone := cache.DeletedFinalStateUnknown{Key: "default/service", Obj: entry}
++	assert.Equal(t, unmanagedAmbientServiceEntry(tombstone), true)
++	entry.Labels = map[string]string{configgateway.MCSProjectorLabel: configgateway.MCSProjectorName}
++	assert.Equal(t, unmanagedAmbientServiceEntry(tombstone), false)
++}
+diff --git a/pilot/pkg/serviceregistry/ambient/services.go b/pilot/pkg/serviceregistry/ambient/services.go
+index 9b89db3f688f95114ca26e61eb6d0f582ddfdfb1..254c2193a0a5c3e474c19424254f53f0d206ecec 100644
+--- a/pilot/pkg/serviceregistry/ambient/services.go
++++ b/pilot/pkg/serviceregistry/ambient/services.go
+@@ -31,6 +31,8 @@ import (
+ 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
+ 	"istio.io/istio/pkg/cluster"
+ 	"istio.io/istio/pkg/config"
++	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/host"
+ 	"istio.io/istio/pkg/config/mesh/labelselector"
+ 	"istio.io/istio/pkg/config/protocol"
+@@ -68,7 +70,7 @@ func (a Builder) ServicesCollection(
+ 			}),
+ 		)...)
+ 
+-	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces, serviceEntryVisibility),
++	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces, serviceEntryVisibility, meshConfig),
+ 		append(
+ 			opts.WithName("ServiceEntriesInfo"),
+ 			krt.WithMetadata(krt.Metadata{
+@@ -437,9 +439,23 @@ func (a Builder) serviceEntryServiceBuilder(
+ 	waypoints krt.Collection[Waypoint],
+ 	namespaces krt.Collection[*v1.Namespace],
+ 	visibility krt.Singleton[model.ServiceEntryVisibilityMatcher],
++	meshConfig krt.Singleton[MeshConfig],
+ ) krt.TransformationMulti[*networkingclient.ServiceEntry, TypedServiceInfo] {
+ 	return func(ctx krt.HandlerContext, s *networkingclient.ServiceEntry) []TypedServiceInfo {
+ 		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, visibility, s.ObjectMeta)
++		if waypoint != nil && configgateway.MCSProjectionOwner(s.ObjectMeta) != nil {
++			switch {
++			case waypoint.ControllerName != constants.ManagedGatewayMeshController:
++				waypointError = &model.StatusMessage{Reason: "UnsupportedWaypointClass", Message: "ServiceImport requires an Istio waypoint"}
++			case HasActiveServiceWaypointCanary(s.ObjectMeta, nil):
++				waypointError = &model.StatusMessage{Reason: "UnsupportedWaypointCanary", Message: "ServiceImport requires a single waypoint"}
++			case !projectionVisibleToWaypoint(ctx, s, waypoint.Namespace, meshConfig):
++				waypointError = &model.StatusMessage{Reason: "WaypointCannotSeeServiceEntry", Message: "ServiceImport projection is not exported to its waypoint"}
++			}
++			if waypointError != nil {
++				waypoint = nil
++			}
++		}
+ 
+ 		ns := krt.FetchOne(ctx, namespaces, krt.FilterKey(s.Namespace))
+ 		var nsAnnotations map[string]string
+@@ -459,6 +475,21 @@ func (a Builder) serviceEntryServiceBuilder(
+ 	}
+ }
+ 
++// Match PushContext's exportTo defaults for the exact namespace that will build the waypoint chain.
++func projectionVisibleToWaypoint(
++	ctx krt.HandlerContext, s *networkingclient.ServiceEntry, namespace string, meshConfig krt.Singleton[MeshConfig],
++) bool {
++	targets := s.Spec.GetExportTo()
++	if len(targets) == 0 {
++		targets = nil
++		if mesh := krt.FetchOne(ctx, meshConfig.AsCollection()); mesh != nil {
++			targets = mesh.GetDefaultServiceExportTo()
++		}
++
++	}
++	return configgateway.MCSExportVisible(targets, s.Namespace, namespace)
++}
++
+ func serviceEntriesInfo(
+ 	ctx krt.HandlerContext,
+ 	s *networkingclient.ServiceEntry,
+@@ -510,6 +541,11 @@ func serviceEntriesInfo(
+ 	// condition. The status value itself comes from the WDS Service.Visibility set above.
+ 	visibilityConfigured := vis.Configured()
+ 	services := constructServiceEntries(ctx, s, w, nsAnnotations, networkGetter)
++
++	var importUID string
++	if owner := configgateway.MCSProjectionOwner(s.ObjectMeta); owner != nil {
++		importUID = string(owner.UID)
++	}
+ 	result := make([]model.ServiceInfo, 0, len(services))
+ 	for _, e := range services {
+ 		e.Visibility = wdsVisibility(resolvedVisibility)
+@@ -520,6 +556,7 @@ func serviceEntriesInfo(
+ 			PortNames:            portNames,
+ 			LabelSelector:        sel,
+ 			Source:               MakeSource(s),
++			MCSImportUID:         importUID,
+ 			Waypoint:             waypoint,
+ 			DNSConnectStrategy:   model.GetDNSConnectStrategy(s.Annotations),
+ 			CreationTime:         s.CreationTimestamp.Time,
+diff --git a/pilot/pkg/serviceregistry/ambient/services_test.go b/pilot/pkg/serviceregistry/ambient/services_test.go
+index f0e4d6b758e9c0cd07111fdc1849d66cf1854b65..746e2fc5ed4cb3aa4d537d6dbaeafc1bd56949ec 100644
+--- a/pilot/pkg/serviceregistry/ambient/services_test.go
++++ b/pilot/pkg/serviceregistry/ambient/services_test.go
+@@ -1376,6 +1376,7 @@ func TestServiceEntryServices(t *testing.T) {
+ 				krttest.GetMockCollection[Waypoint](mock),
+ 				krttest.GetMockCollection[*v1.Namespace](mock),
+ 				krt.NewStatic(matcher, true),
++				krttest.GetMockSingleton[MeshConfig](mock),
+ 			)
+ 			wrapper := builder(krt.TestingDummyContext{}, tt.se)
+ 			res := slices.Map(wrapper, func(e TypedServiceInfo) *workloadapi.Service {
+diff --git a/pilot/pkg/serviceregistry/ambient/waypoints.go b/pilot/pkg/serviceregistry/ambient/waypoints.go
+index 1e21d0960343eb2cc596bc9993646ff1c754ca64..99f7a73346e83eb5eca348366f08c6828ff314fa 100644
+--- a/pilot/pkg/serviceregistry/ambient/waypoints.go
++++ b/pilot/pkg/serviceregistry/ambient/waypoints.go
+@@ -60,7 +60,8 @@ type Waypoint struct {
+ 
+ 	// TrafficType controls whether Service or Workload can reference this
+ 	// waypoint. Must be one of "all", "service", "workload".
+-	TrafficType string
++	TrafficType    string
++	ControllerName gatewayv1.GatewayController
+ 
+ 	// ServiceAccounts from instances of the waypoint.
+ 	// This only handles Pods. If we wish to support non-pod waypoints, we'll
+@@ -78,6 +79,7 @@ type ClusteredNamespace struct {
+ func (w Waypoint) Equals(other Waypoint) bool {
+ 	return w.Named == other.Named &&
+ 		w.TrafficType == other.TrafficType &&
++		w.ControllerName == other.ControllerName &&
+ 		ptr.Equal(w.DefaultBinding, other.DefaultBinding) &&
+ 		w.AllowedRoutes.Equals(other.AllowedRoutes) &&
+ 		slices.Equal(w.ServiceAccounts, other.ServiceAccounts) &&
+@@ -551,7 +553,12 @@ func makeWaypoint(
+ 	netw network.ID,
+ ) *Waypoint {
+ 	binding := makeInboundBinding(gateway, gatewayClass)
++	var controllerName gatewayv1.GatewayController
++	if gatewayClass != nil {
++		controllerName = gatewayClass.Spec.ControllerName
++	}
+ 	return &Waypoint{
++		ControllerName:  controllerName,
+ 		Named:           krt.NewNamed(gateway),
+ 		Address:         getGatewayAddress(gateway, netw),
+ 		DefaultBinding:  binding,
+diff --git a/pilot/pkg/serviceregistry/serviceentry/controller.go b/pilot/pkg/serviceregistry/serviceentry/controller.go
+index 55a94d634db2173e0137b2e1c9383d592be45bc2..2d392f8114be6850679aef96d642396259ee1dfd 100644
+--- a/pilot/pkg/serviceregistry/serviceentry/controller.go
++++ b/pilot/pkg/serviceregistry/serviceentry/controller.go
+@@ -18,6 +18,7 @@ import (
+ 	"strings"
+ 
+ 	v1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+ 
+ 	"istio.io/istio/pilot/pkg/features"
+ 	"istio.io/istio/pilot/pkg/model"
+@@ -72,6 +73,7 @@ type Controller struct {
+ 	workloadEntryController bool
+ 
+ 	canonicalServiceForMeshExternal bool
++	mcsImports                      krt.Collection[*unstructured.Unstructured]
+ 
+ 	model.NetworkGatewaysHandler
+ }
+@@ -167,6 +169,13 @@ func WithNetworkIDCb(cb func(endpointIP string, labels labels.Instance) network.
+ 	}
+ }
+ 
++// WithMCSImports gives the registry the same live projection source as the Gateway API controller.
++func WithMCSImports(load func() krt.Collection[*unstructured.Unstructured]) Option {
++	return func(o *Controller) {
++		o.mcsImports = load()
++	}
++}
++
+ func WithKRTDebugger(debugger *krt.DebugHandler) Option {
+ 	return func(o *Controller) {
+ 		o.krtDebugger = debugger
+@@ -267,6 +276,7 @@ func (s *Controller) buildCollections() {
+ 
+ 		services, servicesByNsHost, servicesByHost := services(
+ 			s.inputs.ServiceEntries,
++			s.mcsImports,
+ 			s.inputs.MeshConfig,
+ 			s.inputs.Namespaces,
+ 			workloadsByNamespace,
+diff --git a/pilot/pkg/serviceregistry/serviceentry/conversion.go b/pilot/pkg/serviceregistry/serviceentry/conversion.go
+index a4f154712e778fab9030dac12730c82c70819a99..a153e111511855e4588ab75bd14f23076851c023 100644
+--- a/pilot/pkg/serviceregistry/serviceentry/conversion.go
++++ b/pilot/pkg/serviceregistry/serviceentry/conversion.go
+@@ -21,6 +21,7 @@ import (
+ 	"strings"
+ 
+ 	v1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+ 
+ 	"istio.io/api/label"
+ 	networking "istio.io/api/networking/v1alpha3"
+@@ -33,6 +34,7 @@ import (
+ 	"istio.io/istio/pkg/cluster"
+ 	"istio.io/istio/pkg/config"
+ 	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/host"
+ 	"istio.io/istio/pkg/config/mesh/meshwatcher"
+ 	"istio.io/istio/pkg/config/protocol"
+@@ -282,6 +284,11 @@ func convertServices(cfg config.Config, nsAnnotations map[string]string, canonic
+ 		}
+ 	}
+ 
++	var importUID string
++	if owner := configgateway.MCSProjectionOwner(cfg.ToObjectMeta()); owner != nil {
++
++		importUID = string(owner.UID)
++	}
+ 	out := make([]*model.Service, 0, len(hostAddresses))
+ 	labels := cfg.Labels
+ 	if canonicalServiceForMeshExternal && serviceEntry.Location == networking.ServiceEntry_MESH_EXTERNAL {
+@@ -304,7 +311,7 @@ func convertServices(cfg config.Config, nsAnnotations map[string]string, canonic
+ 				Labels:                 labels,
+ 				ExportTo:               exportTo,
+ 				LabelSelectors:         labelSelectors,
+-				K8sAttributes:          model.K8sAttributes{ObjectName: cfg.Name, TrafficDistribution: trafficDistribution, DNSConnectStrategy: dnsConnectStrategy},
++				K8sAttributes:          model.K8sAttributes{ObjectName: cfg.Name, MCSImportUID: importUID, TrafficDistribution: trafficDistribution, DNSConnectStrategy: dnsConnectStrategy},
+ 			},
+ 			ServiceAccounts: serviceEntry.SubjectAltNames,
+ 		}
+@@ -509,6 +516,7 @@ func convertWorkloadEntryToWorkloadInstance(
+ // Services derived from ServiceEntry configs
+ func services(
+ 	serviceEntries krt.Collection[config.Config],
++	mcsImports krt.Collection[*unstructured.Unstructured],
+ 	meshConfig krt.Collection[meshwatcher.MeshConfigResource],
+ 	namespaces krt.Collection[*v1.Namespace],
+ 	workloadsByNamespace krt.Index[string, *model.WorkloadInstance],
+@@ -523,6 +531,9 @@ func services(
+ 
+ 	collection := krt.NewManyCollection(serviceEntries, func(ctx krt.HandlerContext, cfg config.Config) []ServiceWithInstances {
+ 		se := cfg.Spec.(*networking.ServiceEntry)
++		if !configgateway.MCSProjectionCurrent(ctx, mcsImports, cfg.ToObjectMeta(), se) {
++			return nil
++		}
+ 		namespace := krt.FetchOne(ctx, namespaces, krt.FilterKey(cfg.Namespace))
+ 		var namespaceAnnotations map[string]string
+ 		var namespaceLabels map[string]string
+diff --git a/pilot/pkg/xds/waypoint_serviceimport_test.go b/pilot/pkg/xds/waypoint_serviceimport_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..4545ce202b9374589e82f323ed3272cdc49b216a
+--- /dev/null
++++ b/pilot/pkg/xds/waypoint_serviceimport_test.go
+@@ -0,0 +1,298 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package xds_test
++
++import (
++	"context"
++	"fmt"
++	"testing"
++
++	envoyroute "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
++
++	extensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
++
++	"istio.io/api/label"
++	"istio.io/istio/pilot/pkg/config/kube/crdclient"
++	"istio.io/istio/pilot/pkg/features"
++	"istio.io/istio/pilot/pkg/model"
++	"istio.io/istio/pilot/test/xds"
++	"istio.io/istio/pilot/test/xdstest"
++	"istio.io/istio/pkg/config"
++	"istio.io/istio/pkg/config/constants"
++	configgateway "istio.io/istio/pkg/config/gateway/kube"
++	"istio.io/istio/pkg/config/schema/gvk"
++	"istio.io/istio/pkg/kube"
++	"istio.io/istio/pkg/test"
++	"istio.io/istio/pkg/test/util/assert"
++)
++
++func TestWaypointServiceImportProducerRoute(t *testing.T) {
++	test.SetForTest(t, &features.EnableAmbient, true)
++	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
++	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, true)
++	test.SetForTest(t, &features.EnableAmbientMultiNetwork, false)
++	test.SetForTest(t, &features.EnableMCSHost, false)
++
++	const parent = "store"
++	const importedHost = "store.default.svc.clusterset.local"
++	const coreHost = "store.default.svc.cluster.local"
++	gvr := schema.GroupVersionResource{Group: configgateway.MCSServiceImportGroup, Version: "v1alpha1", Resource: "serviceimports"}
++	clusterSetVIP := "1.2.3.4"
++	projection := fmt.Sprintf(`apiVersion: networking.istio.io/v1
++kind: ServiceEntry
++metadata:
++  namespace: default
++  name: %s
++  annotations:
++    gateway-api-openstack.github.io/mcs-endpoint-slice-managed-by: mcs.example.io
++  labels:
++    gateway-api-openstack.github.io/managed-by: hibiscus-mcs-projector
++    istio.io/use-waypoint: waypoint
++  ownerReferences:
++  - apiVersion: multicluster.x-k8s.io/v1alpha1
++    kind: ServiceImport
++    name: store
++    uid: import-1
++    controller: true
++spec:
++  hosts: [%s]
++  addresses: [%s]
++  ports:
++  - number: 80
++    name: http
++    protocol: HTTP
++  location: MESH_INTERNAL
++  resolution: STATIC
++  endpoints:
++  - address: 1.1.1.8
++    ports:
++      http: 8080`, configgateway.MCSProjectionName(parent), importedHost, clusterSetVIP)
++	object, _, err := kube.IstioCodec.UniversalDeserializer().Decode([]byte(projection), nil, nil)
++	assert.NoError(t, err)
++	base := joinYaml(waypointGateway, waypointSvc, waypointInstance, `apiVersion: gateway.networking.k8s.io/v1
++kind: GatewayClass
++metadata:
++  name: waypoint
++spec:
++  controllerName: istio.io/mesh-controller`, `apiVersion: v1
++kind: Service
++metadata:
++  name: store
++  namespace: default
++  labels:
++    istio.io/use-waypoint: waypoint
++spec:
++  clusterIP: 1.2.3.5
++  ports:
++  - name: http
++    port: 80`, `apiVersion: discovery.k8s.io/v1
++kind: EndpointSlice
++metadata:
++  namespace: default
++  name: store-core
++  labels:
++    kubernetes.io/service-name: store
++addressType: IPv4
++ports:
++- name: http
++  protocol: TCP
++  port: 8081
++endpoints:
++- addresses: [1.1.1.9]
++  conditions:
++    ready: true`,
++		projection, `apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: producer
++  namespace: default
++spec:
++  parentRefs:
++  - group: multicluster.x-k8s.io
++    kind: ServiceImport
++    name: store
++    port: 80
++  rules:
++  - matches:
++    - path:
++        type: Exact
++        value: /cart
++    backendRefs:
++    - name: store
++      port: 80
++  - matches:
++    - path:
++        type: Exact
++        value: /missing
++    backendRefs:
++    - group: multicluster.x-k8s.io
++      kind: ServiceImport
++      name: missing
++      port: 80
++  - matches:
++    - path:
++        type: Exact
++        value: /wrong-port
++    backendRefs:
++    - group: multicluster.x-k8s.io
++      kind: ServiceImport
++      name: store
++      port: 81
++  - backendRefs:
++    - group: multicluster.x-k8s.io
++      kind: ServiceImport
++      name: store
++      port: 80`)
++	d := xds.NewFakeDiscoveryServer(t, xds.FakeOptions{
++		ConfigString:           waypointInstance,
++		Configs:                []config.Config{crdclient.TranslateObject(object, gvk.ServiceEntry, "cluster.local")},
++		KubernetesObjectString: base,
++	})
++	proxy := d.SetupProxy(&model.Proxy{
++		Type:            model.Waypoint,
++		ConfigNamespace: "default",
++		Labels: map[string]string{
++			label.IoK8sNetworkingGatewayGatewayName.Name: "waypoint",
++			label.GatewayManaged.Name:                    constants.ManagedGatewayMeshControllerLabel,
++		},
++		IPAddresses: []string{"3.0.0.1"},
++	})
++	importCluster := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", importedHost, 80)
++	coreCluster := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", coreHost, 80)
++	waypointRoutes := func(cluster string) []*envoyroute.Route {
++		proxy.SetSidecarScope(d.PushContext())
++		l := xdstest.ExtractListener("main_internal", d.Listeners(proxy))
++		chain := xdstest.ExtractFilterChain(cluster, l)
++		if chain == nil {
++			return nil
++		}
++		var routes []*envoyroute.Route
++		for _, host := range xdstest.ExtractHTTPConnectionManager(t, chain).GetRouteConfig().GetVirtualHosts() {
++			routes = append(routes, host.GetRoutes()...)
++		}
++		return routes
++	}
++	routeClusters := func(cluster string) []string {
++		var clusters []string
++		for _, route := range waypointRoutes(cluster) {
++			clusters = append(clusters, route.GetRoute().GetCluster())
++		}
++		return clusters
++	}
++	assert.Equal(t, routeClusters(importCluster), nil)
++	assert.EventuallyEqual(t, func() []string { return routeClusters(coreCluster) }, []string{coreCluster})
++
++	// Apply the real parent after the route and install the CRD late, as a provider would.
++	ctx := context.Background()
++	client := d.KubeClient().Dynamic().Resource(gvr).Namespace("default")
++	imported, err := client.Create(ctx, &unstructured.Unstructured{Object: map[string]any{
++		"apiVersion": gvr.GroupVersion().String(),
++		"kind":       "ServiceImport",
++		"metadata": map[string]any{
++			"name": parent, "namespace": "default", "uid": "import-1",
++			"labels":      map[string]any{"istio.io/use-waypoint": "waypoint"},
++			"annotations": map[string]any{configgateway.MCSProviderAnnotation: "mcs.example.io"},
++		},
++		"spec": map[string]any{
++			"type": "ClusterSetIP", "ips": []any{clusterSetVIP},
++			"ports": []any{map[string]any{"port": int64(80), "name": "http", "protocol": "TCP"}},
++		},
++		"status": map[string]any{"endpointSliceObjects": "Present"},
++	}}, metav1.CreateOptions{})
++	assert.NoError(t, err)
++	_, err = d.KubeClient().Ext().ApiextensionsV1().CustomResourceDefinitions().Create(ctx, &extensions.CustomResourceDefinition{
++		ObjectMeta: metav1.ObjectMeta{Name: "serviceimports.multicluster.x-k8s.io", UID: "mcs-crd"},
++		Spec: extensions.CustomResourceDefinitionSpec{
++			Group: gvr.Group, Scope: extensions.NamespaceScoped,
++			Names:    extensions.CustomResourceDefinitionNames{Kind: "ServiceImport", Plural: "serviceimports"},
++			Versions: []extensions.CustomResourceDefinitionVersion{{Name: gvr.Version, Served: true, Storage: true}},
++		},
++		Status: extensions.CustomResourceDefinitionStatus{Conditions: []extensions.CustomResourceDefinitionCondition{
++			{Type: extensions.Established, Status: extensions.ConditionTrue},
++		}},
++	}, metav1.CreateOptions{})
++	assert.NoError(t, err)
++
++	active := []string{"UnknownService", "UnknownService", coreCluster, importCluster}
++	assert.EventuallyEqual(t, func() []string { return routeClusters(importCluster) }, active)
++	for _, r := range waypointRoutes(importCluster) {
++		if r.GetRoute().GetCluster() == "UnknownService" {
++			assert.Equal(t, r.GetRoute().GetClusterNotFoundResponseCode(), envoyroute.RouteAction_INTERNAL_SERVER_ERROR)
++		}
++	}
++	assert.Equal(t, routeClusters(coreCluster), []string{coreCluster})
++	endpointAddresses := func(cluster string) []string {
++		// A connected proxy refreshes its scope on a service push. Mirror that for this synthetic proxy.
++		proxy.SetSidecarScope(d.PushContext())
++		for _, cla := range d.Endpoints(proxy) {
++			if cla.GetClusterName() == cluster {
++				return xdstest.ExtractEndpoints(cla)
++			}
++		}
++		return nil
++	}
++	assert.EventuallyEqual(t, func() []string { return endpointAddresses(importCluster) }, []string{"1.1.1.8:8080"})
++	assert.Equal(t, endpointAddresses(coreCluster), []string{"1.1.1.9:8081"})
++
++	// The GatewayClass may change while the projection and import stay the same.
++	gwAPI := d.KubeClient().GatewayAPI().GatewayV1()
++	foreignClass := &gatewayv1.GatewayClass{
++		ObjectMeta: metav1.ObjectMeta{Name: "foreign"},
++		Spec:       gatewayv1.GatewayClassSpec{ControllerName: "example.org/other-mesh"},
++	}
++	_, err = gwAPI.GatewayClasses().Create(ctx, foreignClass, metav1.CreateOptions{})
++	assert.NoError(t, err)
++	gateways := gwAPI.Gateways("default")
++	gateway, err := gateways.Get(ctx, "waypoint", metav1.GetOptions{})
++	assert.NoError(t, err)
++	gateway.Spec.GatewayClassName = "foreign"
++	gateway, err = gateways.Update(ctx, gateway, metav1.UpdateOptions{})
++	assert.NoError(t, err)
++	assert.EventuallyEqual(t, func() bool {
++		svc := d.AmbientIndex.ServiceInfo("default/" + importedHost)
++		return svc != nil && svc.Service.GetWaypoint() == nil && len(routeClusters(importCluster)) == 0
++	}, true)
++	gateway.Spec.GatewayClassName = "waypoint"
++	_, err = gateways.Update(ctx, gateway, metav1.UpdateOptions{})
++	assert.NoError(t, err)
++	assert.EventuallyEqual(t, func() []string { return routeClusters(importCluster) }, active)
++
++	// With the live import still enrolled, removing a Route restores the projected default backend.
++	routes := gwAPI.HTTPRoutes("default")
++	producer, err := routes.Get(ctx, "producer", metav1.GetOptions{})
++	assert.NoError(t, err)
++	assert.NoError(t, routes.Delete(ctx, "producer", metav1.DeleteOptions{}))
++	assert.EventuallyEqual(t, func() []string { return routeClusters(importCluster) }, []string{importCluster})
++	producer.ResourceVersion = ""
++	_, err = routes.Create(ctx, producer, metav1.CreateOptions{})
++	assert.NoError(t, err)
++	assert.EventuallyEqual(t, func() []string { return routeClusters(importCluster) }, active)
++
++	// The still-persisted projection and its rules must be withdrawn if the attestation is removed.
++	imported.SetAnnotations(nil)
++	_, err = client.Update(ctx, imported, metav1.UpdateOptions{})
++	assert.NoError(t, err)
++	assert.EventuallyEqual(t, func() bool {
++		return len(d.Env().GatewayAPIController.List(gvk.VirtualService, "default")) == 0 &&
++			d.AmbientIndex.ServiceInfo("default/"+importedHost) == nil &&
++			d.Env().PushContext().ServiceIndex.HostnameAndNamespace[importedHost]["default"] == nil &&
++			len(routeClusters(importCluster)) == 0
++	}, true)
++	assert.Equal(t, routeClusters(coreCluster), []string{coreCluster})
++}
+diff --git a/pilot/test/xds/fake.go b/pilot/test/xds/fake.go
+index e276f010c5d4f735786b0a2c5a3de9a80b48dd8d..2cca9383b8646b1c5f803e538c651778f4b8faf4 100644
+--- a/pilot/test/xds/fake.go
++++ b/pilot/test/xds/fake.go
+@@ -28,6 +28,7 @@ import (
+ 	"google.golang.org/grpc/credentials/insecure"
+ 	"google.golang.org/grpc/test/bufconn"
+ 	authorizationv1 "k8s.io/api/authorization/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+ 	"k8s.io/apimachinery/pkg/runtime"
+ 	"k8s.io/apimachinery/pkg/runtime/schema"
+ 	"k8s.io/client-go/kubernetes/fake"
+@@ -50,6 +51,7 @@ import (
+ 	"istio.io/istio/pilot/pkg/serviceregistry/ambient"
+ 	kube "istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
+ 	memregistry "istio.io/istio/pilot/pkg/serviceregistry/memory"
++	"istio.io/istio/pilot/pkg/serviceregistry/serviceentry"
+ 	"istio.io/istio/pilot/pkg/serviceregistry/util/xdsfake"
+ 	"istio.io/istio/pilot/pkg/xds"
+ 	"istio.io/istio/pilot/pkg/xds/endpoints"
+@@ -249,7 +251,10 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
+ 		XDSUpdater:          xdsUpdater,
+ 		NetworksWatcher:     opts.NetworksWatcher,
+ 		ServiceRegistries:   registries,
+-		ConfigStoreCaches:   []model.ConfigStoreController{ingr},
++		ServiceEntryOptions: []serviceentry.Option{serviceentry.WithMCSImports(func() krt.Collection[*unstructured.Unstructured] {
++			return gwc.ServiceImports()
++		})},
++		ConfigStoreCaches: []model.ConfigStoreController{ingr},
+ 		CreateConfigStore: func(c model.ConfigStoreController) model.ConfigStoreController {
+ 			// Create extension controller with the aggregate controller 'c'
+ 			// so it can see all configs including those from the base store
+@@ -259,6 +264,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
+ 				return true
+ 			}, kube.Options{
+ 				DomainSuffix: "cluster.local",
++				MeshWatcher:  meshwatcher.NewTestWatcher(m),
+ 			}, xdsUpdater)
+ 			gwc = g
+ 
+@@ -308,6 +314,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
+ 		// before starting informers ensures no krt event processing races with field assignments
+ 		// inside ambient.New().
+ 		ambientIdx = ambient.New(ambient.Options{
++			MCSImports:             gwc.ServiceImports(),
+ 			SystemNamespace:        "istio-system",
+ 			DomainSuffix:           "cluster.local",
+ 			ClusterID:              opts.DefaultClusterName,
+@@ -325,6 +332,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
+ 			t.Fatal(err)
+ 		}
+ 		s.Env.AmbientIndexes = ambientIdx
++		gwc.SetAmbientServiceImportServices(ambientIdx.Services())
+ 	} else {
+ 		s.Env.AmbientIndexes = &model.NoopAmbientIndexes{}
+ 	}
+diff --git a/pkg/config/constants/constants.go b/pkg/config/constants/constants.go
+index f1598fd1f5ff63897e2f754fb802a62545ec1b11..320025930688b6171b68e9c876b3539eac4d711b 100644
+--- a/pkg/config/constants/constants.go
++++ b/pkg/config/constants/constants.go
+@@ -233,6 +233,12 @@ const (
+ 	// TODO: think about a better name?
+ 	ConfigExtraPerRouteRuleInferencePoolConfigs = "perRouteRuleInferencePoolConfigs"
+ 
++	// IstioAmbientMCSGateway indexes generated routes for ambient waypoints only.
++	IstioAmbientMCSGateway = "~ambient-mcs"
++
++	// ConfigExtraMeshServiceImport identifies the exact ServiceEntry projection targeted by a producer HTTPRoute.
++	ConfigExtraMeshServiceImport = "meshServiceImport"
++
+ 	// ConfigExtraMeshConsumerService contains the parent Service and effective listener port for a consumer route.
+ 	ConfigExtraMeshConsumerService = "meshConsumerService"
+ )
+diff --git a/pkg/config/gateway/kube/gatewayapi.go b/pkg/config/gateway/kube/gatewayapi.go
+index 278849a09abda558e9f6f7e89365eb1e8a37580f..bc83e96e1c4d0de94659442753634a4337afae1d 100644
+--- a/pkg/config/gateway/kube/gatewayapi.go
++++ b/pkg/config/gateway/kube/gatewayapi.go
+@@ -15,9 +15,12 @@
+ package kube
+ 
+ import (
++	"crypto/sha256"
+ 	"fmt"
+ 	"strings"
+ 
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++
+ 	"istio.io/istio/pkg/config/constants"
+ )
+ 
+@@ -44,3 +47,38 @@ type MeshConsumerService struct {
+ 	Name      string
+ 	Port      uint32
+ }
++
++const (
++	MCSServiceImportGroup = "multicluster.x-k8s.io"
++	MCSServiceImportKind  = "ServiceImport"
++	MCSProjectorLabel     = "gateway-api-openstack.github.io/managed-by"
++	MCSProjectorName      = "hibiscus-mcs-projector"
++)
++
++// MeshServiceImport identifies the projection eligible to receive an imported VIP's routes.
++type MeshServiceImport struct {
++	Namespace  string
++	Projection string
++	ImportUID  string
++	VIP        string
++	Waypoint   string
++	Port       uint32
++}
++
++func MCSProjectionName(importName string) string {
++	digest := sha256.Sum256([]byte(importName))
++	return fmt.Sprintf("hibiscus-mcs-%x", digest[:16])
++}
++
++func MCSProjectionOwner(meta metav1.ObjectMeta) *metav1.OwnerReference {
++	if meta.Labels[MCSProjectorLabel] != MCSProjectorName || len(meta.OwnerReferences) != 1 {
++		return nil
++	}
++	owner := &meta.OwnerReferences[0]
++	if owner.Kind != MCSServiceImportKind || owner.UID == "" || owner.Controller == nil || !*owner.Controller ||
++		(owner.APIVersion != MCSServiceImportGroup+"/v1beta1" && owner.APIVersion != MCSServiceImportGroup+"/v1alpha1") ||
++		meta.Name != MCSProjectionName(owner.Name) {
++		return nil
++	}
++	return owner
++}
+diff --git a/pkg/config/gateway/kube/serviceimport.go b/pkg/config/gateway/kube/serviceimport.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..15c2e2d7352f3f5838614f3406649230a68fbd3c
+--- /dev/null
++++ b/pkg/config/gateway/kube/serviceimport.go
+@@ -0,0 +1,182 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package kube
++
++import (
++	"cmp"
++	"fmt"
++	"net/netip"
++	"slices"
++	"strings"
++
++	"k8s.io/apimachinery/pkg/api/meta"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
++	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/util/validation"
++
++	"istio.io/api/label"
++	istio "istio.io/api/networking/v1alpha3"
++	"istio.io/istio/pkg/kube/krt"
++)
++
++const MCSProviderAnnotation = "gateway-api-openstack.github.io/mcs-endpoint-slice-managed-by"
++
++// MCSImport is the supported, enrolled subset of the provider's ServiceImport.
++type MCSImport struct {
++	MeshServiceImport
++	Host       string
++	PortName   string
++	apiVersion string
++	name       string
++	provider   string
++}
++
++func ReadMCSImport(imported *unstructured.Unstructured) (*MCSImport, error) {
++	if imported == nil || imported.GetDeletionTimestamp() != nil || imported.GetUID() == "" {
++		return nil, fmt.Errorf("ServiceImport not found")
++	}
++	enrollment := imported.GetLabels()
++	waypointName := enrollment[label.IoIstioUseWaypoint.Name]
++	waypointNS := cmp.Or(enrollment[label.IoIstioUseWaypointNamespace.Name], imported.GetNamespace())
++	provider := imported.GetAnnotations()[MCSProviderAnnotation]
++	if strings.EqualFold(waypointName, "none") || len(validation.IsDNS1123Subdomain(waypointName)) != 0 ||
++		len(validation.IsDNS1123Label(waypointNS)) != 0 || provider == "" ||
++		provider == "endpointslice-controller.k8s.io" || provider == "endpointslicemirroring-controller.k8s.io" ||
++		len(validation.IsValidLabelValue(provider)) != 0 {
++		return nil, fmt.Errorf("ServiceImport requires explicit waypoint and EndpointSlice provider enrollment")
++	}
++	inventory, _, _ := unstructured.NestedString(imported.Object, "status", "endpointSliceObjects")
++
++	status, _, _ := unstructured.NestedMap(imported.Object, "status")
++	var readiness struct {
++		Conditions []metav1.Condition `json:"conditions"`
++	}
++	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(status, &readiness); err != nil {
++		return nil, fmt.Errorf("ServiceImport status is invalid")
++	}
++	if ready := meta.FindStatusCondition(readiness.Conditions, "Ready"); ready != nil &&
++		(ready.ObservedGeneration == 0 || ready.ObservedGeneration == imported.GetGeneration()) &&
++		ready.Status != metav1.ConditionTrue {
++		return nil, fmt.Errorf("ServiceImport provider reports that the import is not ready")
++	}
++	data, _, _ := unstructured.NestedMap(imported.Object, "spec")
++	var spec struct {
++		Type                  string   `json:"type"`
++		IPs                   []string `json:"ips"`
++		IPFamilies            []string `json:"ipFamilies"`
++		InternalTrafficPolicy string   `json:"internalTrafficPolicy"`
++		Ports                 []struct {
++			Name        string  `json:"name"`
++			Protocol    string  `json:"protocol"`
++			AppProtocol *string `json:"appProtocol"`
++			Port        int32   `json:"port"`
++		} `json:"ports"`
++	}
++	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(data, &spec); err != nil ||
++		spec.Type != "ClusterSetIP" || len(spec.IPs) != 1 || len(spec.Ports) != 1 || inventory != "Present" {
++		return nil, fmt.Errorf("ServiceImport requires one ClusterSetIP, one port and a present EndpointSlice inventory")
++	}
++	if spec.InternalTrafficPolicy != "" && spec.InternalTrafficPolicy != "Cluster" {
++		return nil, fmt.Errorf("ServiceImport requires Cluster traffic policy")
++	}
++	ip, err := netip.ParseAddr(spec.IPs[0])
++	port := spec.Ports[0]
++	if err != nil || !ip.Is4() || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
++		(len(spec.IPFamilies) != 0 && (len(spec.IPFamilies) != 1 || spec.IPFamilies[0] != "IPv4")) ||
++		port.Port < 1 || port.Port > 65535 || (port.Protocol != "" && port.Protocol != "TCP") {
++		return nil, fmt.Errorf("ServiceImport requires an IPv4 VIP and a TCP port")
++	}
++
++	appProtocol := ""
++	if port.AppProtocol != nil {
++		appProtocol = *port.AppProtocol
++	}
++	if appProtocol != "http" && !(appProtocol == "" && (port.Name == "http" || strings.HasPrefix(port.Name, "http-"))) {
++		return nil, fmt.Errorf("ServiceImport requires an HTTP port")
++	}
++	return &MCSImport{
++		MeshServiceImport: MeshServiceImport{
++			Namespace: imported.GetNamespace(), Projection: MCSProjectionName(imported.GetName()),
++			ImportUID: string(imported.GetUID()), VIP: ip.String(), Waypoint: waypointNS + "/" + waypointName, Port: uint32(port.Port),
++		},
++		Host:     imported.GetName() + "." + imported.GetNamespace() + ".svc.clusterset.local",
++		PortName: port.Name, apiVersion: imported.GetAPIVersion(), name: imported.GetName(), provider: provider,
++	}, nil
++}
++
++// MatchesProjection verifies the current source and the fields that define its mesh identity.
++func (imported *MCSImport) MatchesProjection(meta metav1.ObjectMeta, spec *istio.ServiceEntry) bool {
++	owner := MCSProjectionOwner(meta)
++	if owner == nil || string(owner.UID) != imported.ImportUID || owner.Name != imported.name ||
++		owner.APIVersion != imported.apiVersion || meta.Namespace != imported.Namespace || meta.DeletionTimestamp != nil ||
++		meta.Annotations[MCSProviderAnnotation] != imported.provider ||
++		cmp.Or(meta.Labels[label.IoIstioUseWaypointNamespace.Name], meta.Namespace)+"/"+meta.Labels[label.IoIstioUseWaypoint.Name] != imported.Waypoint ||
++		len(spec.Hosts) != 1 || spec.Hosts[0] != imported.Host || len(spec.Addresses) != 1 || spec.Addresses[0] != imported.VIP ||
++		spec.Resolution != istio.ServiceEntry_STATIC || spec.Location != istio.ServiceEntry_MESH_INTERNAL ||
++		spec.WorkloadSelector != nil || len(spec.Ports) != 1 {
++		return false
++	}
++	port := spec.Ports[0]
++	return port.GetName() == cmp.Or(imported.PortName, "http") && port.GetNumber() == imported.Port &&
++		port.GetProtocol() == "HTTP" && (port.GetTargetPort() == 0 || port.GetTargetPort() == imported.Port)
++}
++
++// IsMCSProjection identifies reserved projector objects, including ones missing an attestation field.
++func IsMCSProjection(meta metav1.ObjectMeta) bool {
++	if meta.Labels[MCSProjectorLabel] == MCSProjectorName {
++		return true
++	}
++	if !strings.HasPrefix(meta.Name, "hibiscus-mcs-") {
++		return false
++	}
++	if meta.Annotations[MCSProviderAnnotation] != "" {
++		return true
++	}
++	for _, owner := range meta.OwnerReferences {
++		if owner.Kind == MCSServiceImportKind && strings.HasPrefix(owner.APIVersion, MCSServiceImportGroup+"/") &&
++			meta.Name == MCSProjectionName(owner.Name) {
++			return true
++		}
++	}
++	return false
++}
++
++// MCSProjectionCurrent checks reserved projections against the same live import
++// observed by the route controller. Ordinary ServiceEntries pass unchanged.
++func MCSProjectionCurrent(
++	ctx krt.HandlerContext, imports krt.Collection[*unstructured.Unstructured], meta metav1.ObjectMeta, spec *istio.ServiceEntry,
++) bool {
++	if !IsMCSProjection(meta) {
++		return true
++	}
++	owner := MCSProjectionOwner(meta)
++	if imports == nil || owner == nil {
++		return false
++	}
++	obj := krt.FetchOne(ctx, imports, krt.FilterKey(meta.Namespace+"/"+owner.Name))
++	if obj == nil {
++		return false
++	}
++	imported, err := ReadMCSImport(*obj)
++	return err == nil && imported.MatchesProjection(meta, spec)
++}
++
++// MCSExportVisible checks the mesh export scope for the exact waypoint namespace.
++func MCSExportVisible(exportTo []string, ownerNamespace, waypointNamespace string) bool {
++	return exportTo == nil || slices.Contains(exportTo, "*") ||
++		(!slices.Contains(exportTo, "~") && (slices.Contains(exportTo, waypointNamespace) ||
++			(ownerNamespace == waypointNamespace && slices.Contains(exportTo, "."))))
++}
+diff --git a/pkg/config/gateway/kube/serviceimport_test.go b/pkg/config/gateway/kube/serviceimport_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..b019ee0986e668f33a186fbe2b91d5304576c71e
+--- /dev/null
++++ b/pkg/config/gateway/kube/serviceimport_test.go
+@@ -0,0 +1,61 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package kube
++
++import (
++	"testing"
++
++	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
++
++	"istio.io/istio/pkg/test/util/assert"
++)
++
++func TestReadMCSImportRejectsUnsupportedTraffic(t *testing.T) {
++	imported := &unstructured.Unstructured{Object: map[string]any{
++		"apiVersion": MCSServiceImportGroup + "/v1beta1",
++		"kind":       MCSServiceImportKind,
++		"metadata": map[string]any{
++			"namespace": "default", "name": "store", "uid": "import-1",
++			"labels":      map[string]any{"istio.io/use-waypoint": "waypoint"},
++			"annotations": map[string]any{MCSProviderAnnotation: "mcs.example.io"},
++		},
++		"spec": map[string]any{
++			"type": "ClusterSetIP", "ips": []any{"1.2.3.4"},
++			"ports": []any{map[string]any{"port": int64(80), "name": "web", "appProtocol": "http"}},
++		},
++		"status": map[string]any{"endpointSliceObjects": "Present"},
++	}}
++	_, err := ReadMCSImport(imported)
++	assert.NoError(t, err)
++
++	for _, tc := range []struct {
++		name  string
++		field string
++		value any
++	}{
++		{"local endpoint policy", "internalTrafficPolicy", "Local"},
++		{"inconsistent IP families", "ipFamilies", []any{"IPv6"}},
++		{"non-HTTP protocol", "ports", []any{map[string]any{"port": int64(80), "name": "web", "appProtocol": "https"}}},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			input := imported.DeepCopy()
++			assert.NoError(t, unstructured.SetNestedField(input.Object, tc.value, "spec", tc.field))
++			_, err := ReadMCSImport(input)
++			if err == nil {
++				t.Fatalf("unsupported input was accepted")
++			}
++		})
++	}
++}
+diff --git a/pkg/kube/client.go b/pkg/kube/client.go
+index 155715b09d9557af0a3e6793c6e5d455f9911120..915dac2a3fac4b54b3bbe14b4b557218be79ba7e 100644
+--- a/pkg/kube/client.go
++++ b/pkg/kube/client.go
+@@ -397,7 +397,8 @@ func NewFakeClient(objects ...runtime.Object) CLIClient {
+ 	c.istio = setupFakeClient(istiofake.NewSimpleClientset(), "istio", objects)
+ 	c.gatewayapi = setupFakeClient(gatewayapifake.NewSimpleClientset(), "gateway", objects)                     //nolint:staticcheck,lll // SA1019: as NewSimpleClientset breaks
+ 	c.gatewayapiinference = setupFakeClient(gatewayapiinferencefake.NewSimpleClientset(), "inference", objects) //nolint:staticcheck,lll // SA1019: as NewSimpleClientset breaks
+-	c.extSet = extfake.NewClientset()
++	// The generated apply schema in client-go does not contain CustomResourceDefinition.
++	c.extSet = extfake.NewSimpleClientset() //nolint:staticcheck
+ 
+ 	// https://github.com/kubernetes/kubernetes/issues/95372
+ 	// There is a race condition in the client fakes, where events that happen between the List and Watch
