@@ -25,6 +25,8 @@ On one shared HTTP listener, each local channel withdrew a retiring HTTPRoute an
 
 With the Amphora closed-listener option enabled, the controller `454c1541` and Octavia `460570fb` pair passed 51/63 Standard and 57/64 Experimental GATEWAY-HTTP Extended cases locally. The redirect port-and-scheme case passed on both channels. [Original reports, case changes and runtime settings](../common-gateway/454c1541-460570fb/README.md)
 
+A local Standard run on the same source pair used the ten-minute operator resync default and passed 60 of the same 63 GATEWAY-HTTP Extended cases, with 3 failures and zero skips. The suite and fixture each exited with 1. [Case changes, original report and measurements](../common-gateway/454c1541-460570fb/README.md#standard-http-extended-with-the-operator-resync-default)
+
 The signed controller `597d921f` and Octavia `300b2638` source pair passed all 40 local Standard GATEWAY-HTTP Core cases. Two local Standard Extended runs exercised the same 63 cases. With default Go test parallelism, 50 passed and 13 failed. With `-test.parallel=1`, 53 passed and 10 failed. Eight cases failed under both settings. Each selected subset had zero skips. In the default Extended run, four cases passed their traffic assertions before timing out during cleanup. [Original reports and fixture scope](../common-gateway/597d921f-300b2638/README.md) · [Per-case results](../common-gateway/597d921f-300b2638/parallelism-comparison.json)
 
 The same revisions passed 40/40 Experimental GATEWAY-HTTP Core cases and 53/64 Experimental Extended cases. [Experimental reports](../common-gateway/597d921f-300b2638/README.md#experimental-http-with-default-parallelism)
