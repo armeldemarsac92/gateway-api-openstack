@@ -178,7 +178,7 @@ index 5ebcb0922dc4625410db36797d5f19dfcb0927ea..9b97ebd63a61e50cbd247da06f5445a3
  	ServiceImport             *configgateway.MeshServiceImport
  }
 diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
-index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e25889821d25 100644
+index 536df4768b0aaada1c763f9304ae023cc4577e89..9f415c79e8ac6aaf0c62c10c9bf85c72f1be5dcd 100644
 --- a/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
 +++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
 @@ -28,14 +28,19 @@ import (
@@ -219,7 +219,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  	}
  	_, ingress := model.IngressUseWaypointFromLabels(service.Labels, nsLabels)
  	var message string
-@@ -136,25 +141,202 @@ func configureWaypointConsumerParent(ctx RouteContext, parent *routeParentRefere
+@@ -136,25 +141,238 @@ func configureWaypointConsumerParent(ctx RouteContext, parent *routeParentRefere
  			return
  		}
  		port := uint32(*parent.OriginalReference.Port) // checked by waypointConsumerGRPCRouteError
@@ -262,12 +262,21 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  				return
  			}
 +			parent.WaypointError = &WaypointError{Reason: "WaypointCannotSeeHTTPRoute", Message: message}
- 		}
++		}
 +	}
++	checkRequestPolicies := isHTTP && features.EnableAmbientWaypointConsumerHTTPRequest
++	policies := ctx.waypointConsumerPolicies(service, waypointNamespace, waypointLabels[label.IoIstioUseWaypoint.Name], ambientService != nil, checkRequestPolicies)
++	hostname := host.Name(service.Name + "." + service.Namespace + ".svc." + ctx.DomainSuffix)
 +	if isGRPC {
++		port := int(*parent.OriginalReference.Port)
++		chain := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", hostname, port)
++		if message := policies.routePatchError(chain, port); message != "" {
++			parent.DeniedReason = &ParentError{Reason: ParentErrorUnsupportedValue, Message: message}
++			return
+ 		}
  		parent.ConsumerWaypointNamespace = waypointNamespace
 +	} else {
-+		ctx.configureWaypointConsumerHTTPPolicies(http, parent, service, waypointNamespace, waypointLabels[label.IoIstioUseWaypoint.Name], ambientService != nil)
++		configureWaypointConsumerHTTPPolicies(http, parent, hostname, policies)
  	}
  	parent.WaypointConsumer = true
  }
@@ -278,45 +287,24 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
 +	return index < len(droppedRules) && droppedRules[index] != 0
 +}
 +
-+func (ctx RouteContext) configureWaypointConsumerHTTPPolicies(
-+	route *gatewayv1.HTTPRoute, parent *routeParentReference, service *corev1.Service, waypointNamespace, waypointName string, attached bool,
++func configureWaypointConsumerHTTPPolicies(
++	route *gatewayv1.HTTPRoute, parent *routeParentReference, hostname host.Name, policies *waypointConsumerPolicies,
 +) {
 +	var dropped []byte
 +	var messages []string
-+	var policies *waypointConsumerPolicies
 +	for i, rule := range route.Spec.Rules {
-+		for _, filter := range rule.Filters {
-+			headers := filter.RequestHeaderModifier
-+			if filter.Type != gatewayv1.HTTPRouteFilterRequestHeaderModifier || headers == nil ||
-+				len(headers.Set)+len(headers.Add)+len(headers.Remove) == 0 {
-+				continue
++		port := int(*rule.BackendRefs[0].Port) // checked by waypointConsumerHTTPRouteError
++		chain := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", hostname, port)
++		message := policies.routePatchError(chain, port)
++		if message == "" {
++			message = policies.requestHeaderError(rule, chain)
++		}
++		if message != "" {
++			if dropped == nil {
++				dropped = make([]byte, len(route.Spec.Rules))
 +			}
-+			if policies == nil {
-+				policies = ctx.waypointConsumerHTTPPolicies(service, waypointNamespace, waypointName, attached)
-+			}
-+			message := policies.incompatible
-+			if message == "" && len(policies.envoyFilters) != 0 {
-+				hostname := host.Name(service.Name + "." + service.Namespace + ".svc." + ctx.DomainSuffix)
-+				chain := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", hostname, int(*rule.BackendRefs[0].Port))
-+				for _, filter := range policies.envoyFilters {
-+					if envoyfilter.PatchesWaypointHTTPChain(filter.Patches, chain) {
-+						message = "an attached EnvoyFilter can patch the waypoint HTTP chain"
-+						break
-+					}
-+				}
-+			}
-+			if message == "" {
-+				if name := waypointConsumerManagedHeader(headers, policies.jwtHeaders); name != "" {
-+					message = fmt.Sprintf("request header %q is managed by an attached RequestAuthentication", name)
-+				}
-+			}
-+			if message != "" {
-+				if dropped == nil {
-+					dropped = make([]byte, len(route.Spec.Rules))
-+				}
-+				dropped[i] = 1
-+				messages = append(messages, fmt.Sprintf("Dropped Rule %d because %s", i+1, message))
-+			}
++			dropped[i] = 1
++			messages = append(messages, fmt.Sprintf("Dropped Rule %d because %s", i+1, message))
 +		}
 +	}
 +	if len(messages) == 0 {
@@ -337,14 +325,29 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
 +	envoyFilters []*model.EnvoyFilterWrapper
 +}
 +
-+func (ctx RouteContext) waypointConsumerHTTPPolicies(service *corev1.Service, waypointNamespace, waypointName string, attached bool) *waypointConsumerPolicies {
++func (policies *waypointConsumerPolicies) routePatchError(chain string, port int) string {
++	for _, filter := range policies.envoyFilters {
++		if envoyfilter.PatchesWaypointHTTPRoutes(filter.Patches, chain, port) {
++			return "an attached EnvoyFilter can patch the waypoint HTTP route configuration"
++		}
++	}
++	return ""
++}
++
++func (ctx RouteContext) waypointConsumerPolicies(
++	service *corev1.Service, waypointNamespace, waypointName string, attached, checkRequestPolicies bool,
++) *waypointConsumerPolicies {
++	result := &waypointConsumerPolicies{}
++	if !attached && !checkRequestPolicies {
++		return result
++	}
 +	var indexes *waypointPolicyIndexes
 +	if ctx.waypointPolicies.AccessUnprotected() != nil {
 +		indexes = ctx.waypointPolicies.Get(ctx.Krt).Load()
 +	}
-+	if indexes == nil || indexes.requestAuthentication == nil || indexes.authorizationPolicy == nil ||
-+		indexes.trafficExtension == nil || indexes.envoyFilter == nil {
-+		return &waypointConsumerPolicies{incompatible: "the effective waypoint policy store is unavailable"}
++	if indexes == nil {
++		result.incompatible = "the effective waypoint policy store is unavailable"
++		return result
 +	}
 +	var rootNamespace string
 +	if ctx.meshConfig != nil {
@@ -359,26 +362,36 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
 +	}}
 +	matcher := model.PolicyMatcherForService(svc)
 +	namespaces := []string{service.Namespace}
-+	result := &waypointConsumerPolicies{}
 +	if attached {
 +		matcher = model.PolicyMatcherFor(waypointNamespace, labels.Instance{
 +			label.IoK8sNetworkingGatewayGatewayName.Name: waypointName,
 +		}, true).WithRootNamespace(rootNamespace).WithService(svc)
 +		namespaces = slices.FilterDuplicates([]string{waypointNamespace, service.Namespace, rootNamespace})
-+		for _, ns := range slices.FilterDuplicates([]string{waypointNamespace, rootNamespace}) {
-+			for _, cfg := range indexes.envoyFilter.Fetch(ctx.Krt, ns) {
-+				if ef := matcher.AttachedWaypointEnvoyFilter(cfg); ef != nil {
-+					result.envoyFilters = append(result.envoyFilters, ef)
++		if indexes.envoyFilter != nil {
++			for _, ns := range slices.FilterDuplicates([]string{waypointNamespace, rootNamespace}) {
++				for _, cfg := range indexes.envoyFilter.Fetch(ctx.Krt, ns) {
++					if ef := matcher.AttachedWaypointEnvoyFilter(cfg); ef != nil {
++						result.envoyFilters = append(result.envoyFilters, ef)
++					}
 +				}
 +			}
 +		}
++	}
++	if !checkRequestPolicies {
++		return result
++	}
++	if indexes.requestAuthentication == nil || indexes.authorizationPolicy == nil ||
++		indexes.trafficExtension == nil || indexes.envoyFilter == nil {
++		result.incompatible = "the effective waypoint policy store is unavailable"
++		return result
 +	}
 +	listener := model.WaypointHTTPListenerInfo(svc)
 +	var jwtPolicies []*config.Config
 +	for _, ns := range namespaces {
 +		for _, cfg := range indexes.trafficExtension.Fetch(ctx.Krt, ns) {
 +			if matcher.MatchesWaypointHTTPExtension(cfg, listener) {
-+				return &waypointConsumerPolicies{incompatible: "an attached HTTP traffic extension can change headers or routing"}
++				result.incompatible = "an attached HTTP traffic extension can change headers or routing"
++				return result
 +			}
 +		}
 +		for _, cfg := range indexes.requestAuthentication.Fetch(ctx.Krt, ns) {
@@ -394,13 +407,36 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
 +				policy := cfg.Spec.(*security.AuthorizationPolicy)
 +				if policy.GetAction() == security.AuthorizationPolicy_CUSTOM &&
 +					matcher.ShouldAttachPolicy(gvk.AuthorizationPolicy, cfg.NamespacedName(), policy) {
-+					return &waypointConsumerPolicies{incompatible: "the waypoint has both route-invalidating JWT authentication and early CUSTOM authorization"}
++					result.incompatible = "the waypoint has both route-invalidating JWT authentication and early CUSTOM authorization"
++					return result
 +				}
 +			}
 +		}
 +	}
 +	result.jwtHeaders = jwtHeaders
 +	return result
++}
++
++func (policies *waypointConsumerPolicies) requestHeaderError(rule gatewayv1.HTTPRouteRule, chain string) string {
++	for _, filter := range rule.Filters {
++		headers := filter.RequestHeaderModifier
++		if filter.Type != gatewayv1.HTTPRouteFilterRequestHeaderModifier || headers == nil ||
++			len(headers.Set)+len(headers.Add)+len(headers.Remove) == 0 {
++			continue
++		}
++		if policies.incompatible != "" {
++			return policies.incompatible
++		}
++		for _, filter := range policies.envoyFilters {
++			if envoyfilter.PatchesWaypointHTTPChain(filter.Patches, chain) {
++				return "an attached EnvoyFilter can patch the waypoint HTTP chain"
++			}
++		}
++		if name := waypointConsumerManagedHeader(headers, policies.jwtHeaders); name != "" {
++			return fmt.Sprintf("request header %q is managed by an attached RequestAuthentication", name)
++		}
++	}
++	return ""
 +}
 +
 +func waypointConsumerManagedHeader(headers *gatewayv1.HTTPHeaderFilter, jwtHeaders sets.String) string {
@@ -428,7 +464,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  	waypoint := waypointNamespace + "/" + waypointName
  	missing := &WaypointError{
  		Reason:  "NoEffectiveServiceWaypoint",
-@@ -163,20 +345,27 @@ func (ctx RouteContext) waypointConsumerGRPCBinding(svc *corev1.Service, waypoin
+@@ -163,20 +381,27 @@ func (ctx RouteContext) waypointConsumerGRPCBinding(svc *corev1.Service, waypoin
  	if ctx.Gateways == nil || ctx.GatewayClasses == nil || ctx.ambientServices.AccessUnprotected() == nil {
  		return nil, missing
  	}
@@ -460,7 +496,11 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  	services := ctx.ambientServices.Get(ctx.Krt).Load()
  	if services == nil {
  		return nil, missing
-@@ -207,7 +396,7 @@ func waypointConsumerHTTPRouteError(route *gatewayv1.HTTPRoute, parent routePare
+@@ -204,10 +429,11 @@ func (ctx RouteContext) waypointConsumerGRPCBinding(svc *corev1.Service, waypoin
+ }
+ 
+ func waypointConsumerHTTPRouteError(route *gatewayv1.HTTPRoute, parent routeParentReference, service *corev1.Service) string {
++	allowDirectOrRequest := features.EnableAmbientWaypointConsumerHTTPRequest && parent.ServiceImport == nil
  	for i, rule := range route.Spec.Rules {
  		fail := func(message string) string { return fmt.Sprintf("consumer HTTPRoute rule %d: %s", i+1, message) }
  		if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil {
@@ -469,7 +509,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  		}
  		for _, match := range rule.Matches {
  			if match.Path != nil {
-@@ -238,18 +427,37 @@ func waypointConsumerHTTPRouteError(route *gatewayv1.HTTPRoute, parent routePare
+@@ -238,18 +464,43 @@ func waypointConsumerHTTPRouteError(route *gatewayv1.HTTPRoute, parent routePare
  		if message := waypointConsumerBackendError(route.Namespace, parent, service, backend.BackendRef, len(backend.Filters)); message != "" {
  			return fail(message)
  		}
@@ -477,20 +517,27 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
 -			continue
 -		}
 -		if len(rule.Filters) != 1 {
-+		if parent.ServiceImport != nil && len(rule.Filters) > 1 {
- 			return fail("one ResponseHeaderModifier filter is required")
- 		}
+-			return fail("one ResponseHeaderModifier filter is required")
+-		}
 -		filter := rule.Filters[0]
 -		if filter.Type != gatewayv1.HTTPRouteFilterResponseHeaderModifier || filter.ResponseHeaderModifier == nil {
 -			return fail("only ResponseHeaderModifier filters are supported")
--		}
++		if !allowDirectOrRequest {
++			if parent.ServiceImport != nil && len(rule.Filters) == 0 {
++				continue
++			}
++			if len(rule.Filters) != 1 {
++				return fail("one ResponseHeaderModifier filter is required")
++			}
++			filter := rule.Filters[0]
++			if filter.Type != gatewayv1.HTTPRouteFilterResponseHeaderModifier || filter.ResponseHeaderModifier == nil {
++				return fail("only ResponseHeaderModifier filters are supported")
++			}
+ 		}
 -		if message := waypointConsumerResponseHeaderError(filter.ResponseHeaderModifier, invalidConsumerResponseHeader, isValidHeaderValue); message != "" {
 -			return fail(message)
 +		var requestModifier, responseModifier bool
 +		for _, filter := range rule.Filters {
-+			if parent.ServiceImport != nil && filter.Type != gatewayv1.HTTPRouteFilterResponseHeaderModifier {
-+				return fail("only ResponseHeaderModifier filters are supported")
-+			}
 +			switch filter.Type {
 +			case gatewayv1.HTTPRouteFilterRequestHeaderModifier:
 +				if requestModifier || filter.RequestHeaderModifier == nil {
@@ -517,7 +564,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  		}
  	}
  	return ""
-@@ -306,14 +514,14 @@ func waypointConsumerGRPCRouteError(route *gatewayv1.GRPCRoute, parent routePare
+@@ -306,14 +557,14 @@ func waypointConsumerGRPCRouteError(route *gatewayv1.GRPCRoute, parent routePare
  		if message := waypointConsumerResponseHeaderError(filter.ResponseHeaderModifier, invalidConsumerGRPCResponseHeader, validConsumerGRPCMetadataValue); message != "" {
  			return fail(message)
  		}
@@ -534,7 +581,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  	seen := sets.New[string]()
  	for _, operations := range [][]gatewayv1.HTTPHeader{headers.Set, headers.Add} {
  		for _, header := range operations {
-@@ -410,16 +618,20 @@ func waypointConsumerResponseHeaderError(headers *gatewayv1.HTTPHeaderFilter, in
+@@ -410,16 +661,20 @@ func waypointConsumerResponseHeaderError(headers *gatewayv1.HTTPHeaderFilter, in
  	if len(headers.Set)+len(headers.Add)+len(headers.Remove) == 0 {
  		return "at least one response header operation is required"
  	}
@@ -557,7 +604,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  		}
  	}
  	return ""
-@@ -443,6 +655,28 @@ func waypointConsumerHeaderMatches(headers []gatewayv1.HTTPHeaderMatch) []gatewa
+@@ -443,6 +698,28 @@ func waypointConsumerHeaderMatches(headers []gatewayv1.HTTPHeaderMatch) []gatewa
  	return result
  }
  
@@ -586,7 +633,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  func invalidConsumerResponseHeader(name string) bool {
  	switch strings.ToLower(name) {
  	case "host", "connection", "content-length", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade":
-@@ -475,7 +709,10 @@ func configureWaypointConsumerHTTPConflicts(ctx RouteContext, obj *gatewayv1.HTT
+@@ -475,7 +752,10 @@ func configureWaypointConsumerHTTPConflicts(ctx RouteContext, obj *gatewayv1.HTT
  	hostname := parent.ParentKey.Name + "." + parent.ParentKey.Namespace + ".svc." + ctx.DomainSuffix
  	ports := sets.New[uint32]()
  	conflicted := sets.New[uint32]()
@@ -599,7 +646,7 @@ index 536df4768b0aaada1c763f9304ae023cc4577e89..9fd2d8ccb3ae85fcddf3e4749b61e258
  		if !ports.InsertContains(port) && len(ctx.waypointGRPCConsumers.Fetch(ctx.Krt, waypointConsumerRouteKey(obj.Namespace, port, hostname, true))) > 0 {
  			conflicted.Insert(port)
 diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
-index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc76385e9b1348 100644
+index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..c4df9746961484d0dfc06aca88a24df690e1baf9 100644
 --- a/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
 +++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
 @@ -20,6 +20,7 @@ import (
@@ -635,7 +682,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
  	"istio.io/istio/pkg/config/schema/gvk"
  	"istio.io/istio/pkg/config/schema/kind"
  	kubelibrary "istio.io/istio/pkg/kube"
-@@ -114,13 +123,62 @@ func TestWaypointConsumerHTTPRouteContract(t *testing.T) {
+@@ -114,13 +123,66 @@ func TestWaypointConsumerHTTPRouteContract(t *testing.T) {
  		})
  	}
  
@@ -651,9 +698,10 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +	for _, tc := range []struct {
 +		name    string
 +		filters []gatewayv1.HTTPRouteFilter
++		legacy  bool
 +	}{
 +		{name: "direct forwarding"},
-+		{name: "literal response header", filters: []gatewayv1.HTTPRouteFilter{responseFilter}},
++		{name: "literal response header", filters: []gatewayv1.HTTPRouteFilter{responseFilter}, legacy: true},
 +		{name: "request header modification", filters: []gatewayv1.HTTPRouteFilter{requestFilter}},
 +		{name: "empty request header modifier", filters: []gatewayv1.HTTPRouteFilter{{
 +			Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier, RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{},
@@ -663,12 +711,15 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +		t.Run(tc.name, func(t *testing.T) {
 +			consumer := route.DeepCopy()
 +			consumer.Spec.Rules[0].Filters = tc.filters
-+			if message := waypointConsumerHTTPRouteError(consumer, parent, service); message != "" {
-+				t.Fatalf("unexpected rejection: %s", message)
-+			}
++			test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, false)
++			message := waypointConsumerHTTPRouteError(consumer, parent, service)
++			assert.Equal(t, message == "", tc.legacy)
++			test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, true)
++			assert.Equal(t, waypointConsumerHTTPRouteError(consumer, parent, service), "")
 +		})
 +	}
 +
++	test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, true)
  	for _, tc := range []struct {
  		name   string
  		update func(*gatewayv1.HTTPRouteRule)
@@ -701,7 +752,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
  		{"mirror", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterRequestMirror }},
  		{"redirect", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterRequestRedirect }},
  		{"rewrite", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterURLRewrite }},
-@@ -159,17 +217,268 @@ func TestWaypointConsumerHTTPRouteContract(t *testing.T) {
+@@ -159,21 +221,357 @@ func TestWaypointConsumerHTTPRouteContract(t *testing.T) {
  	} {
  		t.Run(tc.name, func(t *testing.T) {
  			consumer := route.DeepCopy()
@@ -723,6 +774,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +	test.SetForTest(t, &features.EnableAmbient, true)
 +	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
 +	test.SetForTest(t, &features.EnableAmbientWaypointConsumerGRPC, false)
++	test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, true)
 +	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, false)
 +	test.SetForTest(t, &features.EnableAmbientMultiNetwork, false)
 +
@@ -755,9 +807,22 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +	}
 +	mixed := route("consumer", "mixed", direct, modify("X-Owner-Claim"), modify("X-Business"))
 +	only := route("another-client", "only", modify("X-Owner-Claim"))
++	response := direct.DeepCopy()
++	response.Filters = []gatewayv1.HTTPRouteFilter{{
++		Type:                   gatewayv1.HTTPRouteFilterResponseHeaderModifier,
++		ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "X-Response", Value: "test"}}},
++	}}
++	responseOnly := route("response-client", "response", *response)
++	otherPort := route("other-client", "other-port", *direct.DeepCopy())
++	otherPort.Spec.ParentRefs = []gatewayv1.ParentReference{*parent.DeepCopy()}
++	otherPort.Spec.ParentRefs[0].Port = ptr.Of(gatewayv1.PortNumber(8080))
++	otherPort.Spec.Rules[0].BackendRefs[0].Port = ptr.Of(gatewayv1.PortNumber(8080))
 +	service := &corev1.Service{
 +		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: string(ns), Labels: map[string]string{label.IoIstioUseWaypoint.Name: "waypoint", label.IoIstioUseWaypointNamespace.Name: "mesh-infra"}},
-+		Spec:       corev1.ServiceSpec{ClusterIP: "1.2.3.4", Ports: []corev1.ServicePort{{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP}}},
++		Spec: corev1.ServiceSpec{ClusterIP: "1.2.3.4", Ports: []corev1.ServicePort{
++			{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP},
++			{Name: "http-alt", Port: 8080, Protocol: corev1.ProtocolTCP},
++		}},
 +	}
 +	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "mesh"},
 +		Spec: gatewayv1.GatewayClassSpec{ControllerName: constants.ManagedGatewayMeshController}}
@@ -769,7 +834,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +			Type: ptr.Of(gatewayv1.HostnameAddressType), Value: "waypoint.mesh-infra.svc.cluster.local",
 +		}}},
 +	}
-+	kc := kubelibrary.NewFakeClient(mixed, only, route("producer", "owner", direct), service, class, waypoint,
++	kc := kubelibrary.NewFakeClient(mixed, only, responseOnly, otherPort, route("producer", "owner", direct), service, class, waypoint,
 +		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "producer"}})
 +	setupClientCRDs(t, kc)
 +	policies := memory.NewController(memory.Make(collections.Pilot))
@@ -781,7 +846,6 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +		},
 +	}
 +	unrelated := jwt.DeepCopy()
-+	unrelated.Name = "other-gateway"
 +	unrelated.Spec.(*security.RequestAuthentication).TargetRefs[0].Name = "elsewhere"
 +	_, err := policies.Create(unrelated)
 +	assert.NoError(t, err)
@@ -846,7 +910,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +		Service: &workloadapi.Service{
 +			Name: "api", Namespace: string(ns), Hostname: "api.producer.svc.cluster.local",
 +			Addresses: []*workloadapi.NetworkAddress{{Address: netip.MustParseAddr("1.2.3.4").AsSlice()}},
-+			Ports:     []*workloadapi.Port{{ServicePort: 80}},
++			Ports:     []*workloadapi.Port{{ServicePort: 80}, {ServicePort: 8080}},
 +			Waypoint: &workloadapi.GatewayAddress{
 +				Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
 +					Namespace: waypoint.Namespace, Hostname: "waypoint.mesh-infra.svc.cluster.local",
@@ -859,6 +923,23 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +	wait(mixed, true, true, false, 3, 80)
 +	_, err = secondary.Create(jwt)
 +	assert.NoError(t, err)
++	assert.Equal(t, store.List(gvk.RequestAuthentication, waypoint.Namespace), store.List(gvk.RequestAuthentication, model.NamespaceAll))
++	assert.Consistently(t, func() int { return projectedRules(mixed.Namespace, 80) }, 3)
++	// Target selection follows the effective version as it changes and as the
++	// higher-priority source is removed.
++	primaryJWT := policies.Get(gvk.RequestAuthentication, jwt.Name, jwt.Namespace).DeepCopy()
++	primaryJWT.Spec = jwt.Spec
++	_, err = policies.Update(primaryJWT)
++	assert.NoError(t, err)
++	wait(mixed, true, true, true, 2, 80)
++	wait(only, false, true, false, 0, 80)
++	primaryJWT = policies.Get(gvk.RequestAuthentication, jwt.Name, jwt.Namespace).DeepCopy()
++	primaryJWT.Spec = unrelated.Spec
++	_, err = policies.Update(primaryJWT)
++	assert.NoError(t, err)
++	wait(mixed, true, true, false, 3, 80)
++	wait(only, true, true, false, 1, 80)
++	assert.NoError(t, policies.Delete(gvk.RequestAuthentication, jwt.Name, jwt.Namespace, nil))
 +	wait(mixed, true, true, true, 2, 80)
 +	wait(only, false, true, false, 0, 80)
 +	assert.Equal(t, projectedRules("producer", 0), 1)
@@ -958,6 +1039,60 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +	assert.NoError(t, policies.Delete(gvk.EnvoyFilter, patch.Name, patch.Namespace, nil))
 +	wait(mixed, true, true, false, 3, 80)
 +
++	routeValue, err := structpb.NewStruct(map[string]any{"route": map[string]any{"timeout": "3s"}})
++	assert.NoError(t, err)
++	routePatch := patch.DeepCopy()
++	routePatch.Name = "owner-route"
++	routeMatch := &istio.EnvoyFilter_RouteConfigurationMatch{
++		Name: "inbound-vip|80|http|api.producer.svc.cluster.local", PortNumber: 80,
++		Vhost: &istio.EnvoyFilter_RouteConfigurationMatch_VirtualHostMatch{
++			Name: "inbound|http|80", DomainName: "*",
++			Route: &istio.EnvoyFilter_RouteConfigurationMatch_RouteMatch{Name: "default", Action: istio.EnvoyFilter_RouteConfigurationMatch_RouteMatch_ROUTE},
++		},
++	}
++	routePatch.Spec.(*istio.EnvoyFilter).ConfigPatches = []*istio.EnvoyFilter_EnvoyConfigObjectPatch{{
++		ApplyTo: istio.EnvoyFilter_HTTP_ROUTE,
++		Match: &istio.EnvoyFilter_EnvoyConfigObjectMatch{Context: istio.EnvoyFilter_SIDECAR_INBOUND,
++			ObjectTypes: &istio.EnvoyFilter_EnvoyConfigObjectMatch_RouteConfiguration{RouteConfiguration: routeMatch}},
++		Patch: &istio.EnvoyFilter_Patch{Operation: istio.EnvoyFilter_Patch_MERGE, Value: routeValue},
++	}}
++	_, err = policies.Create(routePatch)
++	assert.NoError(t, err)
++	wait(mixed, false, true, false, 0, 80)
++	wait(responseOnly, false, true, false, 0, 80)
++	wait(otherPort, true, true, false, 1, 8080)
++	assert.Equal(t, projectedRules("producer", 0), 1)
++
++	currentPatch := policies.Get(gvk.EnvoyFilter, routePatch.Name, routePatch.Namespace).DeepCopy()
++	currentPatch.Spec.(*istio.EnvoyFilter).ConfigPatches[0].Match.GetRouteConfiguration().Vhost.Route.Name = "other-route"
++	_, err = policies.Update(currentPatch)
++	assert.NoError(t, err)
++	wait(mixed, true, true, false, 3, 80)
++	wait(responseOnly, true, true, false, 1, 80)
++
++	currentPatch = policies.Get(gvk.EnvoyFilter, routePatch.Name, routePatch.Namespace).DeepCopy()
++	entry := currentPatch.Spec.(*istio.EnvoyFilter).ConfigPatches[0]
++	entry.ApplyTo = istio.EnvoyFilter_VIRTUAL_HOST
++	entry.Match.GetRouteConfiguration().Vhost.Route = nil
++	entry.Patch = &istio.EnvoyFilter_Patch{Operation: istio.EnvoyFilter_Patch_REMOVE}
++	_, err = policies.Update(currentPatch)
++	assert.NoError(t, err)
++	wait(responseOnly, false, true, false, 0, 80)
++	wait(otherPort, true, true, false, 1, 8080)
++
++	// Configuration shared by both route branches is retained.
++	sharedValue, err := structpb.NewStruct(map[string]any{"max_direct_response_body_size_bytes": 4096})
++	assert.NoError(t, err)
++	currentPatch = policies.Get(gvk.EnvoyFilter, routePatch.Name, routePatch.Namespace).DeepCopy()
++	entry = currentPatch.Spec.(*istio.EnvoyFilter).ConfigPatches[0]
++	entry.ApplyTo = istio.EnvoyFilter_ROUTE_CONFIGURATION
++	entry.Match.GetRouteConfiguration().Vhost = nil
++	entry.Patch = &istio.EnvoyFilter_Patch{Operation: istio.EnvoyFilter_Patch_MERGE, Value: sharedValue}
++	_, err = policies.Update(currentPatch)
++	assert.NoError(t, err)
++	wait(responseOnly, true, true, false, 1, 80)
++	wait(mixed, true, true, false, 3, 80)
++
 +	discovery.DeleteObject(info.ResourceName())
 +	wait(mixed, true, false, false, 3, 80)
 +	discovery.UpdateObject(info)
@@ -976,7 +1111,39 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
  func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
  	test.SetForTest(t, &features.EnableAmbient, true)
  	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
-@@ -254,6 +563,10 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+ 	test.SetForTest(t, &features.EnableAmbientWaypointConsumerGRPC, true)
++	test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, true)
+ 	test.SetForTest(t, &features.EnableAmbientMultiNetwork, false)
+ 	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, false)
+ 	port, producer := gatewayv1.PortNumber(9090), gatewayv1.Namespace("producer")
+@@ -187,12 +585,6 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+ 		Spec: gatewayv1.HTTPRouteSpec{
+ 			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
+ 			Rules: []gatewayv1.HTTPRouteRule{{
+-				Filters: []gatewayv1.HTTPRouteFilter{{
+-					Type: gatewayv1.HTTPRouteFilterResponseHeaderModifier,
+-					ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+-						Set: []gatewayv1.HTTPHeader{{Name: "x-route", Value: "http-consumer"}},
+-					},
+-				}},
+ 				BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: target}}},
+ 			}},
+ 		},
+@@ -236,10 +628,13 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+ 	mesh := meshwatcher.NewTestWatcher(nil)
+ 	c := NewController(kc, func(schema.GroupVersionResource, <-chan struct{}) bool { return false },
+ 		controller.Options{DomainSuffix: "cluster.local", MeshWatcher: mesh}, nil)
++	policies := memory.NewController(memory.Make(collections.Pilot))
++	c.SetWaypointPolicyStore(policies)
+ 	ambient := krt.NewStaticCollection[model.ServiceInfo](nil, nil, krt.WithStop(stop))
+ 	c.SetAmbientServices(ambient)
+ 	kc.RunAndWait(stop)
+ 	go c.Run(stop)
++	go policies.Run(stop)
+ 	c.Reconcile(core.NewConfigGenTest(t, core.TestOptions{}).PushContext())
+ 	queue := &TestStatusQueue{state: map[status.Resource]any{}}
+ 	setAndWait(t, c, queue)
+@@ -254,9 +649,13 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
  	}
  	waitForStatus := func(wantHTTP, wantGRPC, wantWaypoint accepted, partialConflict bool, ports []uint32) {
  		t.Helper()
@@ -985,9 +1152,14 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
 +			wantHTTPWaypoint.Reason = "WaypointCannotSeeHTTPRoute"
 +		}
  		wantPartialHTTP := accepted{metav1.ConditionTrue, "Accepted"}
- 		if wantHTTP.Reason == "UnsupportedValue" {
- 			// An active canary is already unsupported by both HTTP parent forms.
-@@ -268,7 +581,7 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+-		if wantHTTP.Reason == "UnsupportedValue" {
+-			// An active canary is already unsupported by both HTTP parent forms.
++		if wantHTTP.Reason == "UnsupportedValue" && len(ports) == 0 {
++			// A canary affects every port. A patch can leave another port valid.
+ 			wantPartialHTTP = wantHTTP
+ 		}
+ 		takeCondition := func(parent gatewayv1.RouteParentStatus, typ string) accepted {
+@@ -268,7 +667,7 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
  		assert.EventuallyEqual(t, func() bool {
  			queue.mu.Lock()
  			defer queue.mu.Unlock()
@@ -996,7 +1168,7 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
  			var hasPartialConflict, hasForeign bool
  			for key, st := range queue.state {
  				var parents []gatewayv1.RouteParentStatus
-@@ -293,10 +606,11 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+@@ -293,10 +692,11 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
  						hasPartialConflict = condition != nil && strings.Contains(condition.Message, "9090")
  					} else {
  						fullHTTP = takeCondition(p, "Accepted")
@@ -1009,6 +1181,53 @@ index 21e38ef3ad15a8fbc0a94154c06d9ef17f65943d..75b4a626ae865b9a35fbfda4ebcc7638
  				grpc == wantGRPC && waypoint == wantWaypoint && hasPartialConflict == partialConflict && hasForeign
  		}, true)
  		assert.EventuallyEqual(t, func() []uint32 {
+@@ -351,6 +751,46 @@ func TestWaypointConsumerGRPCRouteStatus(t *testing.T) {
+ 	ambient.UpdateObject(info)
+ 	waitForStatus(conflicted, ok, resolved, true, []uint32{8080})
+ 
++	timeout, err := structpb.NewStruct(map[string]any{"route": map[string]any{"timeout": "3s"}})
++	assert.NoError(t, err)
++	ownerRoute := config.Config{
++		Meta: config.Meta{GroupVersionKind: gvk.EnvoyFilter, Namespace: waypoint.Namespace, Name: "owner-route-timeout"},
++		Spec: &istio.EnvoyFilter{
++			TargetRefs: []*typepb.PolicyTargetReference{{Group: gvk.KubernetesGateway.Group, Kind: "Gateway", Name: waypoint.Name}},
++			ConfigPatches: []*istio.EnvoyFilter_EnvoyConfigObjectPatch{{
++				ApplyTo: istio.EnvoyFilter_HTTP_ROUTE,
++				Match: &istio.EnvoyFilter_EnvoyConfigObjectMatch{Context: istio.EnvoyFilter_SIDECAR_INBOUND,
++					ObjectTypes: &istio.EnvoyFilter_EnvoyConfigObjectMatch_RouteConfiguration{
++						RouteConfiguration: &istio.EnvoyFilter_RouteConfigurationMatch{
++							Name: "inbound-vip|9090|http|api.producer.svc.cluster.local", PortNumber: 9090,
++							Vhost: &istio.EnvoyFilter_RouteConfigurationMatch_VirtualHostMatch{
++								Route: &istio.EnvoyFilter_RouteConfigurationMatch_RouteMatch{Name: "default"},
++							},
++						},
++					},
++				},
++				Patch: &istio.EnvoyFilter_Patch{Operation: istio.EnvoyFilter_Patch_MERGE, Value: timeout},
++			}},
++		},
++	}
++	grpcProjectionCount := func() int {
++		count := 0
++		for _, vs := range c.List(gvk.VirtualService, "shop") {
++			if vs.Namespace == "shop" && slices.Contains(vs.Spec.(*istio.VirtualService).Gateways, constants.IstioAmbientConsumerGRPCGateway) {
++				count++
++			}
++		}
++		return count
++	}
++	assert.EventuallyEqual(t, grpcProjectionCount, 1)
++	_, err = policies.Create(ownerRoute)
++	assert.NoError(t, err)
++	waitForStatus(unsupported, unsupported, resolved, false, []uint32{8080})
++	assert.EventuallyEqual(t, grpcProjectionCount, 0)
++	assert.NoError(t, policies.Delete(gvk.EnvoyFilter, ownerRoute.Name, ownerRoute.Namespace, nil))
++	waitForStatus(conflicted, ok, resolved, true, []uint32{8080})
++	assert.EventuallyEqual(t, grpcProjectionCount, 1)
++
+ 	// Hold ambient discovery constant to model an addressed ingress Gateway still
+ 	// being published as the Service's named attachment.
+ 	gateways := kc.GatewayAPI().GatewayV1().Gateways(string(producer))
 diff --git a/pilot/pkg/config/kube/gateway/route_collections.go b/pilot/pkg/config/kube/gateway/route_collections.go
 index 73adb3863fe6fc3aeea00700a384f237e0889c57..f4567599a8d36f6c014d920fda08128c3d70a17e 100644
 --- a/pilot/pkg/config/kube/gateway/route_collections.go
@@ -1070,6 +1289,49 @@ index 73adb3863fe6fc3aeea00700a384f237e0889c57..f4567599a8d36f6c014d920fda08128c
  }
  
  func (i RouteContextInputs) WithCtx(krtctx krt.HandlerContext) RouteContext {
+diff --git a/pilot/pkg/config/kube/gateway/serviceimport_route_test.go b/pilot/pkg/config/kube/gateway/serviceimport_route_test.go
+index ccb438812bf6ca5fb0de7096d964752822fd796e..1072d39194808a2f08e7c026ac83c86d4745b63f 100644
+--- a/pilot/pkg/config/kube/gateway/serviceimport_route_test.go
++++ b/pilot/pkg/config/kube/gateway/serviceimport_route_test.go
+@@ -64,6 +64,7 @@ func TestServiceImportRouteReconciliation(t *testing.T) {
+ 	test.SetForTest(t, &features.EnableAmbient, true)
+ 	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
+ 	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, true)
++	test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, true)
+ 	test.SetForTest(t, &features.EnableAmbientMultiNetwork, false)
+ 	test.SetForTest(t, &features.EnableMCSHost, false)
+ 
+@@ -304,6 +305,15 @@ func TestServiceImportRouteReconciliation(t *testing.T) {
+ 		setAmbient("old", workloadapi.Service_PUBLIC)
+ 		assertParent(validParent, k8s.RouteReasonAccepted, k8s.RouteReasonResolvedRefs)
+ 
++		consumer.Generation++
++		consumer.Spec.Rules[0].Filters = []k8s.HTTPRouteFilter{{
++			Type:                  k8s.HTTPRouteFilterRequestHeaderModifier,
++			RequestHeaderModifier: &k8s.HTTPHeaderFilter{Set: []k8s.HTTPHeader{{Name: "X-Request", Value: "test"}}},
++		}}
++		consumer, err = routes.Update(ctx, consumer, metav1.UpdateOptions{})
++		assert.NoError(t, err)
++		assertParent(validParent, k8s.RouteReasonUnsupportedValue, k8s.RouteReasonResolvedRefs)
++
+ 		// A mirror to the same import still needs a grant, even on a consumer route.
+ 		consumer.Generation++
+ 		consumer.Spec.Rules[0].Filters = []k8s.HTTPRouteFilter{{
+diff --git a/pilot/pkg/features/ambient.go b/pilot/pkg/features/ambient.go
+index a571e161931f9c05c7db194c7606fab72c84291f..43591dc00f8f1b35df9e84cea743b652e0e55c91 100644
+--- a/pilot/pkg/features/ambient.go
++++ b/pilot/pkg/features/ambient.go
+@@ -35,6 +35,10 @@ var (
+ 		false, false,
+ 		"Allow namespace-scoped GRPCRoutes to forward to their parent Kubernetes Service and port through a waypoint.")
+ 
++	EnableAmbientWaypointConsumerHTTPRequest = registerAmbient("PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_HTTP_REQUEST",
++		false, false,
++		"Allow namespace-scoped HTTPRoutes to forward directly or modify request headers when forwarding to their parent Kubernetes Service and port through a waypoint.")
++
+ 	EnableHBONESend = registerAmbient(
+ 		"PILOT_ENABLE_SENDING_HBONE",
+ 		true, false,
 diff --git a/pilot/pkg/model/authentication.go b/pilot/pkg/model/authentication.go
 index 83bce47d81ce34869fa0756df7a96bd44b1182de..def92ead60049a2f7d2b67678fe88eb3e6288ac4 100644
 --- a/pilot/pkg/model/authentication.go
@@ -1259,6 +1521,117 @@ index 5cf833688deda9e0f0dd6a40e0549a9589708b14..872b476e852191be54553d7b237a50ca
  // ApplyListenerPatches applies patches to LDS output
  func ApplyListenerPatches(
  	patchContext networking.EnvoyFilter_PatchContext,
+diff --git a/pilot/pkg/networking/core/envoyfilter/rc_patch.go b/pilot/pkg/networking/core/envoyfilter/rc_patch.go
+index b05b3897cf330f000b6c816a9db3ac568b785c42..06d235f547c1389a95c7bdebf9f77f41eacc29af 100644
+--- a/pilot/pkg/networking/core/envoyfilter/rc_patch.go
++++ b/pilot/pkg/networking/core/envoyfilter/rc_patch.go
+@@ -23,6 +23,7 @@ import (
+ 
+ 	networking "istio.io/api/networking/v1alpha3"
+ 	"istio.io/istio/pilot/pkg/model"
++	istio_route "istio.io/istio/pilot/pkg/networking/core/route"
+ 	"istio.io/istio/pilot/pkg/util/runtime"
+ 	"istio.io/istio/pkg/log"
+ 	"istio.io/istio/pkg/slices"
+@@ -30,6 +31,73 @@ import (
+ 	"istio.io/istio/pkg/util/sets"
+ )
+ 
++// InboundVirtualHostName returns the default virtual host name for an inbound port.
++func InboundVirtualHostName(port int) string {
++	return string(model.TrafficDirectionInbound) + "|http|" + strconv.Itoa(port)
++}
++
++// PatchesWaypointHTTPRoutes reports whether a patch can change the generated
++// inbound fallback for this Kubernetes Service port. A separate consumer route
++// cannot carry arbitrary settings from the owner's route or replace its matcher.
++// Settings shared by the whole route configuration or virtual host are retained.
++// Check the fallback even with an explicit producer route, which can be withdrawn.
++func PatchesWaypointHTTPRoutes(patches map[networking.EnvoyFilter_ApplyTo][]*model.EnvoyFilterConfigPatchWrapper, chainName string, port int) bool {
++	rc := &route.RouteConfiguration{Name: chainName}
++	vh := &route.VirtualHost{Name: InboundVirtualHostName(port), Domains: []string{"*"}}
++	r := &route.Route{Name: istio_route.DefaultRouteName, Action: &route.Route_Route{}}
++	for _, target := range []networking.EnvoyFilter_ApplyTo{
++		networking.EnvoyFilter_ROUTE_CONFIGURATION, networking.EnvoyFilter_VIRTUAL_HOST, networking.EnvoyFilter_HTTP_ROUTE,
++	} {
++		for _, patch := range patches[target] {
++			if patch.ProxyVersionNoMatch || !patchContextMatch(networking.EnvoyFilter_SIDECAR_INBOUND, patch) ||
++				!routeConfigurationMatch(networking.EnvoyFilter_SIDECAR_INBOUND, rc, patch, nil) {
++				continue
++			}
++			op := patch.Operation
++			switch target {
++			case networking.EnvoyFilter_ROUTE_CONFIGURATION:
++				if isMergeOperation(op) {
++					value := patch.Value.(*route.RouteConfiguration)
++					if len(value.VirtualHosts) != 0 || value.Name != "" && value.Name != rc.Name {
++						return true
++					}
++				}
++			case networking.EnvoyFilter_VIRTUAL_HOST:
++				if op == networking.EnvoyFilter_Patch_ADD {
++					return true
++				}
++				if !virtualHostMatch(vh, patch) {
++					continue
++				}
++				if op == networking.EnvoyFilter_Patch_REMOVE || op == networking.EnvoyFilter_Patch_REPLACE {
++					return true
++				}
++				if isMergeOperation(op) {
++					value := patch.Value.(*route.VirtualHost)
++					if value.Matcher != nil || len(value.Routes) != 0 || len(value.Domains) != 0 || value.Name != "" && value.Name != vh.Name {
++						return true
++					}
++				}
++			case networking.EnvoyFilter_HTTP_ROUTE:
++				if !virtualHostMatch(vh, patch) {
++					continue
++				}
++				switch op {
++				case networking.EnvoyFilter_Patch_ADD:
++					return true
++				case networking.EnvoyFilter_Patch_MERGE, networking.EnvoyFilter_Patch_MERGE_AND_REPLACE_LIST,
++					networking.EnvoyFilter_Patch_REMOVE, networking.EnvoyFilter_Patch_INSERT_BEFORE,
++					networking.EnvoyFilter_Patch_INSERT_AFTER, networking.EnvoyFilter_Patch_INSERT_FIRST:
++					if routeMatch(r, patch) {
++						return true
++					}
++				}
++			}
++		}
++	}
++	return false
++}
++
+ func ApplyRouteConfigurationPatches(
+ 	patchContext networking.EnvoyFilter_PatchContext,
+ 	proxy *model.Proxy,
+diff --git a/pilot/pkg/networking/core/httproute.go b/pilot/pkg/networking/core/httproute.go
+index d656174ee8de402a902dc1772c63aa26760e010f..b5f4bb9268411b5420fea8e16b8837c3914bc668 100644
+--- a/pilot/pkg/networking/core/httproute.go
++++ b/pilot/pkg/networking/core/httproute.go
+@@ -47,10 +47,7 @@ import (
+ 	"istio.io/istio/pkg/util/sets"
+ )
+ 
+-const (
+-	wildcardDomainPrefix     = "*."
+-	inboundVirtualHostPrefix = string(model.TrafficDirectionInbound) + "|http|"
+-)
++const wildcardDomainPrefix = "*."
+ 
+ // BuildHTTPRoutes produces a list of routes for the proxy
+ func (configgen *ConfigGeneratorImpl) BuildHTTPRoutes(
+@@ -131,7 +128,7 @@ func buildSidecarInboundHTTPRouteConfig(svc *model.Service, lb *ListenerBuilder,
+ 	}
+ 
+ 	inboundVHost := &route.VirtualHost{
+-		Name:    inboundVirtualHostPrefix + strconv.Itoa(cc.port.Port), // Format: "inbound|http|%d"
++		Name:    envoyfilter.InboundVirtualHostName(cc.port.Port),
+ 		Domains: buildRouteVHostDomains(svc),
+ 		Routes:  []*route.Route{defaultRoute},
+ 	}
 diff --git a/pilot/pkg/networking/core/listener.go b/pilot/pkg/networking/core/listener.go
 index cdd9947acc570c4a10b050b4129029582de1d0e5..f56d8a92717e2db7e25a367625c21c7d1946b976 100644
 --- a/pilot/pkg/networking/core/listener.go
@@ -1296,7 +1669,7 @@ index edcd0063dc7138577e1bb6562f2cd9604c23a15d..948cd7251b8f115a69e645e32bad977b
  			got := fields{
  				GatewayListeners:        lb.gatewayListeners,
 diff --git a/pilot/pkg/networking/core/listener_waypoint.go b/pilot/pkg/networking/core/listener_waypoint.go
-index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8ad9cc8ae 100644
+index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..4d9ad8f04543dd97654725bf2463336f14ba4423 100644
 --- a/pilot/pkg/networking/core/listener_waypoint.go
 +++ b/pilot/pkg/networking/core/listener_waypoint.go
 @@ -25,10 +25,12 @@ import (
@@ -1432,13 +1805,15 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  	}
  
  	virtualServices := lb.node.SidecarScope.EgressListeners[0].VirtualServices()
-@@ -1151,6 +1183,14 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+@@ -1151,6 +1183,16 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
  	var routes []*route.Route
  	consumerRoutes := make(map[string]waypointConsumerRouteList)
  	allowConsumers := lb.waypointAllowsServiceConsumers(svc)
++	allowServiceConsumers := allowConsumers && svc.Attributes.ServiceRegistry == provider.Kubernetes &&
++		(lb.envoyFilterWrapper == nil || !envoyfilter.PatchesWaypointHTTPRoutes(lb.envoyFilterWrapper.Patches, cc.clusterName, cc.port.Port))
 +	var jwtHeaders sets.String
 +	var incompatibleRequestPolicies bool
-+	if allowConsumers {
++	if allowServiceConsumers && features.EnableAmbientWaypointConsumerHTTPRequest {
 +		matcher := model.PolicyMatcherForProxy(lb.node).WithService(svc)
 +		var hasJWT bool
 +		jwtHeaders, hasJWT = model.RequestAuthenticationHeaders(lb.push.AuthnPolicies.GetJwtPoliciesForWorkload(matcher))
@@ -1447,7 +1822,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  	for _, vs := range virtualServices {
  		spec := vs.Spec.(*networking.VirtualService)
  		if imported, found := vs.Extra[constants.ConfigExtraMeshServiceImport].(kube.MeshServiceImport); found {
-@@ -1159,7 +1199,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+@@ -1159,7 +1201,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
  			}
  			if vs.Namespace != imported.Namespace {
  				if allowConsumers && len(spec.Hosts) == 1 && spec.Hosts[0] == svc.Hostname.String() {
@@ -1456,16 +1831,23 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  						consumerRoutes[vs.Namespace] = waypointConsumerRouteList{routes: append(consumerRoutes[vs.Namespace].routes, rules...)}
  					}
  				}
-@@ -1168,7 +1208,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+@@ -1167,8 +1209,8 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 			}
  		}
  		if consumer, found := vs.Extra[constants.ConfigExtraMeshConsumerService].(kube.MeshConsumerService); found {
- 			if allowConsumers && waypointConsumerParentMatches(consumer, spec, svc, cc.port.Port) {
+-			if allowConsumers && waypointConsumerParentMatches(consumer, spec, svc, cc.port.Port) {
 -				if rules := lb.waypointConsumerHTTPRoutes(vs, cc, false); len(rules) != 0 {
++			if allowServiceConsumers && waypointConsumerParentMatches(consumer, spec, svc, cc.port.Port) {
 +				if rules := lb.waypointConsumerHTTPRoutes(vs, svc, cc, false, incompatibleRequestPolicies, jwtHeaders); len(rules) != 0 {
  					consumerRoutes[vs.Namespace] = waypointConsumerRouteList{routes: append(consumerRoutes[vs.Namespace].routes, rules...)}
  				}
  			}
-@@ -1189,19 +1229,23 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+@@ -1185,24 +1227,28 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 		}
+ 		routes = append(routes, vsRoutes...)
+ 	}
+-	if allowConsumers && features.EnableAmbientWaypointConsumerGRPC {
++	if allowServiceConsumers && features.EnableAmbientWaypointConsumerGRPC {
  		for _, vs := range lb.push.VirtualServicesForGateway(lb.node.ConfigNamespace, constants.IstioAmbientConsumerGRPCGateway) {
  			binding, ok := vs.Extra[constants.ConfigExtraMeshConsumerService].(kube.MeshConsumerService)
  			if ok && waypointConsumerParentMatches(binding, vs.Spec.(*networking.VirtualService), svc, cc.port.Port) {
@@ -1483,6 +1865,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  			}
  		}
  	}
+-	vhostName := inboundVirtualHostPrefix + strconv.Itoa(cc.port.Port) // Format: "inbound|http|%d"
 +	var hasConsumerRequestHeaders bool
 +	for _, consumer := range consumerRoutes {
 +		if slices.FindFunc(consumer.routes, func(r *route.Route) bool {
@@ -1492,10 +1875,11 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
 +			break
 +		}
 +	}
- 	vhostName := inboundVirtualHostPrefix + strconv.Itoa(cc.port.Port) // Format: "inbound|http|%d"
++	vhostName := envoyfilter.InboundVirtualHostName(cc.port.Port)
  	if len(routes) == 0 {
  		defaultConfig := buildSidecarInboundHTTPRouteConfig(svc, lb, cc)
-@@ -1213,7 +1257,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 		if len(consumerRoutes) != 0 {
+@@ -1213,7 +1259,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
  				}
  			}
  		}
@@ -1504,7 +1888,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  	}
  
  	inboundVHost := &route.VirtualHost{
-@@ -1230,7 +1274,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+@@ -1230,7 +1276,7 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
  		Name:             cc.clusterName,
  		VirtualHosts:     []*route.VirtualHost{inboundVHost},
  		ValidateClusters: proto.BoolFalse,
@@ -1513,7 +1897,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  }
  
  // Select the config pertaining to the service being processed.
-@@ -1302,13 +1346,33 @@ func waypointConsumerParentMatches(parent kube.MeshConsumerService, spec *networ
+@@ -1302,13 +1348,37 @@ func waypointConsumerParentMatches(parent kube.MeshConsumerService, spec *networ
  		len(spec.Hosts) == 1 && spec.Hosts[0] == service.Hostname.String()
  }
  
@@ -1536,6 +1920,10 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
 +		headers := istio_route.TranslateHeadersOperations(rule.GetHeaders())
 +		var requestHeaders *anypb.Any
 +		if kubernetesConsumer && !grpc {
++			if !features.EnableAmbientWaypointConsumerHTTPRequest &&
++				(rule.GetHeaders().GetRequest() != nil || len(headers.ResponseHeadersToAdd)+len(headers.ResponseHeadersToRemove) == 0) {
++				continue
++			}
 +			if len(headers.RequestHeadersToAdd)+len(headers.RequestHeadersToRemove) != 0 {
 +				// Also protect against a policy push arriving before the route
 +				// collection has removed an incompatible rule.
@@ -1552,7 +1940,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  		}
  		for _, match := range rule.GetMatch() {
  			if match.GetPort() != uint32(cc.port.Port) {
-@@ -1318,6 +1382,7 @@ func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inbo
+@@ -1318,6 +1388,7 @@ func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inbo
  			// authz filters. Use the same Service/port cluster with a fixed action.
  			r := istio_route.BuildDefaultHTTPOutboundRoute(cc.clusterName, telemetry.TraceOperation(string(cc.telemetryMetadata.InstanceHostname), cc.port.Port), lb.push.Mesh)
  			r.Name = rule.GetName()
@@ -1560,7 +1948,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  			r.Match = istio_route.TranslateRouteMatch(*vs, match)
  			if grpc {
  				r.Match.Grpc = &route.RouteMatch_GrpcRouteMatchOptions{}
-@@ -1327,6 +1392,9 @@ func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inbo
+@@ -1327,6 +1398,9 @@ func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inbo
  				}
  			}
  			r.Metadata = util.BuildConfigInfoMetadata(vs.Meta)
@@ -1570,7 +1958,7 @@ index e38ab3cd43e017363bf34eb1998b7f2245f5af8e..f35d5dcba3681ec20460779eb75731d8
  			r.ResponseHeadersToAdd = headers.ResponseHeadersToAdd
  			r.ResponseHeadersToRemove = headers.ResponseHeadersToRemove
  			routes = append(routes, r)
-@@ -1335,6 +1403,31 @@ func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inbo
+@@ -1335,6 +1409,31 @@ func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inbo
  	return routes
  }
  
@@ -1624,10 +2012,10 @@ index 50ce52db0e509999833980bccd1fe0be1b90cae5..6dbdefa6115c589f90970b9aea664f22
  	// ConnectOriginate is the name for the resources associated with the origination of HTTP CONNECT.
  	ConnectOriginate = "connect_originate"
 diff --git a/pilot/pkg/xds/waypoint_test.go b/pilot/pkg/xds/waypoint_test.go
-index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a654bf97a8c 100644
+index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..072cf96f3dcaab5eb1471db0151838f46582e8e2 100644
 --- a/pilot/pkg/xds/waypoint_test.go
 +++ b/pilot/pkg/xds/waypoint_test.go
-@@ -25,8 +25,11 @@ import (
+@@ -25,30 +25,42 @@ import (
  	udpa "github.com/cncf/xds/go/udpa/type/v1"
  	matcher "github.com/cncf/xds/go/xds/type/matcher/v3"
  	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -1639,7 +2027,10 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
  	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
  	networkinput "github.com/envoyproxy/go-control-plane/envoy/extensions/matching/common_inputs/network/v3"
  	upstream "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
-@@ -36,19 +39,26 @@ import (
+ 	. "github.com/onsi/gomega"
+ 	"google.golang.org/protobuf/types/known/anypb"
++	"google.golang.org/protobuf/types/known/structpb"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
  	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
  	"sigs.k8s.io/gateway-api/pkg/consts"
  
@@ -1659,6 +2050,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
 +	"istio.io/istio/pkg/config"
  	"istio.io/istio/pkg/config/constants"
  	"istio.io/istio/pkg/config/mesh"
++	"istio.io/istio/pkg/config/schema/collections"
 +	"istio.io/istio/pkg/config/schema/gvk"
  	"istio.io/istio/pkg/config/schema/gvr"
  	"istio.io/istio/pkg/kube/kclient/clienttest"
@@ -1666,7 +2058,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
  	"istio.io/istio/pkg/ptr"
  	"istio.io/istio/pkg/slices"
  	"istio.io/istio/pkg/test"
-@@ -87,6 +97,13 @@ spec:
+@@ -87,6 +99,13 @@ spec:
    labels:
      gateway.networking.k8s.io/gateway-name: waypoint
  `
@@ -1680,7 +2072,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
  	waypointGateway = `apiVersion: gateway.networking.k8s.io/v1
  kind: Gateway
  metadata:
-@@ -1080,7 +1097,10 @@ spec:
+@@ -1080,7 +1099,11 @@ spec:
  }
  
  func TestWaypointServiceConsumerRoute(t *testing.T) {
@@ -1688,10 +2080,11 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
  	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
 +	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, false)
 +	test.SetForTest(t, &features.EnableAmbientWaypointConsumerGRPC, false)
++	test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, true)
  	app := `apiVersion: v1
  kind: Service
  metadata:
-@@ -1122,19 +1142,145 @@ spec:
+@@ -1122,19 +1145,145 @@ spec:
        port: 80
  `, namespace, namespace)
  	}
@@ -1846,7 +2239,7 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
  	m := vhosts[0].GetMatcher()
  	fields := m.GetMatcherList().GetMatchers()
  	assert.Equal(t, len(fields), 1)
-@@ -1162,16 +1308,177 @@ spec:
+@@ -1162,16 +1311,236 @@ spec:
  		return list.GetRoutes()
  	}
  	consumer := routeList(fields[0].GetOnMatch())
@@ -2021,12 +2414,71 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
 +		assert.NoError(t, d.Store().Delete(gvk.WasmPlugin, plugin.Name, plugin.Namespace, nil))
 +		waitForPolicies(false, true)
 +		assert.EventuallyEqual(t, hasSidecarMutation, true)
++
++		// With no explicit producer route, Istio applies the owner's patches
++		// to the generated inbound fallback.
++		assert.NoError(t, d.KubeClient().GatewayAPI().GatewayV1().HTTPRoutes("default").Delete(ctx, "app-route", metav1.DeleteOptions{}))
++		value, err := structpb.NewStruct(map[string]any{"route": map[string]any{"timeout": "3s"}})
++		assert.NoError(t, err)
++		patch := config.Config{
++			Meta: config.Meta{GroupVersionKind: gvk.EnvoyFilter, Namespace: "default", Name: "owner-route"},
++			Spec: &networking.EnvoyFilter{
++				TargetRefs: []*typepb.PolicyTargetReference{{Group: gvk.KubernetesGateway.Group, Kind: "Gateway", Name: "waypoint"}},
++				ConfigPatches: []*networking.EnvoyFilter_EnvoyConfigObjectPatch{{
++					ApplyTo: networking.EnvoyFilter_HTTP_ROUTE,
++					Match: &networking.EnvoyFilter_EnvoyConfigObjectMatch{Context: networking.EnvoyFilter_SIDECAR_INBOUND,
++						ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_RouteConfiguration{
++							RouteConfiguration: &networking.EnvoyFilter_RouteConfigurationMatch{
++								Name: fc.GetName(), PortNumber: 80,
++								Vhost: &networking.EnvoyFilter_RouteConfigurationMatch_VirtualHostMatch{
++									Name:  "inbound|http|80",
++									Route: &networking.EnvoyFilter_RouteConfigurationMatch_RouteMatch{Name: "default"},
++								},
++							},
++						},
++					},
++					Patch: &networking.EnvoyFilter_Patch{Operation: networking.EnvoyFilter_Patch_MERGE, Value: value},
++				}},
++			},
++		}
++		_, err = collections.EnvoyFilter.ValidateConfig(patch)
++		assert.NoError(t, err)
++		_, err = d.Store().Create(patch)
++		assert.NoError(t, err)
++		waitForPolicies(false, false)
++		assert.EventuallyEqual(t, routeCount, 0)
++		assert.EventuallyEqual(t, func() time.Duration {
++			routes := currentManager().GetRouteConfig().GetVirtualHosts()[0].GetRoutes()
++			if len(routes) != 1 {
++				return 0
++			}
++			return routes[0].GetRoute().GetTimeout().AsDuration()
++		}, 3*time.Second)
++		sidecarConsumerRoutes := func() int {
++			current := *sidecar
++			count := 0
++			for _, rc := range d.Routes(d.SetupProxy(&current)) {
++				for _, host := range rc.GetVirtualHosts() {
++					for _, rule := range host.GetRoutes() {
++						if strings.HasPrefix(rule.GetName(), "consumer.") {
++							count++
++						}
++					}
++				}
++			}
++			return count
++		}
++		assert.EventuallyEqual(t, sidecarConsumerRoutes, 0)
++		assert.NoError(t, d.Store().Delete(gvk.EnvoyFilter, patch.Name, patch.Namespace, nil))
++		waitForPolicies(false, true)
++		assert.EventuallyEqual(t, routeCount, 5)
++		assert.EventuallyEqual(t, func() bool { return sidecarConsumerRoutes() != 0 }, true)
 +	})
 +
  	for _, tc := range []struct {
  		name           string
  		serviceLabel   string
-@@ -1198,12 +1505,13 @@ metadata:
+@@ -1198,12 +1567,13 @@ metadata:
      istio.io/ingress-use-waypoint: %q
  `, tc.namespaceLabel)
  			d, proxy := setupWaypointTest(t, waypointGateway, waypointSvc, waypointInstance, service, appPod,
@@ -2043,7 +2495,40 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
  			if !tc.wantConsumer {
  				assert.Equal(t, vhost.GetRoutes()[0].GetResponseHeadersToAdd()[0].GetHeader().GetValue(), "default")
  			}
-@@ -1305,13 +1613,6 @@ spec:
+@@ -1221,6 +1591,7 @@ func testWaypointServiceConsumerGRPCRoute(t *testing.T, enabled bool) {
+ 	test.SetForTest(t, &features.EnableAmbient, true)
+ 	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
+ 	test.SetForTest(t, &features.EnableAmbientWaypointConsumerGRPC, enabled)
++	test.SetForTest(t, &features.EnableAmbientWaypointConsumerHTTPRequest, false)
+ 	test.SetForTest(t, &features.EnableAmbientMultiNetwork, false)
+ 	test.SetForTest(t, &features.EnableAmbientMCSHTTPRoute, false)
+ 	service := `apiVersion: v1
+@@ -1284,6 +1655,24 @@ spec:
+       namespace: default
+       port: 9090
+ `
++	directHTTP := strings.Replace(strings.Replace(http, "name: app\n  namespace: shop", "name: direct\n  namespace: shop", 1), `  - filters:
++    - type: ResponseHeaderModifier
++      responseHeaderModifier:
++        set:
++        - name: x-route
++          value: http-consumer
++    backendRefs:`, "  - backendRefs:", 1)
++	requestHTTP := strings.NewReplacer(
++		"name: app\n  namespace: shop", "name: request\n  namespace: shop",
++		"ResponseHeaderModifier", "RequestHeaderModifier",
++		"responseHeaderModifier", "requestHeaderModifier",
++	).Replace(http)
++	neighborService := strings.NewReplacer("name: app", "name: neighbor", "1.2.3.4", "1.2.3.5").Replace(service)
++	neighborHTTP := strings.ReplaceAll(http, "name: app", "name: neighbor")
++	neighborOwner := strings.NewReplacer(
++		"name: request\n  namespace: shop", "name: owner\n  namespace: default",
++		"name: app", "name: neighbor",
++	).Replace(requestHTTP)
+ 	destination := `apiVersion: networking.istio.io/v1
+ kind: DestinationRule
+ metadata:
+@@ -1305,14 +1694,8 @@ spec:
  	meshConfig := mesh.DefaultMeshConfig()
  	meshConfig.TrustDomainAliases = []string{"equivalent.example"}
  	meshConfig.CaCertificates = []*meshconfig.MeshConfig_CertificateData{{TrustDomains: []string{"ca-only.example"}}}
@@ -2054,9 +2539,180 @@ index b0bdd0c6bb4977b832e40623a36f57a487dfff6d..382a321ad59caf298a637b6307721a65
 -spec:
 -  controllerName: %s
 -`, constants.ManagedGatewayMeshController)
- 	configs := []string{waypointClass, waypointGateway, waypointSvc, waypointInstance, service, appPod, producer, http, destination}
+-	configs := []string{waypointClass, waypointGateway, waypointSvc, waypointInstance, service, appPod, producer, http, destination}
++	configs := []string{waypointClass, waypointGateway, waypointSvc, waypointInstance, service, appPod, producer,
++		http, directHTTP, requestHTTP, neighborService, neighborHTTP, neighborOwner, destination}
  	if !enabled {
  		// The producer and rejected consumer are listed by the initial GRPCRoute informer snapshot.
+ 		configs = append(configs, strings.NewReplacer(
+@@ -1326,7 +1709,7 @@ spec:
+ 		consts.BundleVersionAnnotation: "v1.7.0",
+ 	})
+ 	cluster := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", "app.default.svc.cluster.local", 9090)
+-	routeConfig := func(listeners []*listenerv3.Listener) *route.VirtualHost {
++	routeConfig := func(listeners []*listenerv3.Listener, cluster string) *route.VirtualHost {
+ 		t.Helper()
+ 		l := xdstest.ExtractListener("main_internal", listeners)
+ 		chain := xdstest.ExtractFilterChain(cluster, l)
+@@ -1344,19 +1727,19 @@ spec:
+ 		assert.NoError(t, action.GetAction().GetTypedConfig().UnmarshalTo(list))
+ 		return list.Routes
+ 	}
+-	waitForNamespaceRoutes := func(want []int) {
++	waitForNamespaceRoutes := func(want []int, wantExplicitFallback bool) {
+ 		t.Helper()
+ 		assert.EventuallyEqual(t, func() []int {
+ 			push := d.PushContext()
+ 			proxy.SetSidecarScope(push)
+-			vhost := routeConfig(d.ConfigGen.BuildListeners(proxy, push))
++			vhost := routeConfig(d.ConfigGen.BuildListeners(proxy, push), cluster)
+ 			m := vhost.GetMatcher()
+ 			fields := m.GetMatcherList().GetMatchers()
+ 			if len(fields) == 0 {
+ 				return nil
+ 			}
+ 			fallback := routeList(m.GetOnNoMatch())
+-			if len(fallback) != 1 || len(fallback[0].GetResponseHeadersToAdd()) != 1 {
++			if len(fallback) != 1 || (len(fallback[0].GetResponseHeadersToAdd()) != 0) != wantExplicitFallback {
+ 				return nil
+ 			}
+ 			counts := make([]int, len(fields))
+@@ -1379,7 +1762,7 @@ spec:
+ 		res := ads.RequestResponseAck(t, nil)
+ 		return routeConfig(slices.Map(res.Resources, func(a *anypb.Any) *listenerv3.Listener {
+ 			return xdstest.UnmarshalAny[listenerv3.Listener](t, a)
+-		}))
++		}), cluster)
+ 	}
+ 	value := func(rule *route.Route) string {
+ 		t.Helper()
+@@ -1388,7 +1771,21 @@ spec:
+ 		assert.Equal(t, headers[0].GetHeader().GetKey(), "x-route")
+ 		return headers[0].GetHeader().GetValue()
+ 	}
+-	waitForNamespaceRoutes([]int{0})
++	sidecarConsumerRoutes := func() sets.String {
++		sidecar := d.SetupProxy(&model.Proxy{Type: model.SidecarProxy, ConfigNamespace: "shop"})
++		consumerRouteNames := sets.New[string]()
++		for _, rc := range d.Routes(sidecar) {
++			for _, vhost := range rc.GetVirtualHosts() {
++				for _, rule := range vhost.GetRoutes() {
++					if strings.HasPrefix(rule.GetName(), "shop.") {
++						consumerRouteNames.Insert(rule.GetName())
++					}
++				}
++			}
++		}
++		return consumerRouteNames
++	}
++	waitForNamespaceRoutes([]int{0}, true)
+ 	if !enabled {
+ 		m := readLDS().GetMatcher()
+ 		consumer := routeList(m.GetMatcherList().GetMatchers()[0].GetOnMatch())
+@@ -1396,6 +1793,7 @@ spec:
+ 		assert.Equal(t, consumer[0].GetMatch().GetGrpc(), nil)
+ 		assert.Equal(t, value(consumer[0]), "http-consumer")
+ 		assert.Equal(t, value(routeList(m.GetOnNoMatch())[0]), "producer")
++		assert.Equal(t, sidecarConsumerRoutes(), sets.New("shop.app.0", "shop.neighbor.0"))
+ 		return
+ 	}
+ 	ctx := context.Background()
+@@ -1442,7 +1840,7 @@ spec:
+ 	warehouseRoutes := d.KubeClient().GatewayAPI().GatewayV1().GRPCRoutes("warehouse")
+ 	_, err = warehouseRoutes.Create(ctx, warehouse, metav1.CreateOptions{})
+ 	assert.NoError(t, err)
+-	waitForNamespaceRoutes([]int{2, 1})
++	waitForNamespaceRoutes([]int{2, 1}, true)
+ 	m := readLDS().GetMatcher()
+ 	fields := m.GetMatcherList().GetMatchers()
+ 	assert.Equal(t, len(fields), 2)
+@@ -1486,7 +1884,7 @@ spec:
+ 	assert.EventuallyEqual(t, func() bool {
+ 		push := d.PushContext()
+ 		proxy.SetSidecarScope(push)
+-		return routeConfig(d.ConfigGen.BuildListeners(proxy, push)) == nil
++		return routeConfig(d.ConfigGen.BuildListeners(proxy, push), cluster) == nil
+ 	}, true)
+ 	assert.Equal(t, readLDS(), nil)
+ 	assert.EventuallyEqual(t, func() int {
+@@ -1495,17 +1893,74 @@ spec:
+ 	wp.Labels[label.IoIstioWaypointFor.Name] = constants.ServiceTraffic
+ 	_, err = gateways.Update(ctx, wp, metav1.UpdateOptions{})
+ 	assert.NoError(t, err)
+-	waitForNamespaceRoutes([]int{2, 1})
++	waitForNamespaceRoutes([]int{2, 1}, true)
+ 	m = readLDS().GetMatcher()
+ 	assert.Equal(t, value(routeList(m.GetMatcherList().GetMatchers()[0].GetOnMatch())[0]), "consumer 100%%")
+ 
++	assert.NoError(t, d.KubeClient().GatewayAPI().GatewayV1().GRPCRoutes("default").Delete(ctx, "producer", metav1.DeleteOptions{}))
++	timeout, err := structpb.NewStruct(map[string]any{"route": map[string]any{"timeout": "3s"}})
++	assert.NoError(t, err)
++	ownerRoute := config.Config{
++		Meta: config.Meta{GroupVersionKind: gvk.EnvoyFilter, Namespace: "default", Name: "owner-route-timeout"},
++		Spec: &networking.EnvoyFilter{
++			TargetRefs: []*typepb.PolicyTargetReference{{Group: gvk.KubernetesGateway.Group, Kind: "Gateway", Name: "waypoint"}},
++			ConfigPatches: []*networking.EnvoyFilter_EnvoyConfigObjectPatch{{
++				ApplyTo: networking.EnvoyFilter_HTTP_ROUTE,
++				Match: &networking.EnvoyFilter_EnvoyConfigObjectMatch{Context: networking.EnvoyFilter_SIDECAR_INBOUND,
++					ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_RouteConfiguration{
++						RouteConfiguration: &networking.EnvoyFilter_RouteConfigurationMatch{
++							Name: cluster, PortNumber: 9090,
++							Vhost: &networking.EnvoyFilter_RouteConfigurationMatch_VirtualHostMatch{
++								Route: &networking.EnvoyFilter_RouteConfigurationMatch_RouteMatch{Name: "default"},
++							},
++						},
++					},
++				},
++				Patch: &networking.EnvoyFilter_Patch{Operation: networking.EnvoyFilter_Patch_MERGE, Value: timeout},
++			}},
++		},
++	}
++	_, err = collections.EnvoyFilter.ValidateConfig(ownerRoute)
++	assert.NoError(t, err)
++	_, err = d.Store().Create(ownerRoute)
++	assert.NoError(t, err)
++	assert.EventuallyEqual(t, func() time.Duration {
++		current := *proxy
++		vhost := routeConfig(d.Listeners(d.SetupProxy(&current)), cluster)
++		if vhost.GetMatcher() != nil || len(vhost.GetRoutes()) != 1 {
++			return 0
++		}
++		return vhost.GetRoutes()[0].GetRoute().GetTimeout().AsDuration()
++	}, 3*time.Second)
++	protected := readLDS()
++	assert.Equal(t, protected.GetMatcher(), nil)
++	assert.Equal(t, protected.GetRoutes()[0].GetRoute().GetTimeout().AsDuration(), 3*time.Second)
++	assert.EventuallyEqual(t, sidecarConsumerRoutes, sets.New("shop.neighbor.0"))
++
++	neighborCluster := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", "neighbor.default.svc.cluster.local", 9090)
++	current := *proxy
++	neighbor := routeConfig(d.Listeners(d.SetupProxy(&current)), neighborCluster).GetMatcher()
++	assert.Equal(t, value(routeList(neighbor.GetMatcherList().GetMatchers()[0].GetOnMatch())[0]), "http-consumer")
++	ordinaryRoute := routeList(neighbor.GetOnNoMatch())[0]
++	assert.Equal(t, len(ordinaryRoute.GetRequestHeadersToAdd()), 1)
++	assert.Equal(t, ordinaryRoute.GetRequestHeadersToAdd()[0].GetHeader().GetValue(), "http-consumer")
++
++	assert.NoError(t, d.Store().Delete(gvk.EnvoyFilter, ownerRoute.Name, ownerRoute.Namespace, nil))
++	waitForNamespaceRoutes([]int{2, 1}, false)
++	m = readLDS().GetMatcher()
++	assert.Equal(t, value(routeList(m.GetMatcherList().GetMatchers()[0].GetOnMatch())[0]), "consumer 100%%")
++	fallback := routeList(m.GetOnNoMatch())[0]
++	assert.Equal(t, fallback.GetName(), "default")
++	assert.Equal(t, fallback.GetRoute().GetTimeout().AsDuration(), time.Duration(0))
++
+ 	assert.NoError(t, client.Delete(ctx, consumer.Name, metav1.DeleteOptions{}))
+ 	assert.NoError(t, client.Delete(ctx, shopFallback.Name, metav1.DeleteOptions{}))
+ 	assert.NoError(t, warehouseRoutes.Delete(ctx, warehouse.Name, metav1.DeleteOptions{}))
+-	waitForNamespaceRoutes([]int{0})
++	waitForNamespaceRoutes([]int{0}, false)
++	assert.EventuallyEqual(t, sidecarConsumerRoutes, sets.New("shop.app.0", "shop.neighbor.0"))
+ 	m = readLDS().GetMatcher()
+ 	assert.Equal(t, value(routeList(m.GetMatcherList().GetMatchers()[0].GetOnMatch())[0]), "http-consumer")
+-	assert.Equal(t, value(routeList(m.GetOnNoMatch())[0]), "producer")
++	assert.Equal(t, routeList(m.GetOnNoMatch())[0].GetName(), "default")
+ }
+ 
+ func setupWaypointTest(t *testing.T, configs ...string) (*xds.FakeDiscoveryServer, *model.Proxy) {
 diff --git a/pilot/test/xds/fake.go b/pilot/test/xds/fake.go
 index 4f024432234275965cb055f08df465a85743f25d..69b3cbae4cb01da9292a739b69536878c55525fc 100644
 --- a/pilot/test/xds/fake.go
@@ -2069,3 +2725,102 @@ index 4f024432234275965cb055f08df465a85743f25d..69b3cbae4cb01da9292a739b69536878
  	s.Env.GatewayAPIController = gwc
  	if err := s.Env.InitNetworksManager(s); err != nil {
  		t.Fatal(err)
+diff --git a/pkg/kube/krt/join.go b/pkg/kube/krt/join.go
+index 2a93ad99d534fa669701b15819af704f6481bc34..0c15d8a3cc07b6507bee20c65499c7155e82bd3a 100644
+--- a/pkg/kube/krt/join.go
++++ b/pkg/kube/krt/join.go
+@@ -216,6 +216,16 @@ func (j *join[T]) getFromColIdx(idx int, key string) *T {
+ 	return obj
+ }
+ 
++// hasHigherPriority checks the key even when the earlier object is outside an index query.
++func (j *join[T]) hasHigherPriority(source int, key string) bool {
++	for i := range source {
++		if j.getFromColIdx(i, key) != nil {
++			return true
++		}
++	}
++	return false
++}
++
+ // refreshEvents refreshes events by checking the current state of all collections
+ // to determine which collection is authoritative for each key. This implements
+ // conflict resolution without storing objects.
+@@ -225,15 +235,7 @@ func (j *join[T]) refreshEvents(events []Event[T], sourceCollectionIdx int) []Ev
+ 	for _, ev := range events {
+ 		key := GetKey(ev.Latest())
+ 
+-		// Check if any higher-priority collection (0...sourceCollectionIdx-1) has this key
+-		hasHigherPriority := false
+-
+-		for i := range sourceCollectionIdx {
+-			if o := j.getFromColIdx(i, key); o != nil {
+-				hasHigherPriority = true
+-				break
+-			}
+-		}
++		hasHigherPriority := j.hasHigherPriority(sourceCollectionIdx, key)
+ 
+ 		if ev.Event == controllers.EventDelete {
+ 			if hasHigherPriority {
+@@ -326,14 +328,23 @@ func (j *join[T]) dump() CollectionDump {
+ // nolint: unused // (not true)
+ type joinIndexer[T any] struct {
+ 	indexers []indexer[T]
++	joined   *join[T]
+ }
+ 
+ // nolint: unused // (not true)
+ func (j joinIndexer[T]) Lookup(key string) []T {
+ 	var res []T
+ 	first := true
+-	for _, i := range j.indexers {
++	for source, i := range j.indexers {
+ 		l := i.Lookup(key)
++		if j.joined != nil && source > 0 {
++			for _, item := range l {
++				if !j.joined.hasHigherPriority(source, GetKey(item)) {
++					res = append(res, item)
++				}
++			}
++			continue
++		}
+ 		if len(l) > 0 && first {
+ 			// Optimization: re-use the first returned slice
+ 			res = l
+@@ -348,6 +359,9 @@ func (j joinIndexer[T]) Lookup(key string) []T {
+ // nolint: unused // (not true, its to implement an interface)
+ func (j *join[T]) index(name string, extract func(o T) []string) indexer[T] {
+ 	ji := joinIndexer[T]{indexers: make([]indexer[T], 0, len(j.collections))}
++	if !j.uncheckedOverlap {
++		ji.joined = j
++	}
+ 	for _, c := range j.collections {
+ 		ji.indexers = append(ji.indexers, c.index(name, extract))
+ 	}
+diff --git a/pkg/kube/krt/join_test.go b/pkg/kube/krt/join_test.go
+index 5caeace2b1f27e6f544318990b8128cd069a02ec..afcf7ddc00542e2a9e0ddce8ee79ac32700d993b 100644
+--- a/pkg/kube/krt/join_test.go
++++ b/pkg/kube/krt/join_test.go
+@@ -67,6 +67,21 @@ func TestJoinCollection(t *testing.T) {
+ 	}
+ }
+ 
++func TestJoinIndexUsesEffectiveObject(t *testing.T) {
++	opts := testOptions(t)
++	primary := NamedValue{Named{"ns", "shared"}, "primary"}
++	secondary := NamedValue{Named{"ns", "shared"}, "secondary"}
++	first := krt.NewStaticCollection(nil, []NamedValue{primary}, opts.WithName("First")...)
++	second := krt.NewStaticCollection(nil, []NamedValue{secondary}, opts.WithName("Second")...)
++	joined := krt.JoinCollection([]krt.Collection[NamedValue]{first, second}, opts.WithName("Joined")...)
++	index := krt.NewIndex(joined, "value", func(item NamedValue) []string { return []string{item.Value} })
++
++	assert.Equal(t, index.Lookup("primary"), []NamedValue{primary})
++	assert.Equal(t, len(index.Lookup("secondary")), 0)
++	first.DeleteObject(primary.ResourceName())
++	assert.Equal(t, index.Lookup("secondary"), []NamedValue{secondary})
++}
++
+ func testJoinInner(t *testing.T, options ...krt.CollectionOption) {
+ 	options = append(options, krt.WithName("JoinTest"))
+ 	opts := testOptions(t).With(options...)
