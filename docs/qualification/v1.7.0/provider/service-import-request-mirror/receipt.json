@@ -1,0 +1,1469 @@
+{
+  "baselineStandard": {
+    "channel": "standard",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "MCS": {
+      "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+      "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+      "controllerServiceImportReadVerbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiVersion": "multicluster.x-k8s.io/v1beta1",
+      "status": {
+        "clusters": [
+          {
+            "cluster": "remote-east"
+          },
+          {
+            "cluster": "remote-west"
+          }
+        ],
+        "endpointSliceObjects": "Present"
+      },
+      "spec": {
+        "ipFamilies": [
+          "IPv4"
+        ],
+        "ports": [
+          {
+            "name": "http",
+            "port": 8080,
+            "protocol": "TCP"
+          },
+          {
+            "appProtocol": "kubernetes.io/h2c",
+            "name": "grpc",
+            "port": 8081,
+            "protocol": "TCP"
+          }
+        ],
+        "type": "Headless"
+      },
+      "endpointSlices": [
+        {
+          "name": "echo",
+          "labels": {
+            "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+            "kubernetes.io/service-name": "echo"
+          },
+          "endpoints": [
+            {
+              "addresses": [
+                "198.51.100.5"
+              ],
+              "conditions": {
+                "ready": true,
+                "serving": true
+              }
+            }
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "port": 44843,
+              "protocol": "TCP"
+            },
+            {
+              "name": "grpc",
+              "port": 35179,
+              "protocol": "TCP"
+            }
+          ]
+        },
+        {
+          "name": "remote-east",
+          "labels": {
+            "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+            "multicluster.kubernetes.io/service-name": "echo",
+            "multicluster.kubernetes.io/source-cluster": "remote-east"
+          },
+          "endpoints": [
+            {
+              "addresses": [
+                "198.51.100.6"
+              ],
+              "conditions": {
+                "ready": true,
+                "serving": true
+              }
+            }
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "port": 36997,
+              "protocol": "TCP"
+            },
+            {
+              "name": "grpc",
+              "port": 45129,
+              "protocol": "TCP"
+            }
+          ]
+        },
+        {
+          "name": "remote-west",
+          "labels": {
+            "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+            "multicluster.kubernetes.io/service-name": "echo",
+            "multicluster.kubernetes.io/source-cluster": "remote-west"
+          },
+          "endpoints": [
+            {
+              "addresses": [
+                "198.51.100.7"
+              ],
+              "conditions": {
+                "ready": true,
+                "serving": true
+              }
+            }
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "port": 43075,
+              "protocol": "TCP"
+            },
+            {
+              "name": "grpc",
+              "port": 46697,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ]
+    },
+    "mirroringCapabilities": [
+      "grpc_request_mirror_v1",
+      "http_request_mirror_v1"
+    ],
+    "phases": {
+      "baseline": {
+        "routes": {
+          "http": {
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/InvalidKind",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "generation": 2,
+            "sameUIDAndSpec": true
+          },
+          "grpc": {
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/InvalidKind",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "generation": 2,
+            "sameUIDAndSpec": true
+          }
+        },
+        "policies": {
+          "grpc": {
+            "action": "WEIGHTED_TARGETS",
+            "scope": "backendRef",
+            "primaryMembers": [
+              [
+                "198.51.100.5",
+                35179
+              ]
+            ],
+            "mirrors": []
+          },
+          "http": {
+            "action": "REDIRECT_TO_POOL",
+            "scope": "rule",
+            "primaryMembers": [
+              [
+                "198.51.100.5",
+                44843
+              ]
+            ],
+            "mirrors": []
+          }
+        },
+        "HAProxy": {
+          "configSHA256": "343b83c88dfa514dd831561aff3fe794d4bfa01a7649aa1b86a494cdb771c887",
+          "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+          "mirrorSocket": false
+        },
+        "applications": {
+          "http": {
+            "primaryResponses": 8,
+            "observedCalls": {
+              "local-service": 8,
+              "remote-east": 0,
+              "remote-west": 0
+            },
+            "oneCopyPerEnabledRequest": true
+          },
+          "grpc": {
+            "primaryResponses": 8,
+            "observedCalls": {
+              "local-service": 8,
+              "remote-east": 0,
+              "remote-west": 0
+            },
+            "oneCopyPerEnabledRequest": true
+          }
+        }
+      }
+    },
+    "admittedRoutes": {
+      "http": {
+        "parentRefs": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          }
+        ],
+        "rules": [
+          {
+            "backendRefs": [
+              {
+                "group": "",
+                "kind": "Service",
+                "name": "echo",
+                "namespace": "backend",
+                "port": 8080,
+                "weight": 1
+              }
+            ],
+            "filters": [
+              {
+                "requestMirror": {
+                  "backendRef": {
+                    "group": "multicluster.x-k8s.io",
+                    "kind": "ServiceImport",
+                    "name": "echo",
+                    "namespace": "backend",
+                    "port": 8080
+                  }
+                },
+                "type": "RequestMirror"
+              }
+            ],
+            "matches": [
+              {
+                "path": {
+                  "type": "Exact",
+                  "value": "/copy"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "grpc": {
+        "parentRefs": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "grpc"
+          }
+        ],
+        "rules": [
+          {
+            "backendRefs": [
+              {
+                "filters": [
+                  {
+                    "requestMirror": {
+                      "backendRef": {
+                        "group": "multicluster.x-k8s.io",
+                        "kind": "ServiceImport",
+                        "name": "echo",
+                        "namespace": "backend",
+                        "port": 8081
+                      }
+                    },
+                    "type": "RequestMirror"
+                  }
+                ],
+                "group": "",
+                "kind": "Service",
+                "name": "echo",
+                "namespace": "backend",
+                "port": 8081,
+                "weight": 1
+              }
+            ],
+            "matches": [
+              {
+                "method": {
+                  "method": "Select",
+                  "service": "example.HeaderNames",
+                  "type": "Exact"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "kubernetesVersion": "v1.36.2",
+    "routeSchemas": {
+      "HTTPRoute": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c",
+      "GRPCRoute": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+    },
+    "controller": {
+      "manifestDigest": "sha256:9eecb97cae17873b3341cd2fa98e67572b8d2ae914460ce2a0032affda670a57",
+      "configDigest": "sha256:48ffa61fe66a01badb888a84e86f93555792e94d06869f071f3bee8c84589399",
+      "ociArchiveSHA256": "b06474722d6fe41e2c660c620f7577d51628546baa08514534a1976839cfc893",
+      "managerSHA256": "4644e9aa4171fe567692e463101c940e91d248f19b6c04463136bf28a37ededd",
+      "platform": "linux/amd64",
+      "sourceRevision": "892bc37a0f8892a15b0839a4979e9080bf541f74"
+    },
+    "provider": {
+      "octavia": {
+        "source": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+        "installedFilesVerified": 674
+      },
+      "octaviaLib": {
+        "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "installedFilesVerified": 24
+      }
+    },
+    "rawReceiptSHA256": "261349c1d4440f24299c05bad2f858808d13bf08eafc5b15ec8e91832410e66b"
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "MCS": {
+        "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+        "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+        "controllerServiceImportReadVerbs": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "apiVersion": "multicluster.x-k8s.io/v1beta1",
+        "status": {
+          "clusters": [
+            {
+              "cluster": "remote-east"
+            },
+            {
+              "cluster": "remote-west"
+            }
+          ],
+          "endpointSliceObjects": "Present"
+        },
+        "spec": {
+          "ipFamilies": [
+            "IPv4"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "port": 8080,
+              "protocol": "TCP"
+            },
+            {
+              "appProtocol": "kubernetes.io/h2c",
+              "name": "grpc",
+              "port": 8081,
+              "protocol": "TCP"
+            }
+          ],
+          "type": "Headless"
+        },
+        "endpointSlices": [
+          {
+            "name": "echo",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+              "kubernetes.io/service-name": "echo"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.5"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 38417,
+                "protocol": "TCP"
+              },
+              {
+                "name": "grpc",
+                "port": 39835,
+                "protocol": "TCP"
+              }
+            ]
+          },
+          {
+            "name": "remote-east",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+              "multicluster.kubernetes.io/service-name": "echo",
+              "multicluster.kubernetes.io/source-cluster": "remote-east"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.6"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 37433,
+                "protocol": "TCP"
+              },
+              {
+                "name": "grpc",
+                "port": 42713,
+                "protocol": "TCP"
+              }
+            ]
+          },
+          {
+            "name": "remote-west",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+              "multicluster.kubernetes.io/service-name": "echo",
+              "multicluster.kubernetes.io/source-cluster": "remote-west"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.7"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 33031,
+                "protocol": "TCP"
+              },
+              {
+                "name": "grpc",
+                "port": 36043,
+                "protocol": "TCP"
+              }
+            ]
+          }
+        ]
+      },
+      "mirroringCapabilities": [
+        "grpc_request_mirror_v1",
+        "http_request_mirror_v1"
+      ],
+      "phases": {
+        "granted": {
+          "routes": {
+            "http": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            },
+            "grpc": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            }
+          },
+          "policies": {
+            "grpc": {
+              "action": "WEIGHTED_TARGETS",
+              "scope": "backendRef",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  39835
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      42713
+                    ],
+                    [
+                      "198.51.100.7",
+                      36043
+                    ]
+                  ]
+                }
+              ]
+            },
+            "http": {
+              "action": "REDIRECT_TO_POOL",
+              "scope": "rule",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  38417
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      37433
+                    ],
+                    [
+                      "198.51.100.7",
+                      33031
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "HAProxy": {
+            "configSHA256": "2bcd2b2ac544b6242f23a156e56aa9b12e7163d9c10ccd28eb166007f11b1e88",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "mirrorSocket": true
+          },
+          "applications": {
+            "http": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            },
+            "grpc": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            }
+          }
+        },
+        "withdrawn": {
+          "routes": {
+            "http": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            },
+            "grpc": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            }
+          },
+          "policies": {
+            "grpc": {
+              "action": "WEIGHTED_TARGETS",
+              "scope": "backendRef",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  39835
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      42713
+                    ],
+                    [
+                      "198.51.100.7",
+                      36043
+                    ]
+                  ]
+                }
+              ]
+            },
+            "http": {
+              "action": "REDIRECT_TO_POOL",
+              "scope": "rule",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  38417
+                ]
+              ],
+              "mirrors": []
+            }
+          },
+          "HAProxy": {
+            "configSHA256": "e535a827504ff033c7641dfad71338741b7dde15f84159776a08e0fedadb0da0",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "mirrorSocket": true
+          },
+          "applications": {
+            "http": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 0,
+                "remote-west": 0
+              },
+              "oneCopyPerEnabledRequest": true
+            },
+            "grpc": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            }
+          }
+        },
+        "restored": {
+          "routes": {
+            "http": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            },
+            "grpc": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            }
+          },
+          "policies": {
+            "grpc": {
+              "action": "WEIGHTED_TARGETS",
+              "scope": "backendRef",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  39835
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      42713
+                    ],
+                    [
+                      "198.51.100.7",
+                      36043
+                    ]
+                  ]
+                }
+              ]
+            },
+            "http": {
+              "action": "REDIRECT_TO_POOL",
+              "scope": "rule",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  38417
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      37433
+                    ],
+                    [
+                      "198.51.100.7",
+                      33031
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "HAProxy": {
+            "configSHA256": "993803cdaaab7eafba9cb4d68e5fc2c287e2176cd9604ebff1c452a393cd6bf8",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "mirrorSocket": true
+          },
+          "applications": {
+            "http": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            },
+            "grpc": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            }
+          }
+        }
+      },
+      "admittedRoutes": {
+        "http": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "http"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "namespace": "backend",
+                  "port": 8080,
+                  "weight": 1
+                }
+              ],
+              "filters": [
+                {
+                  "requestMirror": {
+                    "backendRef": {
+                      "group": "multicluster.x-k8s.io",
+                      "kind": "ServiceImport",
+                      "name": "echo",
+                      "namespace": "backend",
+                      "port": 8080
+                    }
+                  },
+                  "type": "RequestMirror"
+                }
+              ],
+              "matches": [
+                {
+                  "path": {
+                    "type": "Exact",
+                    "value": "/copy"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "grpc": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "multicluster.x-k8s.io",
+                          "kind": "ServiceImport",
+                          "name": "echo",
+                          "namespace": "backend",
+                          "port": 8081
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "namespace": "backend",
+                  "port": 8081,
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Select",
+                    "service": "example.HeaderNames",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "kubernetesVersion": "v1.36.2",
+      "routeSchemas": {
+        "HTTPRoute": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c",
+        "GRPCRoute": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+      },
+      "controller": {
+        "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
+        "configDigest": "sha256:fb3e591e05d8f909f210b57d4492af18bbb42700ab377cd216246fcd0a6331e4",
+        "ociArchiveSHA256": "0054b977d4f0bcfceacafe920c6a0fd508c11b582372ce4f343ac1462f8026ee",
+        "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede",
+        "platform": "linux/amd64",
+        "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d"
+      },
+      "provider": {
+        "octavia": {
+          "source": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "installedFilesVerified": 674
+        },
+        "octaviaLib": {
+          "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "installedFilesVerified": 24
+        }
+      },
+      "rawReceiptSHA256": "ba4309c0278e25eb8dd3e6a653c12a1887c884dc0737498484625ea276c68420"
+    },
+    "experimental": {
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "MCS": {
+        "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+        "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+        "controllerServiceImportReadVerbs": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "apiVersion": "multicluster.x-k8s.io/v1beta1",
+        "status": {
+          "clusters": [
+            {
+              "cluster": "remote-east"
+            },
+            {
+              "cluster": "remote-west"
+            }
+          ],
+          "endpointSliceObjects": "Present"
+        },
+        "spec": {
+          "ipFamilies": [
+            "IPv4"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "port": 8080,
+              "protocol": "TCP"
+            },
+            {
+              "appProtocol": "kubernetes.io/h2c",
+              "name": "grpc",
+              "port": 8081,
+              "protocol": "TCP"
+            }
+          ],
+          "type": "Headless"
+        },
+        "endpointSlices": [
+          {
+            "name": "echo",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+              "kubernetes.io/service-name": "echo"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.5"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 43115,
+                "protocol": "TCP"
+              },
+              {
+                "name": "grpc",
+                "port": 38123,
+                "protocol": "TCP"
+              }
+            ]
+          },
+          {
+            "name": "remote-east",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+              "multicluster.kubernetes.io/service-name": "echo",
+              "multicluster.kubernetes.io/source-cluster": "remote-east"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.6"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 44573,
+                "protocol": "TCP"
+              },
+              {
+                "name": "grpc",
+                "port": 42981,
+                "protocol": "TCP"
+              }
+            ]
+          },
+          {
+            "name": "remote-west",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+              "multicluster.kubernetes.io/service-name": "echo",
+              "multicluster.kubernetes.io/source-cluster": "remote-west"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.7"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 41019,
+                "protocol": "TCP"
+              },
+              {
+                "name": "grpc",
+                "port": 38539,
+                "protocol": "TCP"
+              }
+            ]
+          }
+        ]
+      },
+      "mirroringCapabilities": [
+        "grpc_request_mirror_v1",
+        "http_request_mirror_v1"
+      ],
+      "phases": {
+        "granted": {
+          "routes": {
+            "http": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            },
+            "grpc": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            }
+          },
+          "policies": {
+            "grpc": {
+              "action": "WEIGHTED_TARGETS",
+              "scope": "backendRef",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  38123
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      42981
+                    ],
+                    [
+                      "198.51.100.7",
+                      38539
+                    ]
+                  ]
+                }
+              ]
+            },
+            "http": {
+              "action": "REDIRECT_TO_POOL",
+              "scope": "rule",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  43115
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      44573
+                    ],
+                    [
+                      "198.51.100.7",
+                      41019
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "HAProxy": {
+            "configSHA256": "cb14f5cb3d1e414a532222a950c727b6bf70c07535779f85d5d8df13e04cf9cf",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "mirrorSocket": true
+          },
+          "applications": {
+            "http": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            },
+            "grpc": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            }
+          }
+        },
+        "withdrawn": {
+          "routes": {
+            "http": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            },
+            "grpc": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            }
+          },
+          "policies": {
+            "grpc": {
+              "action": "WEIGHTED_TARGETS",
+              "scope": "backendRef",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  38123
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      42981
+                    ],
+                    [
+                      "198.51.100.7",
+                      38539
+                    ]
+                  ]
+                }
+              ]
+            },
+            "http": {
+              "action": "REDIRECT_TO_POOL",
+              "scope": "rule",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  43115
+                ]
+              ],
+              "mirrors": []
+            }
+          },
+          "HAProxy": {
+            "configSHA256": "dc3e6cbb0c0f814b1482ed614a202821e2324799cef89868f74d81ddfccc4b18",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "mirrorSocket": true
+          },
+          "applications": {
+            "http": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 0,
+                "remote-west": 0
+              },
+              "oneCopyPerEnabledRequest": true
+            },
+            "grpc": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            }
+          }
+        },
+        "restored": {
+          "routes": {
+            "http": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            },
+            "grpc": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "generation": 2,
+              "sameUIDAndSpec": true
+            }
+          },
+          "policies": {
+            "grpc": {
+              "action": "WEIGHTED_TARGETS",
+              "scope": "backendRef",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  38123
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      42981
+                    ],
+                    [
+                      "198.51.100.7",
+                      38539
+                    ]
+                  ]
+                }
+              ]
+            },
+            "http": {
+              "action": "REDIRECT_TO_POOL",
+              "scope": "rule",
+              "primaryMembers": [
+                [
+                  "198.51.100.5",
+                  43115
+                ]
+              ],
+              "mirrors": [
+                {
+                  "ratio": [
+                    1,
+                    1
+                  ],
+                  "members": [
+                    [
+                      "198.51.100.6",
+                      44573
+                    ],
+                    [
+                      "198.51.100.7",
+                      41019
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "HAProxy": {
+            "configSHA256": "a04784e2f864ac871fadc6274be8dd5ad184d689632bdfc424eccc50b5adcf0c",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "mirrorSocket": true
+          },
+          "applications": {
+            "http": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            },
+            "grpc": {
+              "primaryResponses": 8,
+              "observedCalls": {
+                "local-service": 8,
+                "remote-east": 4,
+                "remote-west": 4
+              },
+              "oneCopyPerEnabledRequest": true
+            }
+          }
+        }
+      },
+      "admittedRoutes": {
+        "http": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "http"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "namespace": "backend",
+                  "port": 8080,
+                  "weight": 1
+                }
+              ],
+              "filters": [
+                {
+                  "requestMirror": {
+                    "backendRef": {
+                      "group": "multicluster.x-k8s.io",
+                      "kind": "ServiceImport",
+                      "name": "echo",
+                      "namespace": "backend",
+                      "port": 8080
+                    }
+                  },
+                  "type": "RequestMirror"
+                }
+              ],
+              "matches": [
+                {
+                  "path": {
+                    "type": "Exact",
+                    "value": "/copy"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "grpc": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "filters": [
+                    {
+                      "requestMirror": {
+                        "backendRef": {
+                          "group": "multicluster.x-k8s.io",
+                          "kind": "ServiceImport",
+                          "name": "echo",
+                          "namespace": "backend",
+                          "port": 8081
+                        }
+                      },
+                      "type": "RequestMirror"
+                    }
+                  ],
+                  "group": "",
+                  "kind": "Service",
+                  "name": "echo",
+                  "namespace": "backend",
+                  "port": 8081,
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Select",
+                    "service": "example.HeaderNames",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "kubernetesVersion": "v1.36.2",
+      "routeSchemas": {
+        "HTTPRoute": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d",
+        "GRPCRoute": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+      },
+      "controller": {
+        "manifestDigest": "sha256:5778ad81e7bb24ac96164421fd9057640bd230841f39e77cbb2aa40fdaf65d4a",
+        "configDigest": "sha256:fb3e591e05d8f909f210b57d4492af18bbb42700ab377cd216246fcd0a6331e4",
+        "ociArchiveSHA256": "0054b977d4f0bcfceacafe920c6a0fd508c11b582372ce4f343ac1462f8026ee",
+        "managerSHA256": "d8bc269f55db4db545dd0086dcd1a37df8d0eec131aae8f3f999e172783acede",
+        "platform": "linux/amd64",
+        "sourceRevision": "b38312581f186c83a0f2969326dbc1191178a74d"
+      },
+      "provider": {
+        "octavia": {
+          "source": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "installedFilesVerified": 674
+        },
+        "octaviaLib": {
+          "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "installedFilesVerified": 24
+        }
+      },
+      "rawReceiptSHA256": "5ff6b066f6d2f32224a7e69e969d37499b15d88ad5354b7bb1adc5f23a58ce75"
+    }
+  }
+}

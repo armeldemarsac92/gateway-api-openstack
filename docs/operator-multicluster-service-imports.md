@@ -29,7 +29,11 @@ An HTTP rule can mix Service and ServiceImport references with separate weights.
 
 A valid Headless reference with no eligible members keeps `ResolvedRefs=True`. Its share uses the existing unavailable backend behavior, including HTTP 503 or gRPC `UNAVAILABLE`. TLSRoute rejects that share under the same regional capability requirements as an invalid backend. IPv6 endpoint forwarding and MCS providers that expose Headless endpoints through another mechanism are outside this profile.
 
+On both local release channels, removing and restoring the HTTP import grant preserved the weights and the independently authorized gRPC route. [Route conditions and traffic by phase](qualification/v1.7.0/provider/multicluster-service-imports/README.md)
+
 ## Mirror HTTPRoute and GRPCRoute requests
+
+The local grant cycle recorded one primary reply per request and the copies received at each remote endpoint. [HTTP and gRPC counts and conditions](qualification/v1.7.0/provider/service-import-request-mirror/README.md)
 
 Enable `--octavia-http-request-mirror` alongside `--multicluster-service-imports`. A mirror in a `backendRefs[].filters` list also requires `--octavia-weighted-http-targets`. Use a region that advertises the [HTTP request mirroring capabilities](qualification/v1.7.0/provider/http-request-mirror.md) or [gRPC request mirroring capabilities](getting-started.md#grpc-request-mirroring) for the route protocol. The same IPv4 Endpoint and unmanaged backend security prerequisites apply.
 
@@ -56,3 +60,7 @@ A cross-namespace mirror needs a grant for the import and the exact route kind. 
 Enable the [passthrough](operator-octavia-tls-sni-passthrough.md) or [termination](qualification/v1.7.0/provider/tlsroute-termination.md) profile for the listener. Both sections of an eligible mixed listener can use ServiceImports. Passthrough sends the client TLS stream to the imported TCP port. Termination sends the decrypted stream to the imported TCP port. Service BackendTLSPolicies apply only to core Service references.
 
 A TLSRoute can mix Services and ServiceImports in the same weighted rule. An invalid import or a revoked grant preserves the backend’s connection share as rejection through the regional TCP connection rejection capability, or through independent weighted SNI pools if the region supports them for the selected listener mode. Enable `--octavia-tcp-connection-rejection` to use the single-pool rejection capability. When the regional provider offers neither mechanism, forwarding for that SNI hostname is withdrawn. Separate hostnames continue to use their own backend ports.
+
+The local passthrough Gateway kept both target weights through a TLSRoute ReferenceGrant withdrawal and restoration. [SNI pool state, closed connections and origin counts](qualification/v1.7.0/provider/tlsroute-service-imports/README.md)
+
+The local trials recorded HTTP traffic to distinct published ports, an imported gRPC origin, and TLS connection weights after the final imported endpoint disappeared. [Headless ServiceImport traffic](qualification/v1.7.0/provider/headless-service-imports/README.md)

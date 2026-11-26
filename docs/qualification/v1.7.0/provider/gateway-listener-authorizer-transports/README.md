@@ -1,0 +1,22 @@
+# Verify Envoy and HTTP authorization on Gateway listeners
+
+Experimental listener filters authorize requests before HTTPRoute matching. The trial used two HTTPS hostnames on one Octavia listener and verified the frontend certificate. Amphora contacted a server implementing the Envoy v3 gRPC authorization service over cleartext HTTP/2 (h2c) and the HTTP authorizer over TLSv1.3 and HTTP/1.1. The active HTTP authorizer configuration required the configured CA, exact DNS validation and SNI authorizer.example.test.
+
+| Experimental phase | Protected listener status | Protected hostname | Sibling after convergence | Sibling probes during change |
+| --- | --- | --- | --- | --- |
+| Grant present | ResolvedRefs=True/ResolvedRefs, Programmed=True/Programmed | The matched request returned HTTP 200 after one Envoy Check and one origin call. The unmatched path and header returned the Envoy HTTP 401 body and challenge after one Check, with zero origin calls. | HTTP 200, one origin call, zero authorizer calls | Initial phase |
+| Grant withdrawn | ResolvedRefs=False/RefNotPermitted, Programmed=False/Invalid | Both requests returned HTTP 403 locally with zero authorizer or origin calls. | HTTP 200, one origin call, zero authorizer calls | 11/18 interruptions, 11 refused (7 HTTP 200, 11 connection refusals) |
+| Grant restored under a new UID | ResolvedRefs=True/ResolvedRefs, Programmed=True/Programmed | Envoy Check and the HTTP 200 and 401 results returned. | HTTP 200, one origin call, zero authorizer calls | 7/19 interruptions, 7 refused (12 HTTP 200, 7 connection refusals) |
+| Switched to HTTP over verified TLS | Listener programmed, BackendTLSPolicy Accepted=True/Accepted and ResolvedRefs=True/ResolvedRefs | HTTP 200. The HTTP peer saw the TLS ClientHello, exact SNI and one encrypted HTTP/1.1 authorization request. The origin received one request. | HTTP 200, one origin call, zero authorizer calls | 18/36 interruptions, 18 refused (18 HTTP 200, 18 connection refusals) |
+
+## Envoy v3 authorization over TLS
+
+A separate trial used the same controller, Octavia packages and HAProxy with a gRPC test server implementing the Envoy v3 authorization service. With the correct CA, two Check requests used TLS 1.3 with SNI authz.test and ALPN h2. The allowed request returned HTTP 200 with one origin call. The unmatched request returned HTTP 401 with zero origin calls. With another valid CA, the peer logged the ClientHello and a generic TLS handshake failure. The protected request returned HTTP 503 with zero Check calls over TLS or cleartext and zero origin calls. The sibling returned HTTP 200 after convergence with either CA. During the CA change it returned 15 HTTP 200 responses and recorded 17 connection refusals across 32 probes. [gRPC TLS trial receipt](grpc-tls.json)
+
+## Standard and regional opt-in
+
+Standard rejected both filters during strict admission and admitted an ordinary Gateway. Both ordinary HTTPS hostnames returned HTTP 200 for matching requests. The unmatched path and wrong header on the chosen hostname returned HTTP 404.
+
+Install matching Octavia, driver library and Amphora components and enable the Experimental controller and regional capabilities. Shared HTTPS needs listener_request_filters_v1 and https_listener_isolation_v1. Envoy h2c also needs listener_grpc_external_auth_v1 and backend_h2c_v1. Envoy over TLS also requires backend_tls_hostname_v1 and backend_tls_h2_alpn_v1. Verified HTTP/TLS needs listener_http_external_auth_tls_v1 and backend_tls_hostname_v1. [Operator setup](../../../../operator-octavia-listener-request-filters.md#choose-the-authorizer-transport) · [Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-authorizer-transports-592e32f88b0a)
+
+The trials on Kubernetes v1.36.2 used the verified controller image built from a signed commit, installed Octavia wheels, Barbican TLS, Amphora rendering and native HAProxy. Keystone, Neutron, RPC completion and Amphora agent transport used fixture adapters. Both Octavia lineages reproduced their wheel and source archives twice and passed their selected tests (stable 6 installed and 8 native, master 6 installed and 8 native). Qualification on a deployed Hibiscus region remains open. [Signed revisions, peer events and digests](receipt.json) · [Earlier listener body and grant evidence](../gateway-listener-external-auth-forward-body/README.md)
