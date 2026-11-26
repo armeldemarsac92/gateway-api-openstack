@@ -19,6 +19,7 @@ package graph
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -66,6 +67,9 @@ type tcpGraphFixture struct {
 	udpDropRenderBusy           bool
 	tcpDefaultPoolTLSAPI        bool
 	tcpDefaultPoolTLSAdvertised bool
+	tcpWeightedAPI              bool
+	tcpWeightedAdvertised       bool
+	nextWeightedPool            int
 }
 
 func newTCPGraphFixture(t *testing.T) *tcpGraphFixture {
@@ -134,6 +138,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		capabilities := []string{}
+		if f.tcpWeightedAdvertised {
+			capabilities = append(capabilities, "tcp_weighted_default_pools_v1")
+		}
 		if f.tcpDefaultPoolTLSAdvertised {
 			capabilities = append(capabilities, "tcp_default_pool_tls_v1", "backend_tls_hostname_v1")
 		}
@@ -168,18 +175,33 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			if resource == listPath {
+				caUsage := f.tcpWeightedAPI && (listPath == tcpPools || listPath == tcpListeners) && req.URL.Query().Get("loadbalancer_id") == ""
 				if !safetyRequireQuery(f.t, w, req, "project_id", hibiscusProject) ||
-					kind.parentKey != "" && !safetyRequireQuery(f.t, w, req, kind.parentKey, kind.parentID) {
+					!caUsage && kind.parentKey != "" && !safetyRequireQuery(f.t, w, req, kind.parentKey, kind.parentID) {
 					return
 				}
 				items := []map[string]any{}
 				for _, child := range f.children(listPath) {
-					if (f.tcpRejectionAPI || f.udpDropAPI) && listPath == tcpPools {
+					if (f.tcpRejectionAPI || f.udpDropAPI || f.tcpWeightedAPI) && listPath == tcpPools {
 						refs := []map[string]any{}
 						for _, member := range f.children(tcpPools + "/" + child["id"].(string) + "/members") {
 							refs = append(refs, map[string]any{"id": member["id"]})
 						}
 						child["members"] = refs
+						if f.tcpWeightedAPI {
+							monitors := f.children(tcpMonitors)
+							child["healthmonitor_id"] = nil
+							for _, monitor := range monitors {
+								if monitor["pool_id"] == child["id"] {
+									child["healthmonitor_id"] = monitor["id"]
+									break
+								}
+							}
+						}
+					}
+					if f.tcpWeightedAPI && listPath == tcpListeners && child["default_pool_id"] != nil {
+						child = maps.Clone(child)
+						delete(child, "tcp_default_targets")
 					}
 					if listPath+"/"+child["id"].(string) != f.hiddenChild &&
 						(listPath != tcpMonitors || child["pool_id"] == kind.parentID) {
@@ -220,6 +242,14 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			if listPath == tcpPools && len(f.spec.Routes) > 1 &&
 				slices.Contains(pilotTags(data["tags"]), openstackidentity.Tag("route-uid", f.spec.Routes[1].Spec.Identity.RouteUID)) {
 				entryPath = tcpPool + "-secondary"
+			}
+			role, _ := openstackidentity.ResourceRole(pilotTags(data["tags"]))
+			if f.tcpWeightedAPI && listPath == tcpPools && strings.HasPrefix(role, "tcp-weighted-v1/") {
+				f.nextWeightedPool++
+				entryPath = tcpPools + "/" + fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextWeightedPool)
+			}
+			if f.tcpWeightedAPI && listPath == tcpMonitors && strings.HasPrefix(data["pool_id"].(string), "00000000-") {
+				entryPath = tcpMonitors + "/" + data["pool_id"].(string)
 			}
 			if listPath == tcpMonitors && data["pool_id"] == "pool-secondary" {
 				entryPath = tcpMonitor + "-secondary"
@@ -268,7 +298,14 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				if f.tcpDefaultPoolTLSAPI {
 					data["tcp_default_pool_tls"] = false
 				}
+				if f.tcpWeightedAPI {
+					data["tcp_default_targets"] = []any{}
+					data["client_ca_tls_container_ref"] = nil
+				}
 			case tcpPools:
+				if f.tcpWeightedAPI && data["tls_enabled"] != true {
+					data["tls_enabled"], data["backend_tls_hostname"], data["ca_tls_container_ref"], data["tls_container_ref"] = false, nil, nil, nil
+				}
 				if f.tcpDefaultPoolTLSAPI && data["tls_enabled"] == true {
 					if data["admin_state_up"] != false || data["backend_tls_hostname"] == nil || data["ca_tls_container_ref"] == nil {
 						reject()
@@ -308,9 +345,40 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 			payload := body[kind.name]
+			if f.tcpWeightedAPI && listPath == tcpListeners {
+				if raw, found := payload["tcp_default_targets"]; found {
+					targets, ok := raw.([]any)
+					if !ok || entry["default_pool_id"] != nil && (len(payload) != 3 ||
+						payload["default_pool_id"] != nil || payload["tcp_default_pool_tls"] != false) {
+						reject()
+						return
+					}
+					for _, item := range targets {
+						target := item.(map[string]any)
+						if id, ok := target["pool_id"].(string); ok {
+							if !f.poolReady(id) || f.inventory[tcpPools+"/"+id]["admin_state_up"] != true {
+								reject()
+								return
+							}
+						}
+					}
+					entry["tcp_default_targets"], entry["provisioning_status"] = targets, "PENDING_UPDATE"
+					if len(payload) == 3 {
+						entry["default_pool_id"], entry["tcp_default_pool_tls"] = nil, false
+					}
+					f.refreshPoolListenerRefs()
+					safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
+					return
+				}
+				if admin, found := payload["admin_state_up"]; found {
+					entry["admin_state_up"], entry["provisioning_status"] = admin, "PENDING_UPDATE"
+					safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
+					return
+				}
+			}
 			if f.tcpDefaultPoolTLSAPI && listPath == tcpPools && entry["tls_enabled"] == true {
 				if slices.ContainsFunc(f.children(tcpListeners), func(listener map[string]any) bool {
-					return listener["default_pool_id"] == entry["id"]
+					return fixtureListenerTargetsPool(listener, entry["id"])
 				}) || payload["admin_state_up"] == nil {
 					reject()
 					return
@@ -374,15 +442,7 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 			entry["default_pool_id"], entry["provisioning_status"] = target, "PENDING_UPDATE"
-			for _, pool := range f.children(tcpPools) {
-				references := []map[string]any{}
-				for _, listener := range f.children(tcpListeners) {
-					if listener["default_pool_id"] == pool["id"] {
-						references = append(references, map[string]any{"id": listener["id"]})
-					}
-				}
-				pool["listeners"] = references
-			}
+			f.refreshPoolListenerRefs()
 			if f.loseNextListenerUpdate {
 				f.loseNextListenerUpdate = false
 				w.WriteHeader(http.StatusServiceUnavailable)
@@ -419,7 +479,7 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				poolID = strings.TrimSuffix(strings.TrimPrefix(memberCollection, tcpPools+"/"), "/members")
 			}
 			if resource != entryPath || entry == nil || entry["default_pool_id"] != nil ||
-				poolID != nil && slices.ContainsFunc(f.children(tcpListeners), func(listener map[string]any) bool { return listener["default_pool_id"] == poolID }) {
+				poolID != nil && slices.ContainsFunc(f.children(tcpListeners), func(listener map[string]any) bool { return fixtureListenerTargetsPool(listener, poolID) }) {
 				reject()
 				return
 			}
@@ -438,6 +498,9 @@ func (f *tcpGraphFixture) poolReady(id string) bool {
 	if id == "pool-secondary" {
 		routeIndex, monitorPath = 1, tcpMonitor+"-secondary"
 	}
+	if f.tcpWeightedAPI && strings.HasPrefix(id, "00000000-") {
+		monitorPath = tcpMonitors + "/" + id
+	}
 	poolPath := tcpPools + "/" + id
 	monitorRequired := f.spec.Routes[routeIndex].Spec.HealthMonitor != (cloud.HealthMonitorConfig{})
 	canServe := f.inventory[poolPath+"/members/member"]["provisioning_status"] == "ACTIVE"
@@ -450,6 +513,26 @@ func (f *tcpGraphFixture) poolReady(id string) bool {
 	return f.inventory[poolPath]["provisioning_status"] == "ACTIVE" &&
 		canServe &&
 		(!monitorRequired || f.inventory[monitorPath]["provisioning_status"] == "ACTIVE")
+}
+
+func fixtureListenerTargetsPool(listener map[string]any, poolID any) bool {
+	if listener["default_pool_id"] == poolID {
+		return true
+	}
+	targets, _ := listener["tcp_default_targets"].([]any)
+	return slices.ContainsFunc(targets, func(item any) bool { return item.(map[string]any)["pool_id"] == poolID })
+}
+
+func (f *tcpGraphFixture) refreshPoolListenerRefs() {
+	for _, pool := range f.children(tcpPools) {
+		references := []map[string]any{}
+		for _, listener := range f.children(tcpListeners) {
+			if fixtureListenerTargetsPool(listener, pool["id"]) {
+				references = append(references, map[string]any{"id": listener["id"]})
+			}
+		}
+		pool["listeners"] = references
+	}
 }
 
 func (f *tcpGraphFixture) children(collection string) []map[string]any {

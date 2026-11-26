@@ -127,7 +127,7 @@ func run(ctx context.Context) error {
 	var httpRequestRedirect, longHTTPHostnames, literalHTTPPaths, httpHeaderName256 bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
-	var tcpConnectionRejection, tcpDefaultPoolTLS, udpPacketDrop bool
+	var tcpConnectionRejection, tcpDefaultPoolTLS, tcpWeightedDefaultPools, udpPacketDrop bool
 	var xBackendSessionPersistence bool
 	var routeSessionPersistence bool
 	var httpRequestMirror bool
@@ -171,6 +171,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTPRoute and GRPCRoute backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
 	flag.BoolVar(&tcpDefaultPoolTLS, "octavia-tcp-default-pool-tls", false, "authenticate a singleton Experimental TCPRoute XBackend behind a clear TCP listener")
+	flag.BoolVar(&tcpWeightedDefaultPools, "octavia-tcp-weighted-default-pools", false, "use separate pools and explicit rejection shares for weighted Experimental TCPRoutes with authenticated XBackends")
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject unavailable TCPRoute and TLSRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
 	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend and Service policy session cookies or HTTP headers with optional absolute timeout")
@@ -285,6 +286,7 @@ func run(ctx context.Context) error {
 		BackendRetryBudget:            backendRetryBudget,
 		TCPConnectionRejection:        tcpConnectionRejection,
 		TCPDefaultPoolTLS:             tcpDefaultPoolTLS,
+		TCPWeightedDefaultPools:       tcpWeightedDefaultPools,
 		UDPPacketDrop:                 udpPacketDrop,
 		XBackendSessionPersistence:    xBackendSessionPersistence,
 		RouteSessionPersistence:       routeSessionPersistence,
@@ -380,6 +382,8 @@ func run(ctx context.Context) error {
 		OperationTimeout:       operationTimeout,
 		PollInterval:           pollInterval,
 
+		TCPWeightedDefaultPools: tcpWeightedDefaultPools,
+
 		XBackendSessionPersistence: controllerConfig.XBackendSessionPersistenceEnabled(),
 		RouteSessionPersistence:    controllerConfig.RouteSessionPersistenceEnabled(),
 
@@ -459,8 +463,9 @@ func run(ctx context.Context) error {
 	tcpReconciler := &l4route.Reconciler{
 		Protocol: gatewayv1.TCPProtocolType,
 		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
-		TCPConnectionRejectionAvailable: openStackProvider.TCPConnectionRejectionAvailable,
-		TCPDefaultPoolTLSAvailable:      openStackProvider.TCPDefaultPoolTLSAvailable,
+		TCPConnectionRejectionAvailable:  openStackProvider.TCPConnectionRejectionAvailable,
+		TCPDefaultPoolTLSAvailable:       openStackProvider.TCPDefaultPoolTLSAvailable,
+		TCPWeightedDefaultPoolsAvailable: openStackProvider.TCPWeightedDefaultPoolsAvailable,
 	}
 	if controllerConfig.XBackendClientCertificate {
 		tcpReconciler.XBackendClientCertificates = resolver

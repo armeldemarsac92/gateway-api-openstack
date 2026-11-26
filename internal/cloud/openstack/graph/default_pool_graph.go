@@ -147,7 +147,7 @@ func defaultPoolListenerProvisioningFailure(listener *listeners.Listener) error 
 		fmt.Errorf("octavia %s listener %s provisioning status is %q", listener.Protocol, listener.ID, listener.ProvisioningStatus))
 }
 
-func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string) (gatewayDeletionPlan, error) {
+func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, inventory octavia.ListenerInventory) (gatewayDeletionPlan, error) {
 	plan := gatewayDeletionPlan{defaultPoolListener: listener}
 	if listener != nil {
 		if err := validateDefaultPoolListener(listener, lb.ID); err != nil {
@@ -163,12 +163,36 @@ func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owne
 		}
 		plan.listeners = append(plan.listeners, gatewayDeletionStep{resource: gatewayDeletionListener, resourceID: listener.ID})
 	}
-	routes, err := p.observeRouteGraphs(ctx, owners, lb, listener, protocol)
+	var routes []observedRouteGraph
+	var err error
+	actual := observedGatewayGraph{protocol: protocol, loadBalancer: lb, listener: listener,
+		tcpDefaultTargets: inventory.TCPDefaultTargets, tcpDefaultPoolTLS: inventory.TCPDefaultPoolTLS,
+		defaultPoolsObserved: inventory.DefaultPoolsObserved}
+	if protocol == cloud.ListenerProtocolTCP {
+		routes, err = p.observeTCPRouteGraphs(ctx, &actual, owners)
+	} else {
+		routes, err = p.observeRouteGraphs(ctx, owners, lb, listener, protocol)
+	}
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
 	if listener != nil && listener.DefaultPoolID != "" && defaultPoolOwner(listener, routes) == -1 {
 		return gatewayDeletionPlan{}, unprovenDefaultPool(listener)
+	}
+	if listener != nil {
+		readback := actual.tcpDefaultTargets[listener.ID]
+		if readback.Invalid || readback.PublicationStatus == "PENDING_UPDATE" {
+			plan.defaultPoolPending = errTCPWeightedReadback.Error()
+			return plan, nil
+		}
+		if len(readback.Targets) != 0 {
+			plan.tcpWeightedWithdraw = weightedTCPMutation(listener.ID, -1, nil, false)
+			return plan, nil
+		}
+		if weightedTCPPoolInventory(routes) && !tcpWeightedDetachmentReadback(actual, *listener) {
+			plan.defaultPoolPending = errTCPWeightedReadback.Error()
+			return plan, nil
+		}
 	}
 	// With an ERROR listener, an empty readback does not prove that Amphora
 	// applied the detach. Gateway deletion can remove the owned listener first.
@@ -179,6 +203,7 @@ func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owne
 		return plan, nil
 	}
 	for _, route := range routes {
+		appendWeightedTCPDeletionSteps(&plan, route)
 		if route.pool == nil {
 			continue
 		}
@@ -248,6 +273,20 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		node := desired.spec.Routes[index]
+		if len(route.spec.TCPWeightedBackends) != 0 || len(observed.tcpParts) != 0 {
+			routeResult = p.weightedTCPRouteResult(route, observed, result.Gateway.Outcome)
+			if weighted := route.tcpWeightedPlan; weighted.step != nil {
+				backend = append(backend, *weighted.step)
+			}
+			if index == defaultOwner && len(route.spec.TCPWeightedBackends) != 0 {
+				detach = true
+			}
+			routeResults = append(routeResults, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: routeResult})
+			if routeResult.Outcome.State == cloud.OutcomeProgressing {
+				result.Outcome = routeResult.Outcome
+			}
+			continue
+		}
 		switch node.Disposition {
 		case cloud.GraphPreserve:
 			if index != defaultOwner || desired.spec.Gateway.Disposition != cloud.GraphEnsure {

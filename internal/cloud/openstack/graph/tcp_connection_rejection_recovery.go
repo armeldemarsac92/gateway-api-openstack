@@ -160,7 +160,9 @@ func (p *Provider) pendingTransportBatchResult(ctx context.Context, desired desi
 				scopedRouteBackendReady(route, observed, actual.state.VIPAddress, steps, observed.backendProvisioningIssue(false, true))
 		}
 	}
-	result.Routes[index].Result.ObservationDeferred = false
+	if index >= 0 && index < len(result.Routes) {
+		result.Routes[index].Result.ObservationDeferred = false
+	}
 	return result
 }
 

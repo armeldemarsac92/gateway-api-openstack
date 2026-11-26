@@ -198,15 +198,16 @@ func (r *Reconciler) ObserveXBackendAncestors(ctx context.Context, backend *gate
 					target, ok := model.XBackendReference(route.GetNamespace(), ref.BackendObjectReference)
 					return ok && target == key && ptr.Deref(ref.Weight, 1) > 0
 				})
-				_, _, diagnostic, err = r.observeTCPXBackendTLS(ctx, backend, parent.Spec.GatewayClassName, !positive || singletonTCPReference(route))
+				_, _, diagnostic, err = r.observeTCPXBackendTLS(ctx, backend, parent.Spec.GatewayClassName, !positive || r.tcpXBackendTLSEligible(route))
 				if err != nil {
 					return nil, err
 				}
 				if diagnostic == nil && positive {
-					if r.TCPDefaultPoolTLSAvailable == nil {
-						diagnostic = backendRejection(gatewayv1.RouteReasonPending, "Waiting for regional Octavia TCP default pool TLS support")
-					} else if available, err := r.TCPDefaultPoolTLSAvailable(ctx); err != nil || !available {
-						diagnostic = backendRejection(gatewayv1.RouteReasonPending, "Waiting for regional Octavia TCP default pool TLS support")
+					discover, message := r.tcpXBackendTLSCapability(route)
+					if discover == nil {
+						diagnostic = backendRejection(gatewayv1.RouteReasonPending, message)
+					} else if available, err := discover(ctx); err != nil || !available {
+						diagnostic = backendRejection(gatewayv1.RouteReasonPending, message)
 					}
 				}
 			}

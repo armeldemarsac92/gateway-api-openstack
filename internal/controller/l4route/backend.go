@@ -37,6 +37,7 @@ import (
 )
 
 type backendReference struct {
+	position      int
 	key           client.ObjectKey
 	port          *gatewayv1.PortNumber
 	weight        int32
@@ -105,6 +106,7 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding requires one rule with backendRefs", r.protocol()))}, nil
 	}
 	type backendKey struct {
+		position      int
 		key           client.ObjectKey
 		port          gatewayv1.PortNumber
 		xBackend      bool
@@ -114,7 +116,12 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 	grants := make(map[string][]gatewayv1.ReferenceGrant)
 	grantErrors := make(map[string]error)
 	var rejections backendRejections
-	for _, backend := range route.backendRefs {
+	weightedCandidate := r.tcpWeightedCandidate(route)
+	for index, backend := range route.backendRefs {
+		var position int
+		if weightedCandidate && ptr.Deref(backend.Weight, 1) > 0 {
+			position = index + 1
+		}
 		weight := ptr.Deref(backend.Weight, 1)
 		if weight == 0 && !includeZeroWeight {
 			continue
@@ -133,8 +140,8 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 				}
 				continue
 			}
-			id := backendKey{key: key, xBackend: true}
-			refs[id] = backendReference{key: key, xBackend: true, weight: weight + refs[id].weight}
+			id := backendKey{position: position, key: key, xBackend: true}
+			refs[id] = backendReference{position: position, key: key, xBackend: true, weight: weight + refs[id].weight}
 			continue
 		}
 		key, supported := model.BackendServiceReference(route.GetNamespace(), backend.BackendObjectReference)
@@ -195,8 +202,8 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 				continue
 			}
 		}
-		id := backendKey{key: key, port: ptr.Deref(backend.Port, 0), serviceImport: imported}
-		refs[id] = backendReference{key: key, port: backend.Port, weight: weight + refs[id].weight, serviceImport: imported}
+		id := backendKey{position: position, key: key, port: ptr.Deref(backend.Port, 0), serviceImport: imported}
+		refs[id] = backendReference{position: position, key: key, port: backend.Port, weight: weight + refs[id].weight, serviceImport: imported}
 	}
 	ordered := make([]backendReference, 0, len(refs))
 	for _, ref := range refs {
@@ -219,13 +226,13 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 			}
 			return -1
 		}
-		return cmp.Compare(ptr.Deref(left.port, 0), ptr.Deref(right.port, 0))
+		return cmp.Or(cmp.Compare(ptr.Deref(left.port, 0), ptr.Deref(right.port, 0)), cmp.Compare(left.position, right.position))
 	})
 	return ordered, rejections, nil
 }
 
 // resolveBackends validates authorized references and returns the backends that carry traffic.
-func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode cloud.MemberMode, profile model.XBackendProfile, class gatewayv1.ObjectName, singleton, collect bool) ([]transportBackend, backendRejections, error) {
+func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode cloud.MemberMode, profile model.XBackendProfile, class gatewayv1.ObjectName, tlsEligible, collect bool) ([]transportBackend, backendRejections, error) {
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	readErrors := make(map[client.ObjectKey]error)
 	imports := make(map[client.ObjectKey]serviceImportRevision)
@@ -259,10 +266,14 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 			var tls *cloud.BackendTLSValidation
 			var certificate string
 			if diagnostic == nil && model.XBackendRequiresTLS(backend.Spec) {
-				rejections.retryTLS = rejections.retryTLS || singleton && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer
-				tls, certificate, diagnostic, err = r.observeTCPXBackendTLS(ctx, backend, class, singleton || ref.weight == 0)
+				rejections.retryTLS = rejections.retryTLS || tlsEligible && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer
+				tls, certificate, diagnostic, err = r.observeTCPXBackendTLS(ctx, backend, class, tlsEligible || ref.weight == 0)
 				if err != nil {
-					return nil, rejections, err
+					if ref.position == 0 || ctx.Err() != nil {
+						return nil, rejections, err
+					}
+					diagnostic = backendRejection(gatewayv1.RouteReasonPending, "Waiting to verify the authenticated XBackend trust")
+					rejections.retryTLS = true
 				}
 			}
 			if diagnostic != nil {

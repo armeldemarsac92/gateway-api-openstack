@@ -496,4 +496,47 @@ func TestAuthenticatedTCPXBackendSealsItsInputsAndRejectsItsShareInMixedRoutes(t
 	require.Empty(t, spec.TCPXBackendClientCertificateReference)
 	require.Equal(t, &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}, spec.TCPConnectionRejection)
 	require.Equal(t, []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 1}}, spec.Members)
+
+	r.Config.TCPWeightedDefaultPools = true
+	r.TCPWeightedDefaultPoolsAvailable = func(context.Context) (bool, error) { return true, nil }
+	restoreCA := func() {
+		t.Helper()
+		ca.ResourceVersion = ""
+		require.NoError(t, r.Create(t.Context(), ca))
+	}
+	restoreCA()
+	route = reconcileTCPRoute(t, r, route)
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
+	current = inspect()
+	spec = current.Nodes[0].Spec
+	require.Nil(t, spec.TCPConnectionRejection)
+	require.Empty(t, spec.Members)
+	require.Len(t, spec.TCPWeightedBackends, 2)
+	authenticated, clear := spec.TCPWeightedBackends[0], spec.TCPWeightedBackends[1]
+	require.Equal(t, 1, authenticated.Weight)
+	require.Equal(t, identityB, authenticated.ClientCertificateReference)
+	require.Equal(t, string(ca.UID), authenticated.BackendTLS.CAConfigMapUID)
+	require.Equal(t, 3, clear.Weight)
+	require.Nil(t, clear.BackendTLS)
+	require.Equal(t, []cloud.Member{{Address: "10.1.2.3", Port: 9090}}, clear.Members)
+
+	require.NoError(t, r.Delete(t.Context(), ca))
+	require.ErrorIs(t, current.Validate(t.Context()), controller.ErrGraphInputChanged)
+	withdrawal, err := r.ObserveRouteGraph(t.Context(), graph.Request{
+		Identity: controller.GatewayIdentity(r.Config, gateway), Action: graph.Ensure, Gateway: gateway,
+	}, gateway)
+	require.NoError(t, err)
+	require.Equal(t, cloud.GraphPreserve, withdrawal.Nodes[0].Disposition)
+	require.Equal(t, []cloud.TCPWeightedBackend{{Weight: 1}, clear}, withdrawal.Nodes[0].Spec.TCPWeightedBackends)
+
+	route = reconcileTCPRoute(t, r, route)
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "InvalidCACertificateRef")
+	require.Equal(t, withdrawal.Nodes[0].Spec.TCPWeightedBackends, inspect().Nodes[0].Spec.TCPWeightedBackends)
+	restoreCA()
+	route = reconcileTCPRoute(t, r, route)
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
+	require.Equal(t, spec.TCPWeightedBackends, inspect().Nodes[0].Spec.TCPWeightedBackends)
 }

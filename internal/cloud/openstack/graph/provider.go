@@ -103,6 +103,8 @@ type ProviderConfig struct {
 	OperationTimeout       time.Duration
 	PollInterval           time.Duration
 
+	TCPWeightedDefaultPools bool
+
 	XBackendSessionPersistence bool
 	RouteSessionPersistence    bool
 
@@ -154,6 +156,8 @@ type Provider struct {
 	topology               *topology.Resolver
 	operationTimeout       time.Duration
 	pollInterval           time.Duration
+
+	tcpWeightedDefaultPools bool
 
 	xBackendSessionPersistence bool
 	routeSessionPersistence    bool
@@ -212,6 +216,8 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		topology:               topology.NewResolver(serviceClients, cfg.OperationTimeout),
 		operationTimeout:       cfg.OperationTimeout,
 		pollInterval:           cfg.PollInterval,
+
+		tcpWeightedDefaultPools: cfg.TCPWeightedDefaultPools,
 
 		xBackendSessionPersistence: cfg.XBackendSessionPersistence,
 		routeSessionPersistence:    cfg.RouteSessionPersistence,
