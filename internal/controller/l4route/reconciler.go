@@ -26,7 +26,6 @@ import (
 	"strconv"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -338,12 +337,12 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 	// Validate disabled Services in the Gateway's member mode without reading
 	// their destinations. Before a topology is bound, keep the Endpoint checks
 	// used for multiple references.
-	var inactiveMode, activeMode cloud.MemberMode
+	var inactiveMode, activeMode, xBackendMode cloud.MemberMode
 	var collectUDPShare bool
 	if len(route.backendRefs) > 1 {
 		inactiveMode = cloud.MemberModeEndpoint
 	}
-	if (inactiveMode != "" || collectTCP || collectUDP) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+	if (inactiveMode != "" || collectTCP || collectUDP || slices.ContainsFunc(refs, func(ref backendReference) bool { return ref.xBackend })) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
 		topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
 		if err != nil {
 			if collect {
@@ -355,6 +354,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		if inactiveMode != "" {
 			inactiveMode = topology.Topology.MemberMode
 		}
+		xBackendMode = topology.Topology.MemberMode
 		collectUDPShare = r.udpPacketDropEnabled(parent.gateway, topology, plan.listenerPorts)
 		if collectTCP || collectUDPShare {
 			activeMode = topology.Topology.MemberMode
@@ -366,15 +366,15 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	backends, serviceRejections, err := r.backendServices(ctx, refs, inactiveMode, activeMode, collectShare)
+	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, xBackendMode, collectShare)
 	if err != nil {
 		return routePlan{}, err
 	}
-	activeRejection := cmp.Or(authRejections.active, serviceRejections.active)
-	inactiveRejection := cmp.Or(authRejections.inactive, serviceRejections.inactive)
-	rejectWeight := authRejections.rejectWeight + serviceRejections.rejectWeight
+	activeRejection := cmp.Or(authRejections.active, resolvedRejections.active)
+	inactiveRejection := cmp.Or(authRejections.inactive, resolvedRejections.inactive)
+	rejectWeight := authRejections.rejectWeight + resolvedRejections.rejectWeight
 	plan.setResolvedRefs(route, cmp.Or(activeRejection, inactiveRejection))
-	if authRejections.inactivePending || serviceRejections.inactivePending {
+	if authRejections.inactivePending || resolvedRejections.inactivePending {
 		if activeRejection == nil && inactiveRejection == nil {
 			plan.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionUnknown, "Pending", "A disabled backend reference could not be read")
 		}
@@ -385,7 +385,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	if readErr := errors.Join(authRejections.readError, serviceRejections.readError); readErr != nil {
+	if readErr := errors.Join(authRejections.readError, resolvedRejections.readError); readErr != nil {
 		plan.holdUnreadBackends(route, activeRejection, bound, readErr)
 		return plan, nil
 	}
@@ -513,19 +513,19 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 	return condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == gateway.Generation
 }
 
-func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
+func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []transportBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	return r.buildRouteSpec(ctx, route, gateway, listener, backends, 0, topology, listenerPorts...)
 }
 
-func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, rejectWeight int, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
+func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []transportBackend, rejectWeight int, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
 	udpDrop := r.udpPacketDropEnabled(gateway, topology, listenerPorts)
 	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
 	groups := make([]routebackend.WeightedServiceMembers, 0, len(backends))
-	serving := make([]serviceBackend, 0, len(backends))
+	serving := make([]transportBackend, 0, len(backends))
 	var noEndpoints *model.Diagnostic
 	for _, backend := range backends {
-		members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses, matchVIPFamily)
+		members, diagnostic, err := r.transportMembers(ctx, backend, topology, gateway.Status.Addresses, matchVIPFamily)
 		if err == nil && (r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
 			diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
 			rejectWeight += int(backend.ref.weight)

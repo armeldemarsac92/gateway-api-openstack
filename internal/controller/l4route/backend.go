@@ -28,22 +28,25 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
-type serviceReference struct {
-	key    client.ObjectKey
-	port   *gatewayv1.PortNumber
-	weight int32
+type backendReference struct {
+	key      client.ObjectKey
+	port     *gatewayv1.PortNumber
+	weight   int32
+	xBackend bool
 }
 
-type serviceBackend struct {
-	ref     serviceReference
-	service *corev1.Service
-	port    *corev1.ServicePort
+type transportBackend struct {
+	ref      backendReference
+	service  *corev1.Service
+	port     *corev1.ServicePort
+	xBackend *gatewayx.XBackend
 }
 
 type backendRejections struct {
@@ -54,6 +57,7 @@ type backendRejections struct {
 	inactivePending bool
 	grants          []objectRevision
 	services        []objectRevision
+	xBackends       []xBackendRevision
 }
 
 func (r *backendRejections) reject(weight int32, diagnostic *model.Diagnostic, collect bool) (blocksForwarding bool) {
@@ -86,15 +90,16 @@ func backendRejection(reason gatewayv1.RouteConditionReason, message string) *mo
 	return &model.Diagnostic{Condition: string(gatewayv1.RouteConditionResolvedRefs), Reason: string(reason), Message: message}
 }
 
-func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRoute, includeZeroWeight, collect bool) ([]serviceReference, backendRejections, error) {
+func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRoute, includeZeroWeight, collect bool) ([]backendReference, backendRejections, error) {
 	if len(route.backendRefs) == 0 {
-		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding requires one rule with Service backendRefs", r.protocol()))}, nil
+		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding requires one rule with backendRefs", r.protocol()))}, nil
 	}
 	type backendKey struct {
-		service client.ObjectKey
-		port    gatewayv1.PortNumber
+		key      client.ObjectKey
+		port     gatewayv1.PortNumber
+		xBackend bool
 	}
-	refs := make(map[backendKey]serviceReference, len(route.backendRefs))
+	refs := make(map[backendKey]backendReference, len(route.backendRefs))
 	grants := make(map[string][]gatewayv1.ReferenceGrant)
 	grantErrors := make(map[string]error)
 	var rejections backendRejections
@@ -103,9 +108,27 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 		if weight == 0 && !includeZeroWeight {
 			continue
 		}
+		if key, supported := model.XBackendReference(route.GetNamespace(), backend.BackendObjectReference); supported && r.tcpXBackendsEnabled() {
+			var diagnostic *model.Diagnostic
+			switch {
+			case key.Namespace != route.GetNamespace():
+				diagnostic = backendRejection(gatewayv1.RouteReasonRefNotPermitted, "XBackend must be in the same namespace as its TCPRoute")
+			case backend.Port != nil:
+				diagnostic = backendRejection(gatewayv1.RouteReasonUnsupportedValue, "backendRef.port must be omitted for XBackend")
+			}
+			if diagnostic != nil {
+				if rejections.reject(weight, diagnostic, collect) {
+					return nil, rejections, nil
+				}
+				continue
+			}
+			id := backendKey{key: key, xBackend: true}
+			refs[id] = backendReference{key: key, xBackend: true, weight: weight + refs[id].weight}
+			continue
+		}
 		key, supported := model.BackendServiceReference(route.GetNamespace(), backend.BackendObjectReference)
 		if !supported {
-			if rejections.reject(weight, backendRejection(gatewayv1.RouteReasonInvalidKind, fmt.Sprintf("the %s backendRef must refer to a core Service", r.kind())), collect) {
+			if rejections.reject(weight, backendRejection(gatewayv1.RouteReasonInvalidKind, r.backendKindMessage()), collect) {
 				return nil, rejections, nil
 			}
 			continue
@@ -141,27 +164,58 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 				continue
 			}
 		}
-		id := backendKey{service: key, port: ptr.Deref(backend.Port, 0)}
-		refs[id] = serviceReference{key: key, port: backend.Port, weight: weight + refs[id].weight}
+		id := backendKey{key: key, port: ptr.Deref(backend.Port, 0)}
+		refs[id] = backendReference{key: key, port: backend.Port, weight: weight + refs[id].weight}
 	}
-	ordered := make([]serviceReference, 0, len(refs))
+	ordered := make([]backendReference, 0, len(refs))
 	for _, ref := range refs {
 		ordered = append(ordered, ref)
 	}
-	slices.SortFunc(ordered, func(left, right serviceReference) int {
-		return cmp.Or(cmp.Compare(left.key.Namespace, right.key.Namespace), cmp.Compare(left.key.Name, right.key.Name),
-			cmp.Compare(ptr.Deref(left.port, 0), ptr.Deref(right.port, 0)))
+	slices.SortFunc(ordered, func(left, right backendReference) int {
+		byKey := cmp.Or(cmp.Compare(left.key.Namespace, right.key.Namespace), cmp.Compare(left.key.Name, right.key.Name))
+		if byKey != 0 {
+			return byKey
+		}
+		if left.xBackend != right.xBackend {
+			if left.xBackend {
+				return 1
+			}
+			return -1
+		}
+		return cmp.Compare(ptr.Deref(left.port, 0), ptr.Deref(right.port, 0))
 	})
 	return ordered, rejections, nil
 }
 
-// backendServices validates authorized references and returns the Services that carry traffic.
-func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, inactiveMode, activeMode cloud.MemberMode, collect bool) ([]serviceBackend, backendRejections, error) {
+// resolveBackends validates authorized references and returns the backends that carry traffic.
+func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode, xBackendMode cloud.MemberMode, collect bool) ([]transportBackend, backendRejections, error) {
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	readErrors := make(map[client.ObjectKey]error)
-	backends := make([]serviceBackend, 0, len(refs))
+	backends := make([]transportBackend, 0, len(refs))
 	var rejections backendRejections
 	for _, ref := range refs {
+		if ref.xBackend {
+			backend, diagnostic, err := r.readTCPXBackend(ctx, ref.key, xBackendMode)
+			if err != nil {
+				if rejections.recordReadError(ref.weight, err, collect) {
+					return nil, rejections, err
+				}
+				continue
+			}
+			if backend != nil && ref.weight != 0 {
+				rejections.xBackends = append(rejections.xBackends, xBackendRevision{uid: backend.UID, generation: backend.Generation})
+			}
+			if diagnostic != nil {
+				if rejections.reject(ref.weight, diagnostic, collect) {
+					return nil, rejections, nil
+				}
+				continue
+			}
+			if ref.weight != 0 {
+				backends = append(backends, transportBackend{ref: ref, xBackend: backend})
+			}
+			continue
+		}
 		service, read := services[ref.key]
 		if !read {
 			service = &corev1.Service{}
@@ -205,8 +259,15 @@ func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReferenc
 			continue
 		}
 		if ref.weight != 0 {
-			backends = append(backends, serviceBackend{ref: ref, service: service, port: port})
+			backends = append(backends, transportBackend{ref: ref, service: service, port: port})
 		}
 	}
 	return backends, rejections, nil
+}
+
+func (r *Reconciler) backendKindMessage() string {
+	if r.tcpXBackendsEnabled() {
+		return "the TCPRoute backendRef must refer to a core Service or an Experimental XBackend"
+	}
+	return fmt.Sprintf("the %s backendRef must refer to a core Service", r.kind())
 }

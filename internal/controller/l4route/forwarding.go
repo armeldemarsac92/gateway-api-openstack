@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -39,8 +40,8 @@ import (
 func (r *Reconciler) forwardingTargetType() string { return r.Config.Domain() + "/ForwardingTarget" }
 
 // forwardingTarget hashes the desired destinations with the identities and
-// routing semantics of the Services that contribute to the pool.
-func forwardingTarget(backends []serviceBackend, groups []routebackend.WeightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
+// routing semantics of the backends that contribute to the pool.
+func forwardingTarget(backends []transportBackend, groups []routebackend.WeightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
 	ports := spec.ScopedListenerPorts
 	spec.ScopedListenerPorts = nil
 	target, err := forwardingBackendTarget(backends, groups, weighted, spec)
@@ -54,32 +55,57 @@ func forwardingTarget(backends []serviceBackend, groups []routebackend.WeightedS
 	return target + "/" + scope, nil
 }
 
-func forwardingBackendTarget(backends []serviceBackend, groups []routebackend.WeightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
-	for _, backend := range backends {
+func forwardingBackendTarget(backends []transportBackend, groups []routebackend.WeightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
+	// A rolling controller upgrade does not change the serving destinations.
+	spec.Identity.ControllerVersion = ""
+	type weightedService struct {
+		Service       client.ObjectKey
+		ServiceUID    types.UID
+		ServiceType   corev1.ServiceType
+		TrafficPolicy corev1.ServiceExternalTrafficPolicy
+		Port          *corev1.ServicePort
+		Weight        int32
+		Members       []cloud.Member
+	}
+	type weightedXBackend struct {
+		Key     client.ObjectKey
+		UID     types.UID
+		Port    gatewayx.PortNumber
+		Weight  int32
+		Members []cloud.Member
+	}
+	var xBackends []weightedXBackend
+	services := make([]weightedService, 0, len(backends))
+	for i, backend := range backends {
+		if backend.xBackend != nil {
+			if backend.xBackend.UID == "" {
+				return "", fmt.Errorf("cannot identify the forwarding target for XBackend %s", backend.ref.key)
+			}
+			xBackends = append(xBackends, weightedXBackend{
+				Key: backend.ref.key, UID: backend.xBackend.UID, Port: backend.xBackend.Spec.Port.Number,
+				Weight: backend.ref.weight, Members: groups[i].Members,
+			})
+			continue
+		}
 		if backend.service.UID == "" {
 			return "", fmt.Errorf("cannot identify the forwarding target for Service %s", backend.ref.key)
 		}
-	}
-	// A rolling controller upgrade does not change the serving destinations.
-	spec.Identity.ControllerVersion = ""
-	if weighted {
-		type weightedService struct {
-			Service       client.ObjectKey
-			ServiceUID    types.UID
-			ServiceType   corev1.ServiceType
-			TrafficPolicy corev1.ServiceExternalTrafficPolicy
-			Port          *corev1.ServicePort
-			Weight        int32
-			Members       []cloud.Member
-		}
-		services := make([]weightedService, 0, len(backends))
-		for i, backend := range backends {
+		if weighted {
 			services = append(services, weightedService{
 				Service: backend.ref.key, ServiceUID: backend.service.UID, ServiceType: backend.service.Spec.Type,
 				TrafficPolicy: backend.service.Spec.ExternalTrafficPolicy, Port: backend.port,
 				Weight: backend.ref.weight, Members: groups[i].Members,
 			})
 		}
+	}
+	if len(xBackends) != 0 {
+		return hashForwardingTarget("v3", struct {
+			Services  []weightedService
+			XBackends []weightedXBackend
+			Route     cloud.RouteSpec
+		}{services, xBackends, spec})
+	}
+	if weighted {
 		return hashForwardingTarget("v2", struct {
 			Services []weightedService
 			Route    cloud.RouteSpec
@@ -252,7 +278,7 @@ func (r *Reconciler) canRetainObservedTarget(route *transportRoute, target strin
 	return false
 }
 
-func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int, binding controller.RouteGatewayBinding) error {
+func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []transportBackend, rejectWeight int, binding controller.RouteGatewayBinding) error {
 	bound := binding.Identity.GatewayUID != ""
 	if bound {
 		confirmed, err := r.hasConfirmedForwarding(ctx, route, plan, backends, rejectWeight, binding.Forwarding)
@@ -268,7 +294,7 @@ func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute,
 	return nil
 }
 
-func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int, checkpoint controller.RouteGatewayTarget) (bool, error) {
+func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transportRoute, plan *routePlan, backends []transportBackend, rejectWeight int, checkpoint controller.RouteGatewayTarget) (bool, error) {
 	parent := plan.parent
 	expectedTarget := checkpoint.Value
 	if expectedTarget != "" {

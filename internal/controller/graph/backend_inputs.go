@@ -180,27 +180,35 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 		}
 		spec := observation.Spec
 		if spec.Type == gatewayx.BackendTypeEndpointSelector && model.CheckXBackendObservation(key, observation, input.XBackendProfile) == nil {
-			selector := make(client.MatchingLabels, len(spec.EndpointSelector.MatchLabels))
-			for label, value := range spec.EndpointSelector.MatchLabels {
-				selector[string(label)] = string(value)
-			}
-			var pods corev1.PodList
-			err := reader.List(ctx, &pods, client.InNamespace(key.Namespace), selector)
-			switch {
-			case err == nil && pods.Continue == "":
-				backend := &gatewayx.XBackend{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace}, Spec: spec}
-				observation.Endpoints = model.ResolveXBackendEndpoints(backend, pods.Items)
-			case model.XBackendRequiresTLS(spec) && ctx.Err() == nil:
+			backend := &gatewayx.XBackend{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}, Spec: spec}
+			observation.Endpoints, err = ObserveXBackendEndpoints(ctx, reader, backend)
+			if err != nil {
+				if !model.XBackendRequiresTLS(spec) || ctx.Err() != nil {
+					return err
+				}
 				observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("XBackend %s Pod endpoints could not be read completely", key)}
-			case err != nil:
-				return fmt.Errorf("list Pods for XBackend %s: %w", key, err)
-			default:
-				return fmt.Errorf("incomplete Pod list for XBackend %s", key)
 			}
 		}
 		input.XBackends = append(input.XBackends, *observation)
 	}
 	return nil
+}
+
+// ObserveXBackendEndpoints lists the complete Pod inventory for a validated EndpointSelector.
+func ObserveXBackendEndpoints(ctx context.Context, reader client.Reader, backend *gatewayx.XBackend) ([]model.Endpoint, error) {
+	selector := make(client.MatchingLabels, len(backend.Spec.EndpointSelector.MatchLabels))
+	for label, value := range backend.Spec.EndpointSelector.MatchLabels {
+		selector[string(label)] = string(value)
+	}
+	key := client.ObjectKeyFromObject(backend)
+	var pods corev1.PodList
+	if err := reader.List(ctx, &pods, client.InNamespace(key.Namespace), selector); err != nil {
+		return nil, fmt.Errorf("list Pods for XBackend %s: %w", key, err)
+	}
+	if pods.Continue != "" {
+		return nil, fmt.Errorf("incomplete Pod list for XBackend %s", key)
+	}
+	return model.ResolveXBackendEndpoints(backend, pods.Items), nil
 }
 
 // XBackendClientCertificateResolver authorizes the operator-enrolled client identity.

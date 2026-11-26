@@ -36,6 +36,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -79,6 +80,8 @@ type Reconciler struct {
 	// ExternalHostnames shares DNS observations across this Gateway's reconciles.
 	ExternalHostnames       *ExternalHostnameCache
 	retryBudgetPolicyServed bool
+	// TCPRoutes contributes Experimental XBackend status for raw TCP consumers.
+	TCPRoutes *l4route.Reconciler
 	// BackendRetryBudgetAvailable checks regional Amphora support for Service budgets.
 	BackendRetryBudgetAvailable func(context.Context) (bool, error)
 	// XBackendCookieAvailable checks regional Amphora support for the requested HTTP cookie.
