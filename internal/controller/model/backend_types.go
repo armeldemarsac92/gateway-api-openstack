@@ -58,19 +58,21 @@ type ServicePortKey struct {
 // BackendGroup preserves one backendRef's contribution independently of endpoints.
 // Groups are not combined even when their Services or endpoints overlap.
 type BackendGroup struct {
-	Reference       gatewayv1.HTTPBackendRef
-	Weight          int32
-	Authorization   BackendAuthorization
-	State           BackendState
-	Service         types.NamespacedName
-	ServiceUID      types.UID
-	XBackend        types.NamespacedName
-	XBackendPort    int
-	XBackendUsesH2C bool
-	Port            *corev1.ServicePort
-	Endpoints       []Endpoint
-	Diagnostic      *Diagnostic
-	BackendTLS      backendtls.Selection
+	Reference        gatewayv1.HTTPBackendRef
+	Weight           int32
+	Authorization    BackendAuthorization
+	State            BackendState
+	Service          types.NamespacedName
+	ServiceUID       types.UID
+	ServiceImport    types.NamespacedName
+	ServiceImportVIP string
+	XBackend         types.NamespacedName
+	XBackendPort     int
+	XBackendUsesH2C  bool
+	Port             *corev1.ServicePort
+	Endpoints        []Endpoint
+	Diagnostic       *Diagnostic
+	BackendTLS       backendtls.Selection
 
 	RouteSessionPersistence *RouteSessionPersistence
 

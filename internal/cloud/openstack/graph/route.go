@@ -434,18 +434,25 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		unavailable := backend.Unavailable || fixedResponse
 		deniedTLS := backend.BackendTLS != nil && backend.BackendTLS.Denied
 		xBackend := backend.Kind == cloud.HTTPBackendKindXBackend
-		validPort := backend.Port >= 1 && backend.Port <= 65535 || xBackend && (backend.InvalidReference || deniedTLS) && backend.Port == 0
+		serviceImport := backend.Kind == cloud.HTTPBackendKindServiceImport
+		validPort := backend.Port >= 1 && backend.Port <= 65535 || backend.Port == 0 &&
+			(xBackend && (backend.InvalidReference || deniedTLS) || serviceImport && unavailable)
 		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" ||
-			(backend.Kind != "" && backend.Kind != cloud.HTTPBackendKindXBackend) || !validPort ||
+			(backend.Kind != "" && !xBackend && !serviceImport) || !validPort ||
 			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
 		if backend.BackendH2CPending && (!xBackend || !backend.BackendH2C || spec.GRPC || backend.BackendTLS != nil) {
 			return invalid(errors.New("pending h2c requires a cleartext HTTP XBackend pool"))
 		}
-		if backend.RoutedExternal && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
-			len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendRetryBudget != nil || backend.InvalidReference) {
-			return invalid(errors.New("routed external members require an unmanaged HTTP XBackend pool"))
+		if serviceImport && (backend.BackendTLS != nil || backend.BackendRetryBudget != nil || backend.BackendRetryBudgetPending ||
+			!unavailable && !backend.RoutedExternal || mirrorsUsed[index]) {
+			return invalid(errors.New("ServiceImport requires a primary routed pool without Service transport policies"))
+		}
+		routedXBackend := xBackend && !spec.GRPC && backend.BackendRetryBudget == nil && !backend.InvalidReference
+		if backend.RoutedExternal && (spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 ||
+			!serviceImport && !routedXBackend) {
+			return invalid(errors.New("routed external members require an unmanaged Endpoint pool for ServiceImport or HTTP XBackend"))
 		}
 		if xBackend && backend.BackendTLS != nil && !deniedTLS &&
 			(spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {
@@ -471,7 +478,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return invalid(errors.New("HTTP session persistence absolute timeout requires a cookie name, valid timeout and XBackend scope"))
 		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
-		if backend.SessionPersistenceRule != "" && (xBackend || backend.ServiceSessionPersistencePending ||
+		if backend.SessionPersistenceRule != "" && (backend.Kind != "" || backend.ServiceSessionPersistencePending ||
 			mirrorsUsed[index] || backend.BackendH2C && backend.BackendTLS != nil && !deniedTLS) {
 			return invalid(errors.New("rule session persistence requires a primary HTTP Service Endpoint pool with a compatible transport"))
 		}
@@ -487,7 +494,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		partSpec.ServiceSessionPersistence = backend.ServiceSessionPersistence
 		partSpec.ServiceSessionPersistencePending = backend.ServiceSessionPersistencePending
 		if (partSpec.ServiceSessionPersistence != nil || partSpec.ServiceSessionPersistencePending) &&
-			(xBackend || backend.InvalidReference || deniedTLS || len(backend.Matches) == 0 && !targetsUsed[index]) {
+			(backend.Kind != "" || backend.InvalidReference || deniedTLS || len(backend.Matches) == 0 && !targetsUsed[index]) {
 			return invalid(errors.New("service session persistence requires an eligible primary Service destination"))
 		}
 		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable, backend.RoutedExternal)

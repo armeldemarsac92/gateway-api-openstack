@@ -50,6 +50,7 @@ type routeGraphResult struct {
 	persistenceRevision        *string
 	servicePersistenceRevision *string
 	xBackendTransportRevision  *string
+	serviceImports             *routeServiceImportSnapshot
 	backendDiagnostic          model.Diagnostic
 	corsFallback               bool
 	droppedInlineRules         string
@@ -108,6 +109,9 @@ func (r *Reconciler) ensureRouteGraph(
 		HTTPRouteXBackendPersistenceRevision: prepared.persistenceRevision,
 		HTTPRouteServicePersistenceRevision:  prepared.servicePersistenceRevision,
 		HTTPRouteXBackendTransportRevision:   prepared.xBackendTransportRevision,
+	}
+	if prepared.serviceImports != nil {
+		request.HTTPRouteServiceImportObservations = &prepared.serviceImports.observed
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
@@ -183,6 +187,7 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		retryBudgetAncestorFull: snapshot.retryBudgetAncestorFull,
 	}
 	if snapshot.backends != nil {
+		prepared.serviceImports = r.snapshotServiceImports(snapshot.route, snapshot.backends.input)
 		prepared.usesXBackendClientTLS = snapshot.backends.routeUsesXBackendClientTLS(route)
 		if r.Config.RouteSessionPersistenceEnabled() || r.retryBudgetPolicyServed && r.Config.XBackendSessionPersistenceEnabled() {
 			revision := servicePersistenceRevision(snapshot.desired)

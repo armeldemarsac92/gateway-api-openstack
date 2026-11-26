@@ -84,6 +84,8 @@ type Request struct {
 	HTTPRouteXBackendPersistenceRevision *string
 	// HTTPRouteXBackendTransportRevision ties per-parent programming to the observed transports.
 	HTTPRouteXBackendTransportRevision *string
+	// HTTPRouteServiceImportObservations ties status to the import inputs used for this route by the writer.
+	HTTPRouteServiceImportObservations *[]model.ServiceImportObservation
 	// HTTPRouteRetryBudgetAncestorFull binds its status to the live capacity check.
 	HTTPRouteRetryBudgetAncestorFull *bool
 	// HTTPRouteRejectedSections ties per-parent status to the graph's profile election.

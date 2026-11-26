@@ -150,6 +150,7 @@ func NormalizeRequestMirrors(filters []gatewayv1.HTTPRouteFilter, enabled, forwa
 
 func ResolveRequestMirrorBackends(route *gatewayv1.HTTPRoute, mirrors []RequestMirror, input Input) {
 	input.EnableXBackend = false
+	input.EnableServiceImport = false
 	for i := range mirrors {
 		mirrors[i].Backend = resolveBackend(route, mirrors[i].Backend.Reference, input)
 	}
@@ -160,6 +161,7 @@ func ResolveRequestMirrorBackends(route *gatewayv1.HTTPRoute, mirrors []RequestM
 func ResolveBackendsAndMirrors(route *gatewayv1.HTTPRoute, rule gatewayv1.HTTPRouteRule, input Input) []BackendGroup {
 	groups := ResolveBackends(route, rule, input)
 	input.EnableXBackend = false
+	input.EnableServiceImport = false
 	for _, reference := range RequestMirrorReferences(rule) {
 		groups = append(groups, resolveBackend(route, gatewayv1.HTTPBackendRef{
 			BackendRef: gatewayv1.BackendRef{BackendObjectReference: reference},

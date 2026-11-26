@@ -521,7 +521,23 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	}
 	persistenceCapability := r.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.xBackendH2CDiagnostic(ctx) })
+	serviceImportH2CIssue := sync.OnceValue(func() model.Diagnostic { return r.backendH2CDiagnostic(ctx, "ServiceImports") })
 	for _, backend := range backends {
+		if key, imported := model.ServiceImportReference(route.Namespace, backend); imported && r.Config.MulticlusterServiceImports {
+			observation, err := graph.ObserveServiceImport(ctx, r.routePatchReader(), key)
+			if err != nil {
+				return err
+			}
+			input := model.Input{EnableServiceImport: true, BackendH2C: r.Config.BackendH2C, ServiceImports: []model.ServiceImportObservation{observation},
+				ReferenceGrants: grantsByNamespace[key.Namespace]}
+			rule := gatewayv1.HTTPRouteRule{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: backend}}}}
+			issue, err := r.serviceImportReferenceStatus(ctx, model.ResolveBackends(route, rule, input)[0], gateway, serviceImportH2CIssue)
+			if err != nil {
+				return err
+			}
+			*status = status.withBackendDiagnostic(issue)
+			continue
+		}
 		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() {
 			if backend.Port != nil {
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "backendRef.port must be omitted for XBackend"})
@@ -596,8 +612,8 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 	if r.APIReader == nil {
 		return controller.ErrAPIReaderRequired
 	}
-	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
-	if err := graph.CollectBackendServiceInputs(ctx, r.APIReader, &input); err != nil {
+	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C, EnableServiceImport: r.Config.MulticlusterServiceImports}
+	if err := graph.CollectBackendReferenceInputs(ctx, r.APIReader, &input); err != nil {
 		return err
 	}
 	inputs := routeModelInputs{}
@@ -621,14 +637,23 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 			diagnostic = preferredBackendDiagnostic(diagnostic, issue)
 		}
 	}
+	serviceImportH2CIssue := sync.OnceValue(func() model.Diagnostic { return r.backendH2CDiagnostic(ctx, "ServiceImports") })
 	for _, rule := range route.Spec.Rules {
 		resolveMirrors(rule.Filters, true)
 		for i, backend := range model.ResolveBackends(route, rule, input) {
-			if backend.Diagnostic != nil {
+			canForward := backend.Diagnostic == nil && backend.Weight > 0
+			if backend.ServiceImport.Name != "" {
+				issue, err := r.serviceImportReferenceStatus(ctx, backend, gateway, serviceImportH2CIssue)
+				if err != nil {
+					return err
+				}
+				diagnostic = preferredBackendDiagnostic(diagnostic, issue)
+				canForward = canForward && issue.Reason == ""
+			} else if backend.Diagnostic != nil {
 				diagnostic = preferredBackendDiagnostic(diagnostic, *backend.Diagnostic)
 			}
 			tls := inputs.backendTLSValidation(backend, true)
-			resolveMirrors(rule.BackendRefs[i].Filters, backend.Diagnostic == nil && backend.Weight > 0 && (tls == nil || !tls.Denied))
+			resolveMirrors(rule.BackendRefs[i].Filters, canForward && (tls == nil || !tls.Denied))
 		}
 	}
 	status.resolved = metav1.ConditionTrue

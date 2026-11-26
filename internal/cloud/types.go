@@ -289,7 +289,10 @@ type HTTPURLRewrite struct {
 
 type HTTPBackendKind string
 
-const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
+const (
+	HTTPBackendKindXBackend      HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
+	HTTPBackendKindServiceImport HTTPBackendKind = "multicluster.x-k8s.io/ServiceImport"
+)
 
 // BackendTLSValidation requires authenticated TLS to a backend. The
 // hostname is used as SNI and authenticates the certificate if no SANs are

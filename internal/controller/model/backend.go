@@ -51,6 +51,9 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 	if key, xbackend := XBackendReference(route.Namespace, reference.BackendObjectReference); xbackend && input.EnableXBackend && HTTPProfileRouteKind(route) == HTTPRouteKind {
 		return resolveXBackend(route, group, key, input)
 	}
+	if key, imported := ServiceImportReference(route.Namespace, reference.BackendObjectReference); imported && input.EnableServiceImport {
+		return resolveServiceImport(route, group, key, input)
+	}
 	serviceKey, supported := BackendServiceReference(route.Namespace, reference.BackendObjectReference)
 	if !supported {
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonInvalidKind,
@@ -122,6 +125,11 @@ func BackendReferenceAllowedFor(kind gatewayv1.Kind, namespace string, target ty
 
 // BackendReferenceAllowedForGroup also accepts sources in the Experimental API group.
 func BackendReferenceAllowedForGroup(group gatewayv1.Group, kind gatewayv1.Kind, namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) bool {
+	return backendTargetAllowed(group, kind, namespace, "", "Service", target, grants)
+}
+
+func backendTargetAllowed(group gatewayv1.Group, kind gatewayv1.Kind, namespace string,
+	targetGroup gatewayv1.Group, targetKind gatewayv1.Kind, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) bool {
 	if namespace == target.Namespace {
 		return true
 	}
@@ -136,7 +144,7 @@ func BackendReferenceAllowedForGroup(group gatewayv1.Group, kind gatewayv1.Kind,
 			continue
 		}
 		if slices.ContainsFunc(grant.Spec.To, func(to gatewayv1.ReferenceGrantTo) bool {
-			return to.Group == "" && to.Kind == "Service" && (to.Name == nil || string(*to.Name) == target.Name)
+			return to.Group == targetGroup && to.Kind == targetKind && (to.Name == nil || string(*to.Name) == target.Name)
 		}) {
 			return true
 		}
@@ -163,13 +171,17 @@ func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber,
 // HTTPS when the caller establishes that plaintext forwarding is prohibited.
 func ResolveServicePortForBackendTLS(service *corev1.Service, selected *gatewayv1.PortNumber, backendH2C, backendTLS bool) (*corev1.ServicePort, *Diagnostic) {
 	port, diagnostic := ResolveTCPServicePort(service, selected)
-	if diagnostic == nil && port.AppProtocol != nil &&
-		(!backendH2C || !ServicePortUsesH2C(port)) &&
-		(!backendTLS || !strings.EqualFold(*port.AppProtocol, "https")) &&
-		!slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol) {
+	if diagnostic == nil && !supportsHTTPAppProtocol(port, backendH2C, backendTLS) {
 		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
 	}
 	return port, diagnostic
+}
+
+func supportsHTTPAppProtocol(port *corev1.ServicePort, backendH2C, backendTLS bool) bool {
+	return port.AppProtocol == nil ||
+		backendH2C && ServicePortUsesH2C(port) ||
+		backendTLS && strings.EqualFold(*port.AppProtocol, "https") ||
+		slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol)
 }
 
 // CheckGRPCBackendProtocol checks the transport against the Service port and

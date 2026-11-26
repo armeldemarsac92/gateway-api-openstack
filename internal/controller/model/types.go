@@ -52,6 +52,8 @@ type Input struct {
 	BackendResponseHeaders bool
 	BackendH2C             bool
 	EnableXBackend         bool
+	EnableServiceImport    bool
+	ServiceImports         []ServiceImportObservation
 	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`
 	XBackendProfile        XBackendProfile
 	XBackends              []XBackendObservation
