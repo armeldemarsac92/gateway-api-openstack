@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-GRPCRoute and TCPRoute can target enrolled external XBackend hostnames. A TCPRoute with a single protected XBackend can also authenticate the origin. [Build record](image.json) · [TCP and gRPC application traffic](provider/xbackend-grpc-tcp-transports/README.md)
+An Experimental TCPRoute can preserve the configured weights of clear and authenticated backends when a client identity grant changes. [Build record](image.json) · [Connection counts and grant transitions](provider/tcproute-weighted-backend-pools/README.md)
+
+GRPCRoute and TCPRoute can target enrolled external XBackend hostnames. A TCPRoute with a single protected XBackend can also authenticate the origin. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-62dced8cdd6b7cac8a50848373a51562ef1b9b36/image.json) · [TCP and gRPC application traffic](provider/xbackend-grpc-tcp-transports/README.md)
 
 Producer HTTPRoutes can attach to an enrolled ServiceImport through the opt-in ambient pilot. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-83c1506b09b1eafc259180e5e9c2d94acd34900c/image.json) · [Waypoint responses and port eligibility](provider/ambient-service-import-parents/README.md)
 
