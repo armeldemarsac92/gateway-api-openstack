@@ -1,0 +1,350 @@
+{
+  "gatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": {
+    "sourceRevision": "83c1506b09b1eafc259180e5e9c2d94acd34900c",
+    "manifestDigest": "sha256:3e3a699c82f7e8b9ab6d597289885767bc3ccce9a3df4f0d5f79d651e33782c8",
+    "managerSHA256": "fb1289e5125bec2bb54558611d34131525da3a42a4fe89f3acf7aa22ed33199a"
+  },
+  "pilot": {
+    "sourcePackage": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+    "manifestDigest": "sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+    "release": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-istio-82213f2b4cf5"
+  },
+  "channels": {
+    "standard": {
+      "gatewayBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "managerSHA256": "fb1289e5125bec2bb54558611d34131525da3a42a4fe89f3acf7aa22ed33199a",
+      "pilotImageID": "sha256:623dd3ef54556775a470f5b0605daf586688d7dfc20fe8d33a48623118f0ccaa",
+      "distinctVIPs": true,
+      "sameNamedServiceUnchanged": true,
+      "projectedPorts": [
+        {
+          "name": "http",
+          "number": 80,
+          "protocol": "HTTP"
+        }
+      ],
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "ResolvedWaypoints": "True/ResolvedWaypoints"
+      },
+      "conditionsWithoutGrant": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "False/RefNotPermitted",
+        "ResolvedWaypoints": "True/ResolvedWaypoints"
+      },
+      "conditionsAfterGrantRemoval": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "False/RefNotPermitted",
+        "ResolvedWaypoints": "True/ResolvedWaypoints"
+      },
+      "traffic": {
+        "beforeRoute": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "unenrolled": {
+          "core": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          },
+          "import": {
+            "samples": 2,
+            "httpStatus": null,
+            "origin": null,
+            "transportError": "timed out"
+          }
+        },
+        "withoutGrant": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 500,
+            "origin": null,
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "withGrant": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "granted-origin",
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "withRoute": {
+          "redirect": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "override-origin",
+            "transportError": null
+          },
+          "default": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "afterGrantRemoval": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 500,
+            "origin": null,
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "afterRouteDeletion": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          }
+        },
+        "afterSliceDeletion": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 503,
+            "origin": null,
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "afterSliceRestoration": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          }
+        },
+        "afterOptOut": {
+          "import": {
+            "samples": 2,
+            "httpStatus": null,
+            "origin": null,
+            "transportError": "timed out"
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        }
+      },
+      "rawResultSHA256": "63cdf92cf7aa8fa22f00740c69b60210f2d8027ed4f97eec1308b67abebaac2f",
+      "rawInputsSHA256": "dd8c93183790100068d4c44e99281b2c370936e906b1ee017144677b31cf51f9"
+    },
+    "experimental": {
+      "gatewayBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "managerSHA256": "fb1289e5125bec2bb54558611d34131525da3a42a4fe89f3acf7aa22ed33199a",
+      "pilotImageID": "sha256:623dd3ef54556775a470f5b0605daf586688d7dfc20fe8d33a48623118f0ccaa",
+      "distinctVIPs": true,
+      "sameNamedServiceUnchanged": true,
+      "projectedPorts": [
+        {
+          "name": "http",
+          "number": 80,
+          "protocol": "HTTP"
+        }
+      ],
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "ResolvedWaypoints": "True/ResolvedWaypoints"
+      },
+      "conditionsWithoutGrant": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "False/RefNotPermitted",
+        "ResolvedWaypoints": "True/ResolvedWaypoints"
+      },
+      "conditionsAfterGrantRemoval": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "False/RefNotPermitted",
+        "ResolvedWaypoints": "True/ResolvedWaypoints"
+      },
+      "traffic": {
+        "beforeRoute": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "unenrolled": {
+          "core": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          },
+          "import": {
+            "samples": 2,
+            "httpStatus": null,
+            "origin": null,
+            "transportError": "timed out"
+          }
+        },
+        "withoutGrant": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 500,
+            "origin": null,
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "withGrant": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "granted-origin",
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "withRoute": {
+          "redirect": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "override-origin",
+            "transportError": null
+          },
+          "default": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "afterGrantRemoval": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 500,
+            "origin": null,
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "afterRouteDeletion": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          }
+        },
+        "afterSliceDeletion": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 503,
+            "origin": null,
+            "transportError": null
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        },
+        "afterSliceRestoration": {
+          "import": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "import-origin",
+            "transportError": null
+          }
+        },
+        "afterOptOut": {
+          "import": {
+            "samples": 2,
+            "httpStatus": null,
+            "origin": null,
+            "transportError": "timed out"
+          },
+          "homonymousService": {
+            "samples": 2,
+            "httpStatus": 200,
+            "origin": "core-origin",
+            "transportError": null
+          }
+        }
+      },
+      "rawResultSHA256": "134e57e3fdd161cb89326474922274208a95fcfacf9a253d64e0d4e293c4e30f",
+      "rawInputsSHA256": "57d605916f4edb6802d6d1b108dd33c3d38ac7a891387a30715826fc7eebf2b0"
+    }
+  },
+  "scope": "Producer HTTPRoute, one IPv4 ClusterSetIP and one HTTP port. Disposable single-network kind clusters with Istio ambient, waypoint, ztunnel and HTTP applications. ServiceImport and provider EndpointSlices were applied locally, and a local fixture responded to the OpenStack service catalog requests."
+}
