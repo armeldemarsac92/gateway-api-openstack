@@ -18,4 +18,6 @@ These local runs selected individual cases after the original Gateway profile ca
 
 In the Experimental backend TLS replay, the frontend certificate fallback case passed. The conflict-resolution case completed its four HTTP probes and then exceeded the upstream 30-second deadline while deleting the HTTPRoute. Its upstream result is FAIL.
 
+A focused Experimental replay on controller `71d946b5` and Octavia `300b2638` passed all four backend TLS conflict HTTP checks. Kubernetes confirmed route deletion after 8.954 seconds within the upstream 30-second deadline. [Replay on the released revisions](../../../provider/conditional-l7-removal/backendtls-conflict/README.md)
+
 Kubernetes and the request paths ran locally. The Octavia fixtures supplied cloud resources and worker completion. The original full-profile results retain their own pass, fail and skip counts. [Original campaign](../README.md) · [Inputs, attempt history and report hashes](results.json)
