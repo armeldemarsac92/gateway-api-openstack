@@ -38,3 +38,5 @@ Enable the [passthrough](operator-octavia-tls-sni-passthrough.md) or [terminatio
 A TLSRoute can mix Services and ServiceImports in the same weighted rule. An invalid import or a revoked grant preserves the backend’s connection share as rejection through the regional TCP connection rejection capability, or through independent weighted SNI pools if the region supports them for the selected listener mode. Enable `--octavia-tcp-connection-rejection` to use the single-pool rejection capability. When the regional provider offers neither mechanism, forwarding for that SNI hostname is withdrawn. Separate hostnames continue to use their own backend ports.
 
 The local passthrough Gateway kept both target weights through a TLSRoute ReferenceGrant withdrawal and restoration. [SNI pool state, closed connections and origin counts](qualification/v1.7.0/provider/tlsroute-service-imports/README.md)
+
+The local trials recorded HTTP traffic to distinct published ports, an imported gRPC origin, and TLS connection weights after the final imported endpoint disappeared. [Headless ServiceImport traffic](qualification/v1.7.0/provider/headless-service-imports/README.md)
