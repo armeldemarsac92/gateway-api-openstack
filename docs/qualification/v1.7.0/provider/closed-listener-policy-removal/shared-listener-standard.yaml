@@ -1,0 +1,178 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-26T07:53:50+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 0e729b171594b058f09783aede6b7221eb62e85d
+kind: ConformanceReport
+mode: local-octavia-amphora-signed
+profiles:
+- core:
+    result: partial
+    skippedTests:
+    - GatewayClassObservedGenerationBump
+    - GatewayInvalidRouteKind
+    - GatewayInvalidTLSConfiguration
+    - GatewayListenerUnsupportedProtocol
+    - GatewayModifyListeners
+    - GatewayNameMaximumLength
+    - GatewayObservedGenerationBump
+    - GatewayPreserveForeignConditions
+    - GatewaySecretInvalidReferenceGrant
+    - GatewaySecretMissingReferenceGrant
+    - GatewaySecretReferenceGrantAllInNamespace
+    - GatewaySecretReferenceGrantSpecific
+    - GatewayWithAttachedRoutes
+    - HTTPRouteCrossNamespace
+    - HTTPRouteExactPathMatching
+    - HTTPRouteHTTPSListener
+    - HTTPRouteHeaderMatching
+    - HTTPRouteHostnameIntersection
+    - HTTPRouteInvalidBackendRefUnknownKind
+    - HTTPRouteInvalidCrossNamespaceBackendRef
+    - HTTPRouteInvalidCrossNamespaceParentRef
+    - HTTPRouteInvalidNonExistentBackendRef
+    - HTTPRouteInvalidParentRefNotMatchingSectionName
+    - HTTPRouteInvalidReferenceGrant
+    - HTTPRouteListenerHostnameMatching
+    - HTTPRouteMatching
+    - HTTPRouteMatchingAcrossRoutes
+    - HTTPRouteMultipleGateways
+    - HTTPRouteNoBackendRefs
+    - HTTPRouteObservedGenerationBump
+    - HTTPRoutePartiallyInvalidViaInvalidReferenceGrant
+    - HTTPRoutePathMatchOrder
+    - HTTPRoutePreserveForeignStatus
+    - HTTPRouteRedirectHostAndStatus
+    - HTTPRouteReferenceGrant
+    - HTTPRouteRequestHeaderModifier
+    - HTTPRouteRuleOrder
+    - HTTPRouteServiceTypes
+    - HTTPRouteSimpleSameNamespace
+    - HTTPRouteWeight
+    statistics:
+      Failed: 0
+      Passed: 0
+      Skipped: 40
+  extended:
+    result: partial
+    skippedTests:
+    - BackendTLSPolicy
+    - BackendTLSPolicyConflictResolution
+    - BackendTLSPolicyInvalidCACertificateRef
+    - BackendTLSPolicyInvalidKind
+    - BackendTLSPolicyObservedGenerationBump
+    - BackendTLSPolicyPreserveForeignStatus
+    - BackendTLSPolicySANValidation
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayFrontendInvalidDefaultClientCertificateValidation
+    - GatewayHTTPListenerIsolation
+    - GatewayInfrastructureMetadata
+    - GatewayInvalidFrontendClientCertificateValidation
+    - GatewayInvalidParametersRef
+    - GatewayInvalidTLSBackendConfiguration
+    - GatewayOptionalAddressValue
+    - GatewayStaticAddresses
+    - GatewayTLSBackendClientCertificate
+    - GatewayWithAttachedRoutesWithPort8080
+    - HTTPRoute303Redirect
+    - HTTPRoute307Redirect
+    - HTTPRoute308Redirect
+    - HTTPRouteBackendProtocolH2C
+    - HTTPRouteBackendProtocolWebSocket
+    - HTTPRouteBackendRequestHeaderModifier
+    - HTTPRouteBackendURLRewrite
+    - HTTPRouteCORS
+    - HTTPRouteHTTPSListenerDetectMisdirectedRequests
+    - HTTPRouteInvalidParentRefSectionNameNotMatchingPort
+    - HTTPRouteListenerPortMatching
+    - HTTPRouteMethodMatching
+    - HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection
+    - HTTPRouteNamedRule
+    - HTTPRouteQueryParamMatching
+    - HTTPRouteRedirectPath
+    - HTTPRouteRedirectPort
+    - HTTPRouteRedirectPortAndScheme
+    - HTTPRouteRedirectScheme
+    - HTTPRouteRequestHeaderModifierBackendWeights
+    - HTTPRouteRequestMirror
+    - HTTPRouteRequestMultipleMirrors
+    - HTTPRouteRequestPercentageMirror
+    - HTTPRouteResponseHeaderModifier
+    - HTTPRouteRetry
+    - HTTPRouteRetryConnectionError
+    - HTTPRouteRetryWithBackendTimeout
+    - HTTPRouteRetryWithRequestTimeout
+    - HTTPRouteRewriteHost
+    - HTTPRouteRewritePath
+    - HTTPRouteTimeoutBackendRequest
+    - HTTPRouteTimeoutRequest
+    - ListenerSetAllowedNamespaceNone
+    - ListenerSetAllowedNamespaceSame
+    - ListenerSetAllowedNamespaceSelector
+    - ListenerSetDefaultNotAllowed
+    - ListenerSetDualParentRefIndependence
+    - ListenerSetGatewayParentSectionNameNotFound
+    - ListenerSetHTTPRouting
+    - ListenerSetHostnameConflict
+    - ListenerSetProtocolConflict
+    - ListenerSetReferenceGrant
+    - ListenerSetRouteStatusScopedToParentRef
+    statistics:
+      Failed: 0
+      Passed: 1
+      Skipped: 62
+    supportedFeatures:
+    - BackendTLSPolicy
+    - BackendTLSPolicySANValidation
+    - GatewayAddressEmpty
+    - GatewayBackendClientCertificate
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayHTTPListenerIsolation
+    - GatewayHTTPSListenerDetectMisdirectedRequests
+    - GatewayInfrastructure
+    - GatewayPort8080
+    - GatewayRouteHostnameIntersectionPrecedence
+    - GatewayStaticAddresses
+    - HTTPRoute303RedirectStatusCode
+    - HTTPRoute307RedirectStatusCode
+    - HTTPRoute308RedirectStatusCode
+    - HTTPRouteBackendProtocolH2C
+    - HTTPRouteBackendProtocolWebSocket
+    - HTTPRouteBackendRequestHeaderModification
+    - HTTPRouteBackendTimeout
+    - HTTPRouteBackendURLRewrite
+    - HTTPRouteCORS
+    - HTTPRouteHostRewrite
+    - HTTPRouteMethodMatching
+    - HTTPRouteNamedRouteRule
+    - HTTPRouteParentRefPort
+    - HTTPRoutePathRedirect
+    - HTTPRoutePathRewrite
+    - HTTPRoutePortRedirect
+    - HTTPRouteQueryParamMatching
+    - HTTPRouteRequestMirror
+    - HTTPRouteRequestMultipleMirrors
+    - HTTPRouteRequestPercentageMirror
+    - HTTPRouteRequestTimeout
+    - HTTPRouteResponseHeaderModification
+    - HTTPRouteRetryCodes
+    - HTTPRouteRetryConnectionError
+    - HTTPRouteSchemeRedirect
+    - ListenerSet
+    unsupportedFeatures:
+    - ClusterTrustBundle
+    - GatewayAddressRoutability
+    - GatewayAddressRoutabilityCluster
+    - GatewayListenerFilters
+    - HTTPRouteDestinationPortMatching
+  name: GATEWAY-HTTP
+  summary: Core tests partially succeeded with 40 test skips. Extended tests partially
+    succeeded with 62 test skips.

@@ -1,0 +1,76 @@
+{
+  "closure": {
+    "loadBalancer": "4f24fd288d836de4",
+    "listener": "19ceffeea80147d4",
+    "allocatedPeerCount": 1,
+    "configSHA256": "f2f30b18e6d0facdb485a2eca3e49f77254023b447cc808ef03a0cbf3dfe2235",
+    "publicationObserved": true,
+    "bindClosed": true,
+    "acknowledged": true,
+    "reloadSeconds": 0.042,
+    "apiClosureConfirmed": true
+  },
+  "mismatchedPublication": {
+    "loadBalancer": "4f24fd288d836de4",
+    "listener": "19ceffeea80147d4",
+    "allocatedPeerCount": 1,
+    "configSHA256": "5350ee478f6ea6f8169cec9b4025bbe8cd982317b22c004e4bd9c2bebfc65b16",
+    "publicationObserved": false,
+    "bindClosed": false,
+    "acknowledged": false,
+    "reloadSeconds": 0.043,
+    "apiClosureConfirmed": false,
+    "tcpBindRefusedIndependentProbe": true
+  },
+  "guardedRemovals": [
+    {
+      "policy": "157c396fd9c20c78",
+      "status": 202,
+      "rpcRequiresClosure": true,
+      "rulesRemoved": true,
+      "snapshotAfterWorkerStatus": 404,
+      "proxyReloads": 0
+    },
+    {
+      "policy": "68b54ce13779c207",
+      "status": 202,
+      "rpcRequiresClosure": true,
+      "rulesRemoved": true,
+      "snapshotAfterWorkerStatus": 404,
+      "proxyReloads": 0
+    }
+  ],
+  "policyUpdateAfterReopening": {
+    "rpc": "update_l7policy",
+    "taskOriginalPolicyAndListenerIDs": true,
+    "rpcHasListenerRevision": false,
+    "listenersUpdateCalls": 1,
+    "amphoraDriverUpdateCalls": 1,
+    "taskSource": "octavia/controller/worker/v2/tasks/amphora_driver_tasks.py",
+    "taskSHA256": "6a76a1e1a429692ffaf9a6a51c08d7a0a76cf35579b1f8651c66abdc08c9c4ec",
+    "nativeReloads": 1,
+    "priorConfigSHA256": "90e0aff18c72b49e682a22d8eb86266b181ae40aa736b7714100b80cd66b1422",
+    "activeConfigSHA256": "42683d13b55651a47258d943c1d2654a68622dd62188ecc819c91e38f75adfbe",
+    "httpStatus": 302,
+    "apiProvisioningStatus": "ACTIVE",
+    "apiRedirectURL": "http://example.test/sibling-changed",
+    "locationBeforePUT": "http://example.test/sibling",
+    "locationAfterPUT": "http://example.test/sibling-changed"
+  },
+  "reopeningInvalidatedClosure": true,
+  "reopeningRestoredBind": true,
+  "reopenedSiblingResponse": {
+    "status": 302,
+    "location": "http://example.test/sibling"
+  },
+  "reopenedRetiredResponses": [
+    503,
+    503
+  ],
+  "missingProofKeptListenerActive": true,
+  "providerTree": "7f59e419dbf2a222c0288305e729561bc82d4ed7",
+  "stagedNativeSHA256": "802befb48cb13f5037941803a65ed4d9bbba197c1a8b0eabb9e05a9f2329bb0f",
+  "adapterSHA256": "fe719f98c796fab23f59dd7c9fde596e0345aa8b1e0e10933dc30112f01135b9",
+  "siblingCheckSHA256": "dba5c856196c1a2f832d420218e73e4c5a7c13b180b4c8b9aeef3424b699327d",
+  "expected": "published"
+}
