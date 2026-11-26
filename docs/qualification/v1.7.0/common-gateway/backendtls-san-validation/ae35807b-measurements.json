@@ -1,0 +1,104 @@
+{
+  "report": "ae35807b-report.yaml",
+  "reportDate": "2026-11-26T13:47:49+01:00",
+  "reportSHA256": "083067a0b3efebac017a3720fb7a22229591000a69afec1ba2ba2e848d355e18",
+  "channel": "experimental",
+  "profile": "GATEWAY-HTTP",
+  "subset": "Extended",
+  "selectedCase": "BackendTLSPolicySANValidation",
+  "statistics": {
+    "Failed": 0,
+    "Passed": 1,
+    "Skipped": 63
+  },
+  "suiteExit": 0,
+  "fixtureExit": 0,
+  "subtestsPassed": 6,
+  "caseDurationSeconds": 38.94,
+  "resyncIntervalSeconds": 2,
+  "sources": {
+    "controllerRevision": "ae35807bd2fc80ea48b87b0ad7840288a74541ce",
+    "controllerImageManifestDigest": "sha256:3cfd04e3e4c46d8bbf454bba328c5dddb5b47df7daefaab4ac50ccb757ce3402",
+    "runningManagerSHA256": "583637822faca9b61f47115998b9c032d5173fe2fdf4f266aee1ec86d8ec9541",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "upstreamConformanceExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+    "experimentalBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+    "octaviaRevision": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+    "octaviaLibRevision": "735564bb8701e13495cc79554170ab65ceb1a811",
+    "haproxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+  },
+  "successfulPoolPOSTs": 5,
+  "successfulL7PolicyPOSTsWithInitialRules": 5,
+  "firstSuccessfulPoolPUTOrder": [
+    "san-dns",
+    "san-dns-mismatch",
+    "san-uri",
+    "san-uri-mismatch",
+    "multiple-sans"
+  ],
+  "checks": [
+    {
+      "policy": "san-dns",
+      "path": "/backendtlspolicy-san-dns",
+      "pool": "85078a624b4e08d9",
+      "firstSuccessfulPoolPUTRank": 1,
+      "firstObservedHAProxyPosition": 1,
+      "publishedTLSSettingsMatchPolicy": true,
+      "firstGETToHTTP200Seconds": 4.564,
+      "firstDNSGETToHTTP200Seconds": 4.564,
+      "http404BeforePass": 45
+    },
+    {
+      "policy": "san-dns-mismatch",
+      "path": "/backendtlspolicy-san-dns-mismatch",
+      "pool": "a8ff7ad4cce3037c",
+      "firstSuccessfulPoolPUTRank": 2,
+      "firstObservedHAProxyPosition": 2,
+      "publishedTLSSettingsMatchPolicy": true,
+      "activeRouteInLatestPublicationAtFirstGET": false,
+      "httpStatus": null
+    },
+    {
+      "policy": "san-uri",
+      "path": "/backendtlspolicy-san-uri",
+      "pool": "a5d167ef6afb308d",
+      "firstSuccessfulPoolPUTRank": 3,
+      "firstObservedHAProxyPosition": 3,
+      "publishedTLSSettingsMatchPolicy": true,
+      "firstGETToHTTP200Seconds": 9.397,
+      "firstDNSGETToHTTP200Seconds": 13.97,
+      "http404BeforePass": 93
+    },
+    {
+      "policy": "san-uri-mismatch",
+      "path": "/backendtlspolicy-san-uri-mismatch",
+      "pool": "5bb0686ab0ad4abd",
+      "firstSuccessfulPoolPUTRank": 4,
+      "firstObservedHAProxyPosition": 4,
+      "publishedTLSSettingsMatchPolicy": true,
+      "activeRouteInLatestPublicationAtFirstGET": false,
+      "httpStatus": null
+    },
+    {
+      "policy": "multiple-sans",
+      "path": "/backendtlspolicy-multiple-sans",
+      "pool": "8552fd6cd81e3a8e",
+      "firstSuccessfulPoolPUTRank": 5,
+      "firstObservedHAProxyPosition": 5,
+      "publishedTLSSettingsMatchPolicy": true,
+      "firstGETToHTTP200Seconds": 12.111,
+      "firstDNSGETToHTTP200Seconds": 26.087,
+      "http404BeforePass": 120
+    },
+    {
+      "policy": "multiple-mismatch-sans",
+      "path": "/backendtlspolicy-multiple-mismatch-sans",
+      "pool": null,
+      "firstSuccessfulPoolPUTRank": null,
+      "firstObservedHAProxyPosition": null,
+      "publishedTLSSettingsMatchPolicy": null,
+      "activeRouteInLatestPublicationAtFirstGET": false,
+      "httpStatus": null
+    }
+  ]
+}
