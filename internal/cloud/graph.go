@@ -201,6 +201,9 @@ type RouteGraphNode struct {
 	// pool can keep after readback. An empty, non-nil list withdraws all defaults
 	// in a scoped election.
 	RetainListenerPorts []int
+	// RestrictUDPPacketDrop permits an uncheckpointed UDP target to remove
+	// destinations from an existing guarded default and increase discard.
+	RestrictUDPPacketDrop bool
 	// WaitForHTTPPolicyRemoval guards Gateway readiness while an attached peer
 	// with no current desired model still owns a policy on the HTTP frontend.
 	// Only the route's durable detach checkpoint authorizes its deletion.

@@ -644,7 +644,7 @@ func observedRouteDeleteCompletions(desired desiredGatewayGraph, actual observed
 		if node.Disposition != cloud.GraphDelete {
 			continue
 		}
-		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpParts) != 0 || len(actual.routes[index].tcpParts) != 0) {
+		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpParts) != 0 || len(actual.routes[index].tcpParts) != 0 || len(actual.routes[index].udpParts) != 0) {
 			continue
 		}
 		// Inventory was either completely observed or the parent was absent.
@@ -731,7 +731,7 @@ func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
 	if actual.scoped {
 		for _, listener := range actual.scopedListeners {
 			if listener.DefaultPoolID != "" {
-				if owner := defaultPoolOwner(&listener, actual.routes); owner != -1 && actual.routes[owner].udpDropPool() {
+				if owner := defaultPoolOwner(&listener, actual.routes); owner != -1 && actual.routes[owner].defaultPool(listener.DefaultPoolID).udpDropPool() {
 					return []graphMutation{deleteDefaultUDPPacketDropPool(listener.DefaultPoolID)}
 				}
 				mutation := clearListenerDefaultPool(actual.protocol)
@@ -1207,6 +1207,11 @@ func (actual observedGatewayGraph) policyListener(route observedRouteGraph, id s
 
 func graphRoutePart(desired desiredGatewayGraph, step graphMutation) desiredRoute {
 	route := desired.routes[step.routeIndex]
+	if port := udpDropPartPort(step.backendKey); port != 0 {
+		route.backendKey = step.backendKey
+		route.spec.ScopedListenerPorts = []int{port}
+		return route
+	}
 	if strings.HasPrefix(step.backendKey, tcpWeightedPartPrefix) {
 		index := slices.IndexFunc(route.tcpParts, func(part desiredRoute) bool { return part.backendKey == step.backendKey })
 		if index >= 0 {

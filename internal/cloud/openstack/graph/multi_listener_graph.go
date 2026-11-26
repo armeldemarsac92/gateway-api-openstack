@@ -19,6 +19,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -281,6 +282,14 @@ func scopedListenerDeletionPlan(actual observedGatewayGraph) gatewayDeletionPlan
 	}
 	for _, route := range actual.routes {
 		appendWeightedTCPDeletionSteps(&plan, route)
+		for _, key := range slices.Sorted(maps.Keys(route.udpParts)) {
+			part := route.udpParts[key]
+			if issue := part.backendProvisioningIssue(true, true); issue != "" {
+				plan.defaultPoolPending = issue
+				return plan
+			}
+			plan.pools = appendDefaultPoolDeletionSteps(plan.pools, *part)
+		}
 		if route.pool == nil {
 			continue
 		}
@@ -350,6 +359,11 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 	if err != nil {
 		return nil
 	}
+	poolsByID := make(map[string]pools.Pool, len(inventory.Items))
+	for _, pool := range inventory.Items {
+		poolsByID[pool.ID] = pool
+	}
+	completePools := len(actual.loadBalancer.Pools) == len(inventory.Items)
 	deferred := make(map[int]bool)
 	for index, route := range desired.routes {
 		ports := route.spec.ScopedListenerPorts
@@ -360,6 +374,10 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 			deferred[index] = p.proveServingTCPWeightedRoute(ctx, desired, actual, route, readyListeners, inventory)
 			continue
 		}
+		if route.spec.UDPPacketDrop != nil {
+			deferred[index] = completePools && p.proveServingUDPDropRoute(ctx, desired, actual, route, readyListeners, inventory, poolsByID)
+			continue
+		}
 		poolID := readyListeners[ports[0]].DefaultPoolID
 		if poolID == "" || slices.ContainsFunc(ports, func(port int) bool {
 			listener := readyListeners[port]
@@ -367,30 +385,75 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 		}) {
 			continue
 		}
-		poolIndex := slices.IndexFunc(inventory.Items, func(pool pools.Pool) bool { return pool.ID == poolID })
-		if poolIndex == -1 {
-			continue
-		}
-		pool := inventory.Items[poolIndex]
-		if !pool.AdminStateUp || pool.ProvisioningStatus != "ACTIVE" || len(pool.Listeners) != len(ports) ||
-			!route.identity.MatchesRoute(pool.Tags, rolePool) ||
-			p.validateScopedDefaultPool(pool, actual.loadBalancer.ID, actual.scopedListeners, actual.protocol) != nil {
-			continue
-		}
-		observed := observedRouteGraph{
-			pool: &pool, tcpRejection: inventory.TCPConnectionRejection[pool.ID], udpDrop: inventory.UDPPacketDrop[pool.ID],
-			backendTLS: inventory.BackendTLS[pool.ID], backendH2C: inventory.BackendH2C[pool.ID],
-		}
-		if p.observeRoutePoolChildren(ctx, route.identity, &observed) != nil || observed.validateDefaultPoolChildren() != nil {
-			continue
-		}
-		if actual.protocol == cloud.ListenerProtocolTCP && route.spec.BackendTLS != nil {
-			route.tcpDefaultPoolTLS = p.observeTCPDefaultPoolTLS(ctx, route, observed, desired.tcpDefaultPoolTLSAvailable, desired.spec.Gateway.BackendCAOwned)
-		}
-		changes, _, err := buildRouteEnsurePlan(route, observed)
-		deferred[index] = err == nil && scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true))
+		deferred[index] = p.proveScopedDefaultPool(ctx, desired, actual, route, inventory, poolsByID[poolID])
 	}
 	return deferred
+}
+
+func (p *Provider) proveServingUDPDropRoute(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, route desiredRoute,
+	readyListeners map[int]listeners.Listener, inventory octavia.PoolInventory, poolsByID map[string]pools.Pool,
+) bool {
+	proven := make(map[string]bool, len(route.spec.ScopedListenerPorts))
+	for _, port := range route.spec.ScopedListenerPorts {
+		listener := readyListeners[port]
+		pool := poolsByID[listener.DefaultPoolID]
+		role, ok := openstackidentity.ResourceRole(pool.Tags)
+		if !ok || proven[pool.ID] {
+			return false
+		}
+		part := route
+		part.spec.ScopedListenerPorts = []int{port}
+		if role != rolePool {
+			part.backendKey = udpDropPartKey(port)
+			if role != part.httpRole(rolePool, "") || !slices.Contains(pool.Tags, udpDropPoolTag) {
+				return false
+			}
+		}
+		if !p.proveScopedDefaultPool(ctx, desired, actual, part, inventory, pool) {
+			return false
+		}
+		proven[pool.ID] = true
+	}
+	// An obsolete edge can still be serving while its route loses an election.
+	// It must settle before a logical route can claim unchanged forwarding.
+	if route.backendKey == "" {
+		for _, pool := range inventory.Items {
+			if proven[pool.ID] || len(pool.Listeners) == 0 && !slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
+				return listener.DefaultPoolID == pool.ID
+			}) {
+				continue
+			}
+			role, ok := readRouteResourceRole(pool.Tags, rolePool)
+			if ok && (role.raw == rolePool || udpDropPartPort(role.backend) != 0) && route.identity.MatchesRoute(pool.Tags, role.raw) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (p *Provider) proveScopedDefaultPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, route desiredRoute,
+	inventory octavia.PoolInventory, pool pools.Pool,
+) bool {
+	if !pool.AdminStateUp || pool.ProvisioningStatus != "ACTIVE" || len(pool.Listeners) != len(route.spec.ScopedListenerPorts) ||
+		!route.identity.MatchesRoute(pool.Tags, route.httpRole(rolePool, "")) ||
+		p.validateScopedDefaultPool(pool, actual.loadBalancer.ID, actual.scopedListeners, actual.protocol) != nil {
+		return false
+	}
+	observed := observedRouteGraph{
+		pool: &pool, tcpRejection: inventory.TCPConnectionRejection[pool.ID], udpDrop: inventory.UDPPacketDrop[pool.ID],
+		backendTLS: inventory.BackendTLS[pool.ID], backendH2C: inventory.BackendH2C[pool.ID],
+	}
+	if p.observeRoutePoolChildrenWithRole(ctx, routeGraphOwner{identity: route.identity}, &observed, route.backendKey) != nil ||
+		observed.validateDefaultPoolChildren() != nil ||
+		observed.udpDropPool() && (observed.monitor != nil || pool.Persistence != (pools.SessionPersistence{}) || p.validateUDPPoolCascade(observed) != nil) {
+		return false
+	}
+	if actual.protocol == cloud.ListenerProtocolTCP && route.spec.BackendTLS != nil {
+		route.tcpDefaultPoolTLS = p.observeTCPDefaultPoolTLS(ctx, route, observed, desired.tcpDefaultPoolTLSAvailable, desired.spec.Gateway.BackendCAOwned)
+	}
+	changes, _, err := buildRouteEnsurePlan(route, observed)
+	return err == nil && scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true))
 }
 
 // Use the same convergence test when the whole graph is active and when a
@@ -402,6 +465,22 @@ func scopedRouteBackendReady(route desiredRoute, observed observedRouteGraph, vi
 }
 
 func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
+	partDesired, partActual, parts := udpDropPlanningParts(desired, actual)
+	plan, result, err := p.buildScopedListenerPartPlan(partDesired, partActual)
+	if len(parts) != 0 {
+		combineUDPDropResults(&result, parts, len(desired.routes))
+		for index := range plan {
+			step := &plan[index]
+			if step.kind == graphRouteMutation {
+				step.backendKey = partDesired.routes[step.routeIndex].backendKey
+				step.routeIndex = parts[step.routeIndex].owner
+			}
+		}
+	}
+	return plan, result, err
+}
+
+func (p *Provider) buildScopedListenerPartPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
 	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state)}
 	ensureGateway := desired.spec.Gateway.Disposition == cloud.GraphEnsure
 	spec := desired.spec.Gateway.Spec
@@ -559,10 +638,15 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 				node.Disposition == cloud.GraphEnsure && !keepEdge[listener.ProtocolPort] ||
 				node.RetainListenerPorts != nil && !keepEdge[listener.ProtocolPort]
 			if obsolete || withdraw {
+				result.Routes[owner].Result.Outcome = p.progressingOutcome("Waiting for the superseded default to detach")
+				if actual.routes[owner].udpDropPool() {
+					// Guarded edges are withdrawn with their checked
+					// pool subtree by the packet-drop reconciler.
+					continue
+				}
 				step := clearListenerDefaultPool(actual.protocol)
 				step.listenerID = listener.ID
 				detach = append(detach, step)
-				result.Routes[owner].Result.Outcome = p.progressingOutcome("Waiting for the superseded default to detach")
 				continue
 			}
 		}

@@ -108,6 +108,7 @@ type observedRouteGraph struct {
 	policies               []observedRoutePolicy
 	httpParts              map[string]*observedRouteGraph
 	tcpParts               map[string]*observedRouteGraph
+	udpParts               map[string]*observedRouteGraph
 	weightedPoolHeld       bool
 }
 
@@ -147,6 +148,9 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 		return routeResourceRole{raw: raw, base: raw}, true
 	}
 	if role, ok := parseTCPWeightedResourceRole(raw); ok {
+		return role, slices.Contains(bases, role.base)
+	}
+	if role, ok := parseUDPDropResourceRole(raw); ok {
 		return role, slices.Contains(bases, role.base)
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
@@ -197,6 +201,9 @@ func (route *observedRouteGraph) part(backend string) *observedRouteGraph {
 	parts := &route.httpParts
 	if strings.HasPrefix(backend, tcpWeightedPartPrefix) {
 		parts = &route.tcpParts
+	}
+	if strings.HasPrefix(backend, udpDropPartPrefix) {
+		parts = &route.udpParts
 	}
 	if *parts == nil {
 		*parts = make(map[string]*observedRouteGraph)
@@ -349,6 +356,13 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 	}
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
+	if protocol == cloud.ListenerProtocolUDP && scopedListeners != nil && slices.ContainsFunc(poolItems, func(pool pools.Pool) bool {
+		return slices.Contains(pool.Tags, udpDropPoolTag) || poolInventory.UDPPacketDrop[pool.ID].Present
+	}) {
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "pool", lb.Pools, poolItems, func(pool pools.Pool) string { return pool.ID }); err != nil {
+			return nil, err
+		}
+	}
 	strictHTTP := scopedHTTP || protocol == cloud.ListenerProtocolHTTP && p.fixedHTTPResponses || containsHTTPFragmentPool(poolItems) ||
 		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool {
 			return owner.expectsHTTPParts || owner.expectsBackendTLS || owner.requiresHTTPHostIsolation
@@ -391,11 +405,15 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 			return nil, fmt.Errorf("%w: %s pool %s appears more than once in the Gateway inventory", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)
 		}
 		weighted := strings.HasPrefix(role.backend, tcpWeightedPartPrefix)
+		udpPort := udpDropPartPort(role.backend)
 		if weighted && poolProtocol != cloud.ListenerProtocolTCP {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: weighted TCP role on another transport", cloud.ErrOwnershipConflict)}
 		}
+		if udpPort != 0 && (poolProtocol != cloud.ListenerProtocolUDP || scopedListeners == nil || !slices.Contains(pool.Tags, udpDropPoolTag)) {
+			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: pool %s has an invalid UDP discard role", cloud.ErrOwnershipConflict, pool.ID)}
+		}
 		if usesDefaultPool(poolProtocol) {
-			if role.backend != "" && !weighted {
+			if role.backend != "" && !weighted && udpPort == 0 {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: HTTP backend roles cannot identify a transport pool", cloud.ErrOwnershipConflict)}
 			}
 			var err error
@@ -408,6 +426,11 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 			}
 			if err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+			if udpPort != 0 && (len(pool.Listeners) > 1 || slices.ContainsFunc(scopedListeners, func(listener listeners.Listener) bool {
+				return listener.DefaultPoolID == pool.ID && listener.ProtocolPort != udpPort
+			})) {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: UDP discard pool %s is attached outside its port %d", cloud.ErrOwnershipConflict, pool.ID, udpPort)}
 			}
 		} else if strictHTTP {
 			validateParent := validateDefaultPoolParent
@@ -869,6 +892,16 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner routeGraphOwner, graph *observedRouteGraph, backend string) error {
 	var err error
 	strictChildren := backend != "" || owner.expectsBackendTLS || hasObservedBackendTLS(*graph.pool, graph.backendTLS)
+	matchesChild := func(tags []string, base string) bool {
+		expected := httpResourceRole(base, backend, "")
+		if udpDropPartPort(backend) != 0 {
+			role, ok := openstackidentity.ResourceRole(tags)
+			if !ok || role != expected {
+				return false
+			}
+		}
+		return owner.matchesRoute(tags, expected)
+	}
 	opts := pools.ListMembersOpts{ProjectID: p.projectID}
 	switch {
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP &&
@@ -902,7 +935,7 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 		if err := p.validateOptionalProject("member", member.ID, member.ProjectID); err != nil {
 			return err
 		}
-		if strictChildren && member.ProjectID != p.projectID || !owner.matchesRoute(member.Tags, httpResourceRole(roleMember, backend, "")) {
+		if strictChildren && member.ProjectID != p.projectID || !matchesChild(member.Tags, roleMember) {
 			return fmt.Errorf("%w: pool %s contains member %s not owned by the selected route", cloud.ErrOwnershipConflict, graph.pool.ID, member.ID)
 		}
 		if member.PoolID != "" && member.PoolID != graph.pool.ID {
@@ -934,7 +967,7 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 			return err
 		}
 		if strictChildren && (monitor.ProjectID != p.projectID || len(monitor.Pools) != 1) ||
-			!owner.matchesRoute(monitor.Tags, httpResourceRole(roleMonitor, backend, "")) {
+			!matchesChild(monitor.Tags, roleMonitor) {
 			return fmt.Errorf("%w: pool %s contains health monitor %s not owned by the selected route", cloud.ErrOwnershipConflict, graph.pool.ID, monitor.ID)
 		}
 		for _, parent := range monitor.Pools {

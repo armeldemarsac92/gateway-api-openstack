@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gophercloud/gophercloud/v2"
 )
 
@@ -117,6 +118,163 @@ func newUDPPacketDropProvider(f *tcpGraphFixture) *Provider {
 	return newTestProvider(f.t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{UDPPacketDrop: true})
 }
 
+func newScopedUDPPacketDropGraph(t *testing.T, guarded bool) *tcpGraphFixture {
+	t.Helper()
+	f := newUDPPacketDropFixture(t)
+	f.distinctUDPPoolIDs = true
+	f.spec.Gateway.Spec.ScopedListeners = append(f.spec.Gateway.Spec.ScopedListeners, cloud.ScopedListener{Name: "additional", Port: 9353})
+	route := &f.spec.Routes[0].Spec
+	route.ScopedListenerPorts = append(route.ScopedListenerPorts, 9353)
+	slices.Sort(route.ScopedListenerPorts)
+	if !guarded {
+		f.settleTransportGraph(newUDPPacketDropProvider(f))
+		return f
+	}
+	route.UDPPacketDrop, route.HealthMonitor = &cloud.UDPPacketDrop{Denominator: 1}, cloud.HealthMonitorConfig{}
+	settleScopedUDPPacketDropGraph(t, f)
+	return f
+}
+
+func settleScopedUDPPacketDropGraph(t *testing.T, f *tcpGraphFixture) {
+	t.Helper()
+	provider := newUDPPacketDropProvider(f)
+	for range 20 {
+		for _, item := range append(f.children(tcpListeners), f.children(tcpPools)...) {
+			if item["provisioning_status"] == "PENDING_UPDATE" {
+				item["provisioning_status"] = "ACTIVE"
+			}
+		}
+		if result := f.reconcile(provider); result.Outcome.State == cloud.OutcomeReady {
+			return
+		}
+	}
+	t.Fatalf("UDP graph did not settle: %v", f.writes)
+}
+
+func TestUDPPacketDropWithdrawsAnOrdinaryPeersSupersededDefault(t *testing.T) {
+	f := newScopedUDPPacketDropGraph(t, true)
+	primary, additional := f.inventory[tcpListener], f.inventory[tcpListener+"-9353"]
+	control := f.inventory[tcpListener+"-9311"]
+	primaryID, additionalID := primary["default_pool_id"], additional["default_pool_id"]
+	peer := &f.spec.Routes[1]
+	peer.Disposition, peer.RetainListenerPorts = cloud.GraphPreserve, []int{}
+	peer.Spec = cloud.RouteSpec{Identity: peer.Spec.Identity}
+	before := len(f.writes)
+	f.reconcile(newUDPPacketDropProvider(f))
+	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpListener + "-9311"}) || control["default_pool_id"] != nil ||
+		primary["default_pool_id"] != primaryID || additional["default_pool_id"] != additionalID {
+		t.Fatalf("withdrawal changed the wrong graph edges: %v", f.writes[before:])
+	}
+}
+
+func TestUDPPacketDropRestrictsAnExistingPoolBeforeRouteCheckpoint(t *testing.T) {
+	f := newScopedUDPPacketDropGraph(t, true)
+	node := &f.spec.Routes[0]
+	route := &node.Spec
+	granted := slices.Clone(route.Members)
+	primary, additional, sibling := f.inventory[tcpListener], f.inventory[tcpListener+"-9353"], f.inventory[tcpListener+"-9311"]
+	primaryID, additionalID, siblingID := primary["default_pool_id"], additional["default_pool_id"], sibling["default_pool_id"]
+	paths := []string{tcpPools + "/" + primaryID.(string), tcpPools + "/" + additionalID.(string)}
+	node.Disposition, node.RetainListenerPorts = cloud.GraphPreserve, slices.Clone(route.ScopedListenerPorts)
+	node.RestrictUDPPacketDrop = true
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	retained := route.Members[0]
+	retained.Weight = 1
+	route.Members = []cloud.Member{retained}
+	before := len(f.writes)
+	provider := newUDPPacketDropProvider(f)
+	fenceErr := errors.New("authorization changed")
+	f.spec.ValidateMutation = func(context.Context) error { return fenceErr }
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, fenceErr) || len(f.writes) != before {
+		t.Fatalf("the uncheckpointed restriction bypassed the authorization fence: %v, writes %v", err, f.writes[before:])
+	}
+	f.spec.ValidateMutation = nil
+	for _, path := range paths {
+		f.reconcile(provider)
+		if pool := f.inventory[path]; pool != nil {
+			pool["provisioning_status"] = "ACTIVE"
+		}
+	}
+	want := []string{"PUT " + paths[0] + "/members", "PUT " + paths[1] + "/members"}
+	if !slices.Equal(f.writes[before:], want) || primary["default_pool_id"] != primaryID ||
+		additional["default_pool_id"] != additionalID || sibling["default_pool_id"] != siblingID {
+		t.Fatalf("withdrawal before the route checkpoint did not batch both guarded pools: %v", f.writes[before:])
+	}
+	for _, path := range paths {
+		members := f.children(path + "/members")
+		if len(members) != 1 || members[0]["id"] != "member" || members[0]["address"] != retained.Address {
+			t.Fatalf("retained member changed identity or an unauthorized member still serves: %v", members)
+		}
+	}
+	route.UDPPacketDrop, route.Members = &cloud.UDPPacketDrop{Denominator: 1}, granted
+	before = len(f.writes)
+	f.reconcile(provider)
+	if len(f.writes) != before || primary["default_pool_id"] != primaryID || additional["default_pool_id"] != additionalID ||
+		sibling["default_pool_id"] != siblingID {
+		t.Fatalf("grant restoration changed forwarding before the route checkpoint: %v", f.writes[before:])
+	}
+	node.Disposition, node.RetainListenerPorts = cloud.GraphEnsure, nil
+	node.RestrictUDPPacketDrop = false
+	settleScopedUDPPacketDropGraph(t, f)
+	if !slices.Equal(f.writes[before:], want) || primary["default_pool_id"] != primaryID || additional["default_pool_id"] != additionalID {
+		t.Fatalf("route checkpoint did not restore both guarded pools: %v", f.writes[before:])
+	}
+
+	// The same snapshot can revoke an active member while granting access to a
+	// new one. The gateway must stop the revoked member without admitting the new one.
+	node.Disposition, node.RetainListenerPorts, node.RestrictUDPPacketDrop = cloud.GraphPreserve, slices.Clone(route.ScopedListenerPorts), true
+	route.Members = []cloud.Member{retained, {Address: "10.1.2.6", Port: 8080, Weight: 1}}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	before = len(f.writes)
+	f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"DELETE " + paths[0]}) || additional["default_pool_id"] != additionalID ||
+		sibling["default_pool_id"] != siblingID {
+		t.Fatalf("a mixed authorization change mutated the wrong pool: %v", f.writes[before:])
+	}
+}
+
+func TestUDPPacketDropKeepsSharedStockPoolAfterFailedDetach(t *testing.T) {
+	f := newScopedUDPPacketDropGraph(t, false)
+	node := &f.spec.Routes[0]
+	route := &node.Spec
+	first, second, control := f.inventory[tcpListener], f.inventory[tcpListener+"-9353"], f.inventory[tcpListener+"-9311"]
+	stockID, controlID := first["default_pool_id"], control["default_pool_id"]
+	route.ScopedListenerPorts = []int{9353}
+	route.UDPPacketDrop, route.HealthMonitor = &cloud.UDPPacketDrop{Denominator: 1}, cloud.HealthMonitorConfig{}
+	f.reconcile(newUDPPacketDropProvider(f))
+	if first["default_pool_id"] != nil || second["default_pool_id"] != stockID {
+		t.Fatal("migration did not start by detaching the former winning port")
+	}
+	first["provisioning_status"] = "ERROR"
+	before := len(f.writes)
+	f.reconcile(newUDPPacketDropProvider(f))
+	if len(f.writes) != before || f.inventory[tcpPool] == nil || second["default_pool_id"] != stockID || control["default_pool_id"] != controlID {
+		t.Fatalf("an unverified detach let the shared stock pool change: %v", f.writes[before:])
+	}
+	first["provisioning_status"] = "ACTIVE"
+	settleScopedUDPPacketDropGraph(t, f)
+	if first["default_pool_id"] != nil || second["default_pool_id"] == nil || second["default_pool_id"] == stockID || control["default_pool_id"] != controlID {
+		t.Fatalf("migration did not recover after the old listener settled: %v", f.writes[before:])
+	}
+}
+
+func TestUDPPacketDropDefersOnlyAfterReadbackOfEveryWinningPort(t *testing.T) {
+	f := newScopedUDPPacketDropGraph(t, true)
+	f.inventory[tcpLB]["provisioning_status"] = "PENDING_UPDATE"
+	f.inventory[tcpListener+"-9311"]["provisioning_status"] = "PENDING_UPDATE"
+	provider := newUDPPacketDropProvider(f)
+	before := len(f.writes)
+	if result := f.reconcile(provider); !result.Routes[0].Result.ObservationDeferred ||
+		result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || len(f.writes) != before {
+		t.Fatalf("the pending sibling did not retain the established route observation: %+v", result.Routes)
+	}
+	additionalID := f.inventory[tcpListener+"-9353"]["default_pool_id"].(string)
+	f.inventory[tcpPools+"/"+additionalID]["udp_packet_drop"] = map[string]any{"numerator": 1, "denominator": 4}
+	if result := f.reconcile(provider); result.Routes[0].Result.ObservationDeferred || len(f.writes) != before {
+		t.Fatalf("one drifted pool incorrectly deferred the route observation: %+v", result.Routes)
+	}
+}
+
 func TestUDPPacketDropUsesAuthorizedNodePorts(t *testing.T) {
 	f := newUDPPacketDropFixture(t)
 	f.spec.Routes[0].Spec.MemberMode = "" // The default normalizes to NodePort.
@@ -182,6 +340,235 @@ func TestUDPPacketDropRetainsOnlyTheObservedWeightedPool(t *testing.T) {
 
 func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
 	testUDPPacketDropAtomicReplacement(t, newUDPPacketDropFixture(t))
+}
+
+func TestUDPPacketDropOneRouteOnTwoPorts(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	f.distinctUDPPoolIDs = true
+	const additional = 9353
+	f.spec.Gateway.Spec.ScopedListeners = append(f.spec.Gateway.Spec.ScopedListeners, cloud.ScopedListener{Name: "additional", Port: additional})
+	route := &f.spec.Routes[0].Spec
+	route.ScopedListenerPorts = append(route.ScopedListenerPorts, additional)
+	slices.Sort(route.ScopedListenerPorts)
+	provider := newUDPPacketDropProvider(f)
+	f.settleTransportGraph(provider)
+	first, second, control := f.inventory[tcpListener], f.inventory[tcpListener+"-9353"], f.inventory[tcpListener+"-9311"]
+	stock := first["default_pool_id"]
+	if stock == nil || second["default_pool_id"] != stock || control["default_pool_id"] == stock {
+		t.Fatalf("expected a stock pool shared by the route's two ports and an independent sibling")
+	}
+	stockMonitor, granted := route.HealthMonitor, slices.Clone(route.Members)
+	controlID := control["default_pool_id"]
+	checkListeners := func() {
+		t.Helper()
+		if f.inventory[tcpListener]["id"] != first["id"] || f.inventory[tcpListener+"-9353"]["id"] != second["id"] ||
+			control["default_pool_id"] != controlID || control["provisioning_status"] != "ACTIVE" {
+			t.Fatal("the migration changed a listener identity or the independent sibling")
+		}
+	}
+	settle := func(provider *Provider) {
+		t.Helper()
+		for range 20 {
+			for _, item := range append(f.children(tcpListeners), f.children(tcpPools)...) {
+				if item["provisioning_status"] == "PENDING_UPDATE" {
+					item["provisioning_status"] = "ACTIVE"
+				}
+			}
+			result := f.reconcile(provider)
+			checkListeners()
+			if len(result.Routes) != 2 || result.Routes[0].Identity != route.Identity {
+				t.Fatalf("physical pool parts must have one route result: %+v", result.Routes)
+			}
+			if result.Routes[0].Result.Outcome.State == cloud.OutcomeReady {
+				return
+			}
+		}
+		t.Fatalf("UDP route did not settle, writes %v", f.writes)
+	}
+	route.UDPPacketDrop, route.HealthMonitor = &cloud.UDPPacketDrop{Denominator: 1}, cloud.HealthMonitorConfig{}
+	before := len(f.writes)
+	settle(provider)
+	wantDetach := []string{"PUT " + tcpListener, "PUT " + tcpListener + "-9353", "DELETE " + tcpPool}
+	if got := f.writes[before:]; !slices.Equal(got[:min(len(wantDetach), len(got))], wantDetach) {
+		t.Fatalf("shared stock defaults must detach before pool replacement: %v", got)
+	}
+	firstID, secondID := first["default_pool_id"], second["default_pool_id"]
+	if firstID == nil || secondID == nil || firstID == secondID || firstID == controlID || secondID == controlID {
+		t.Fatalf("expected two dedicated pool IDs and an independent sibling: %v, %v, %v", firstID, secondID, controlID)
+	}
+	paths := []string{tcpPools + "/" + firstID.(string), tcpPools + "/" + secondID.(string)}
+	retained := granted[0]
+	retained.Weight = 1
+	for _, phase := range []struct {
+		share   cloud.UDPPacketDrop
+		members []cloud.Member
+	}{
+		{share: cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, members: []cloud.Member{retained}},
+		{share: cloud.UDPPacketDrop{Denominator: 1}, members: granted},
+	} {
+		route.UDPPacketDrop, route.Members = &phase.share, phase.members
+		before := len(f.writes)
+		provider = newUDPPacketDropProvider(f)
+		if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || result.Routes[0].Result.ObservationDeferred {
+			t.Fatalf("reported convergence with only the first port updated: %+v", result.Routes[0])
+		}
+		settle(provider)
+		writes := slices.Clone(f.writes[before:])
+		slices.Sort(writes)
+		want := []string{"PUT " + paths[0] + "/members", "PUT " + paths[1] + "/members"}
+		slices.Sort(want)
+		if !slices.Equal(writes, want) || first["default_pool_id"] != firstID || second["default_pool_id"] != secondID {
+			t.Fatalf("wanted one atomic batch per unchanged default: writes %v", writes)
+		}
+		for _, path := range paths {
+			pool := f.inventory[path]
+			fraction, _ := pool["udp_packet_drop"].(map[string]any)
+			members := f.children(path + "/members")
+			if fraction["numerator"] != float64(phase.share.Numerator) || fraction["denominator"] != float64(phase.share.Denominator) || len(members) != len(phase.members) {
+				t.Fatalf("pool %s readback is %v with members %v", path, fraction, members)
+			}
+			for _, member := range phase.members {
+				if !slices.ContainsFunc(members, func(item map[string]any) bool {
+					return item["address"] == member.Address && item["weight"] == float64(member.Weight)
+				}) {
+					t.Fatalf("pool %s missing member %+v", path, member)
+				}
+			}
+		}
+	}
+	// A rejected batch on the second port must withdraw that pool only.
+	share := cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	route.UDPPacketDrop, route.Members = &share, []cloud.Member{retained}
+	f.reconcile(provider)
+	f.inventory[paths[0]]["provisioning_status"] = "ACTIVE"
+	f.tcpRejectionRejectCode = http.StatusBadRequest
+	before = len(f.writes)
+	if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
+		!slices.Equal(f.writes[before:], []string{"DELETE " + paths[1]}) ||
+		first["default_pool_id"] != firstID || second["default_pool_id"] != nil {
+		t.Fatalf("rejected batch must remove the affected pool only: %+v, writes %v", result, f.writes[before:])
+	}
+	f.tcpRejectionRejectCode = 0
+	route.UDPPacketDrop, route.Members = &cloud.UDPPacketDrop{Denominator: 1}, granted
+	settle(newUDPPacketDropProvider(f))
+	if first["default_pool_id"] != firstID || second["default_pool_id"] == secondID || second["default_pool_id"] == nil {
+		t.Fatal("the affected port did not recover with a replacement pool")
+	}
+	paths[1] = tcpPools + "/" + second["default_pool_id"].(string)
+
+	// The same route can lose one port at the election without changing the
+	// surviving default or the independent route, and win it again later.
+	ports := route.ScopedListenerPorts
+	route.ScopedListenerPorts = ports[:1]
+	before = len(f.writes)
+	settle(provider)
+	if !slices.Equal(f.writes[before:], []string{"DELETE " + paths[1]}) ||
+		first["default_pool_id"] != firstID || second["default_pool_id"] != nil {
+		t.Fatalf("election withdrawal touched more than its port: %v", f.writes[before:])
+	}
+	route.ScopedListenerPorts = ports
+	settle(newUDPPacketDropProvider(f))
+	if first["default_pool_id"] != firstID || second["default_pool_id"] == nil {
+		t.Fatal("adding an elected port did not keep the surviving pool")
+	}
+	paths[1] = tcpPools + "/" + second["default_pool_id"].(string)
+
+	route.UDPPacketDrop, route.HealthMonitor = nil, stockMonitor
+	settle(f.provider())
+	if first["default_pool_id"] == nil || first["default_pool_id"] != second["default_pool_id"] || f.inventory[tcpMonitor] == nil ||
+		f.inventory[paths[0]] != nil || f.inventory[paths[1]] != nil {
+		t.Fatal("disabling the feature did not restore the shared stock pool and remove its dedicated predecessors")
+	}
+}
+
+func TestUDPPacketDropAdoptsOnlyAProvenLegacyDefault(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	f.distinctUDPPoolIDs = true
+	const addedPort = 9353
+	f.spec.Gateway.Spec.ScopedListeners = append(f.spec.Gateway.Spec.ScopedListeners, cloud.ScopedListener{Name: "additional", Port: addedPort})
+	route := &f.spec.Routes[0].Spec
+	route.HealthMonitor = cloud.HealthMonitorConfig{}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+	settle := func() {
+		t.Helper()
+		provider := newUDPPacketDropProvider(f)
+		for range 20 {
+			for _, item := range append(f.children(tcpPools), f.children(tcpListeners)...) {
+				if item["provisioning_status"] == "PENDING_UPDATE" {
+					item["provisioning_status"] = "ACTIVE"
+				}
+			}
+			if result := f.reconcile(provider); result.Outcome.State == cloud.OutcomeReady {
+				return
+			}
+		}
+		t.Fatalf("UDP graph did not settle: %v", f.writes)
+	}
+	settle()
+
+	first, second := f.inventory[tcpListener], f.inventory[tcpListener+"-9353"]
+	poolID := first["default_pool_id"]
+	path := tcpPools + "/" + poolID.(string)
+	identity, err := newUDPPacketDropProvider(f).identity(route.Identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed the controller's original scalar role and its original member tags.
+	tags, err := identity.RouteTags(rolePool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.inventory[path]["tags"] = append(tags, udpDropPoolTag)
+	tags, err = identity.RouteTags(roleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range f.children(path + "/members") {
+		member["tags"] = tags
+	}
+
+	route.ScopedListenerPorts = append(route.ScopedListenerPorts, addedPort)
+	slices.Sort(route.ScopedListenerPorts)
+	settle()
+	if first["default_pool_id"] != poolID || second["default_pool_id"] == nil || second["default_pool_id"] == poolID {
+		t.Fatalf("proven legacy default was not kept on its original port: %v / %v", first, second)
+	}
+	witness := f.inventory[tcpListener+"-9311"]
+	witness["provisioning_status"] = "PENDING_UPDATE"
+	if result := f.reconcile(newUDPPacketDropProvider(f)); !result.Routes[0].Result.ObservationDeferred {
+		t.Fatalf("a proved legacy default and a port-specific default did not defer together: %+v", result.Routes[0])
+	}
+	witness["provisioning_status"] = "ACTIVE"
+
+	newPool := tcpPools + "/" + second["default_pool_id"].(string)
+	before := len(f.writes)
+	tags = pilotTags(f.inventory[newPool]["tags"])
+	wrongPortRole := udpDropResourceRole(rolePool, udpDropPartKey(route.ScopedListenerPorts[0]))
+	replacement, err := identity.RouteTags(wrongPortRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.inventory[newPool]["tags"] = append(replacement, udpDropPoolTag)
+	provider := newUDPPacketDropProvider(f)
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(f.writes) != before {
+		t.Fatalf("wrong-port pool role allowed a mutation: %v, writes %v", err, f.writes[before:])
+	}
+	f.inventory[newPool]["tags"] = tags
+	member := f.children(newPool + "/members")[0]
+	tags = pilotTags(member["tags"])
+	member["tags"] = append(slices.Clone(tags), openstackidentity.Tag("role", roleMember))
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(f.writes) != before {
+		t.Fatalf("ambiguous descendant role allowed a mutation: %v, writes %v", err, f.writes[before:])
+	}
+	member["tags"] = tags
+
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.spec.Routes[0].Disposition, f.spec.Routes[1].Disposition = cloud.GraphDelete, cloud.GraphPreserve
+	settle()
+	if f.inventory[path] != nil || f.inventory[newPool] != nil ||
+		f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("restarted cleanup did not remove exactly the two owned pools: %v", f.writes[before:])
+	}
 }
 
 func testUDPPacketDropAtomicReplacement(t *testing.T, f *tcpGraphFixture) {

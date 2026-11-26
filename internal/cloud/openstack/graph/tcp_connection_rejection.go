@@ -133,12 +133,13 @@ func transportBatchMember(desired desiredRoute, member cloud.Member, existing po
 	}
 	weightTag := desired.nodePortWeightTag()
 	if existing.ID == "" {
-		tags, err := desired.identity.RouteTags(roleMember)
+		role := desired.httpRole(roleMember, "")
+		tags, err := desired.identity.RouteTags(role)
 		if err != nil {
 			return opts, err
 		}
 		opts.Tags = tags
-		opts.Name = new(resourceName(desired.spec.Identity, roleMember))
+		opts.Name = new(resourceName(desired.spec.Identity, role))
 		if opts.Weight == nil {
 			opts.Weight = new(1)
 		}
@@ -191,7 +192,7 @@ func defaultPoolCanServe(route desiredRoute) bool {
 // An explicit rejection of the batch leaves the old member set serving.
 // Reprove the owned default before withdrawing it. An ambiguous response
 // follows ordinary re-observation because Octavia may have accepted the write.
-func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desired desiredGatewayGraph, index int, result *cloud.GatewayGraphResult, failure error) (bool, error) {
+func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desired desiredGatewayGraph, index int, poolID string, result *cloud.GatewayGraphResult, failure error) (bool, error) {
 	if !slices.ContainsFunc([]int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed,
 		http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity, http.StatusNotImplemented}, func(code int) bool { return gophercloud.ResponseCodeIs(failure, code) }) {
 		return false, nil
@@ -201,14 +202,16 @@ func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desi
 		return false, err
 	}
 	pendingUDP := hasAmphoraUDPGraph(actual) && actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE"
-	if pendingUDP {
+	activeScopedUDP := hasAmphoraUDPGraph(actual) && actual.loadBalancer.ProvisioningStatus == "ACTIVE" &&
+		actual.scoped && len(actual.routes) == 0 && actual.outcome.State == cloud.OutcomeProgressing
+	if pendingUDP || activeScopedUDP {
 		if err := p.observePendingUDPRoutes(ctx, desired, &actual); err != nil {
 			return false, err
 		}
 	} else if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 		return false, nil
 	}
-	if actual.loadBalancer == nil || index < len(actual.routes) && actual.routes[index].pool == nil {
+	if actual.loadBalancer == nil || index < len(actual.routes) && actual.routes[index].defaultPool(poolID).pool == nil {
 		// An independently observed disappearance can be handled by normal
 		// graph staging. A 404 on an existing pool may identify its subnet.
 		return isNotFound(failure), nil
@@ -216,12 +219,17 @@ func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desi
 	if index >= len(actual.routes) {
 		return false, nil
 	}
-	route := actual.routes[index]
+	route := actual.routes[index].defaultPool(poolID)
+	if actual.protocol == cloud.ListenerProtocolUDP {
+		if err := validateTransportRouteBinding(desired.routes[index], actual); err != nil {
+			return false, err
+		}
+	}
 	if pendingUDP {
 		if route.pool.ProvisioningStatus != "PENDING_UPDATE" || !route.udpDrop.Present {
 			return false, nil
 		}
-		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, result)
+		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, route, result)
 	}
 	if route.pool.ProvisioningStatus != "ERROR" && route.backendProvisioningIssue(true, true) != "" {
 		return false, nil
@@ -234,7 +242,7 @@ func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desi
 		return false, nil
 	}
 	if actual.protocol == cloud.ListenerProtocolUDP {
-		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, result)
+		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, route, result)
 	}
 	return true, p.withdrawTCPRejectionDefault(ctx, desired, actual, index, frontends[listener].ID, result)
 }

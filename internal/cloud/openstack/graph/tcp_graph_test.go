@@ -65,6 +65,8 @@ type tcpGraphFixture struct {
 	udpDropAdvertised           bool
 	udpDiscoveryUnavailable     bool
 	udpDropRenderBusy           bool
+	distinctUDPPoolIDs          bool
+	nextUDPPoolID               int
 	tcpDefaultPoolTLSAPI        bool
 	tcpDefaultPoolTLSAdvertised bool
 	tcpWeightedAPI              bool
@@ -244,6 +246,12 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				entryPath = tcpPool + "-secondary"
 			}
 			role, _ := openstackidentity.ResourceRole(pilotTags(data["tags"]))
+			if f.distinctUDPPoolIDs && listPath == tcpPools {
+				if _, ok := parseUDPDropResourceRole(role); ok {
+					f.nextUDPPoolID++
+					entryPath = tcpPool + "-udp-" + strconv.Itoa(f.nextUDPPoolID)
+				}
+			}
 			if f.tcpWeightedAPI && listPath == tcpPools && strings.HasPrefix(role, "tcp-weighted-v1/") {
 				f.nextWeightedPool++
 				entryPath = tcpPools + "/" + fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextWeightedPool)
