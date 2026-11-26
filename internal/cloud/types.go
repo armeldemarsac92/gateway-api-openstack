@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"net/netip"
 	"slices"
 )
 
@@ -258,6 +259,11 @@ type Member struct {
 	// RoutedExternal reaches a ServiceImport using Amphora's existing
 	// routes. It omits the Neutron member subnet even in a mixed backend pool.
 	RoutedExternal bool `json:",omitempty"`
+}
+
+// IsUnicastIPv4MemberAddress accepts native IPv4 destinations usable by the guarded UDP pool.
+func IsUnicastIPv4MemberAddress(address netip.Addr) bool {
+	return address.Is4() && address.IsGlobalUnicast() && !address.IsLoopback() && !address.IsLinkLocalUnicast()
 }
 
 // HTTPPathMatch describes one path and its optional conjunctive predicates at its listener rank.

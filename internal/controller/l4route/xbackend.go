@@ -101,7 +101,7 @@ func (r *Reconciler) observeTCPXBackendTLS(ctx context.Context, backend *gateway
 	return observed.TLS.Validation.CloudValidation(), observed.ClientCertificateReference, nil, nil
 }
 
-func (r *Reconciler) transportMembers(ctx context.Context, backend transportBackend, topology classconfig.Resolved, addresses []gatewayv1.GatewayStatusAddress, matchVIPFamily bool) ([]cloud.Member, *model.Diagnostic, error) {
+func (r *Reconciler) transportMembers(ctx context.Context, backend transportBackend, topology classconfig.Resolved, addresses []gatewayv1.GatewayStatusAddress, options routebackend.TransportMemberOptions) ([]cloud.Member, *model.Diagnostic, error) {
 	if backend.ref.serviceImport {
 		if diagnostic := serviceImportModeIssue(topology.Topology.MemberMode); diagnostic != nil {
 			return nil, diagnostic, nil
@@ -115,7 +115,7 @@ func (r *Reconciler) transportMembers(ctx context.Context, backend transportBack
 		return backend.importMembers, nil, nil
 	}
 	if backend.xBackend == nil {
-		return routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, addresses, matchVIPFamily)
+		return routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, addresses, options)
 	}
 	endpoints, err := graph.ObserveXBackendEndpoints(ctx, r.APIReader, backend.xBackend)
 	if err != nil {

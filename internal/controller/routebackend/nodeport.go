@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"slices"
 	"sort"
 
@@ -67,7 +68,9 @@ func ReadyBackendNodes(service *corev1.Service, servicePort *corev1.ServicePort,
 		return nil, diagnostic
 	}
 	if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal && len(localNodes) == 0 {
-		return nil, pending("backend Service %s uses externalTrafficPolicy Local but ready endpoints do not identify their Nodes", service.Name)
+		diagnostic := pending("backend Service %s uses externalTrafficPolicy Local but ready endpoints do not identify their Nodes", service.Name)
+		diagnostic.NoEligibleWorkers = true
+		return nil, diagnostic
 	}
 
 	return localNodes, nil
@@ -85,6 +88,10 @@ func sliceSupportsServicePort(service *corev1.Service, servicePort *corev1.Servi
 
 // NodePortMembersForNodes selects eligible workers according to Service traffic policy.
 func NodePortMembersForNodes(service *corev1.Service, nodePort int32, addressType corev1.NodeAddressType, localNodes BackendNodes, nodes []corev1.Node) ([]cloud.Member, *model.Diagnostic) {
+	return nodePortMembersForNodes(service, nodePort, addressType, localNodes, nodes, false)
+}
+
+func nodePortMembersForNodes(service *corev1.Service, nodePort int32, addressType corev1.NodeAddressType, localNodes BackendNodes, nodes []corev1.Node, requireUnicastIPv4 bool) ([]cloud.Member, *model.Diagnostic) {
 	members := make([]cloud.Member, 0, len(nodes))
 	providersByAddress := map[string]string{}
 	for index := range nodes {
@@ -92,7 +99,7 @@ func NodePortMembersForNodes(service *corev1.Service, nodePort int32, addressTyp
 		if controller.NodePortNodeExcluded(node) || !readyNode(node) {
 			continue
 		}
-		address := nodeAddress(node, addressType, service.Spec.ExternalTrafficPolicy, localNodes)
+		address := nodeAddress(node, addressType, service.Spec.ExternalTrafficPolicy, localNodes, requireUnicastIPv4)
 		if address == "" {
 			continue
 		}
@@ -107,7 +114,9 @@ func NodePortMembersForNodes(service *corev1.Service, nodePort int32, addressTyp
 		members = append(members, cloud.Member{Address: address, Port: int(nodePort), ProviderID: node.Spec.ProviderID})
 	}
 	if len(members) == 0 {
-		return nil, pending("backend Service %s has no eligible worker Nodes with a %s address", service.Name, addressType)
+		diagnostic := pending("backend Service %s has no eligible worker Nodes with a %s address", service.Name, addressType)
+		diagnostic.NoEligibleWorkers = true
+		return nil, diagnostic
 	}
 	sort.Slice(members, func(i, j int) bool {
 		if members[i].Address == members[j].Address {
@@ -138,11 +147,17 @@ func readyNode(node *corev1.Node) bool {
 	return false
 }
 
-func nodeAddress(node *corev1.Node, addressType corev1.NodeAddressType, policy corev1.ServiceExternalTrafficPolicy, readyNodes BackendNodes) string {
+func nodeAddress(node *corev1.Node, addressType corev1.NodeAddressType, policy corev1.ServiceExternalTrafficPolicy, readyNodes BackendNodes, requireUnicastIPv4 bool) string {
 	for _, address := range node.Status.Addresses {
 		ip := net.ParseIP(address.Address)
 		if address.Type != addressType || ip == nil {
 			continue
+		}
+		if requireUnicastIPv4 {
+			parsed, err := netip.ParseAddr(address.Address)
+			if err != nil || !cloud.IsUnicastIPv4MemberAddress(parsed) {
+				continue
+			}
 		}
 		family := discoveryv1.AddressTypeIPv6
 		if ip.To4() != nil {
@@ -163,6 +178,10 @@ func nodeAddress(node *corev1.Node, addressType corev1.NodeAddressType, policy c
 
 // NodePortMembers obtains the workers only after establishing endpoint readiness.
 func NodePortMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *corev1.ServicePort, addressType corev1.NodeAddressType, endpoints []discoveryv1.EndpointSlice) ([]cloud.Member, *model.Diagnostic, error) {
+	return nodePortMembers(ctx, reader, service, port, addressType, endpoints, false)
+}
+
+func nodePortMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *corev1.ServicePort, addressType corev1.NodeAddressType, endpoints []discoveryv1.EndpointSlice, requireUnicastIPv4 bool) ([]cloud.Member, *model.Diagnostic, error) {
 	local, diagnostic := ReadyBackendNodes(service, port, endpoints)
 	if diagnostic != nil {
 		return nil, diagnostic, nil
@@ -174,6 +193,6 @@ func NodePortMembers(ctx context.Context, reader client.Reader, service *corev1.
 	if nodes.Continue != "" {
 		return nil, nil, fmt.Errorf("incomplete backend Node list")
 	}
-	members, diagnostic := NodePortMembersForNodes(service, port.NodePort, addressType, local, nodes.Items)
+	members, diagnostic := nodePortMembersForNodes(service, port.NodePort, addressType, local, nodes.Items, requireUnicastIPv4)
 	return members, diagnostic, nil
 }

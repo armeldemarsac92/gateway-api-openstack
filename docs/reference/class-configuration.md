@@ -457,7 +457,7 @@ For a UDP NodePort, the chosen worker address and ready EndpointSlice must use t
 Its address family must be one of the Service's configured families and match the selected Node address.
 With `externalTrafficPolicy: Cluster`, eligible workers can use a ready endpoint in that family anywhere in the cluster.
 With `externalTrafficPolicy: Local`, that endpoint must also identify the worker through `endpoints[].nodeName`.
-The route remains pending when no worker is eligible.
+When no worker is eligible, the route remains pending with ordinary forwarding. A dedicated IPv4 UDP listener enrolled in proportional discard can discard the unavailable backend's share. [Proportional UDP packet discard](../operator-octavia-udp-packet-drop.md)
 Node and EndpointSlice changes recalculate membership, preserving members whose address and NodePort have not changed.
 
 Operators must ensure that the selected Node addresses belong to the configured member network and that Amphora can reach their NodePorts.

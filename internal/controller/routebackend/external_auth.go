@@ -99,7 +99,7 @@ func ExternalAuthTransportDiagnostic(service *corev1.Service, port *corev1.Servi
 
 // ResolveExternalAuthMembers uses an already authorized Service and TCP port.
 func ResolveExternalAuthMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *corev1.ServicePort, auth cloud.ListenerExternalAuth, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *model.Diagnostic, error) {
-	members, diagnostic, err := TransportMembers(ctx, reader, service, new(gatewayv1.PortNumber(port.Port)), corev1.ProtocolTCP, topology, nil, false)
+	members, diagnostic, err := TransportMembers(ctx, reader, service, new(gatewayv1.PortNumber(port.Port)), corev1.ProtocolTCP, topology, nil, TransportMemberOptions{})
 	if err != nil {
 		return auth, nil, err
 	}

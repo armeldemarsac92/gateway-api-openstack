@@ -103,7 +103,7 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	}
 	route.TCPRoutes = tcp
 	udp := &l4route.Reconciler{Protocol: gatewayv1.UDPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
-	if cfg.UDPPacketDrop {
+	if cfg.UDPPacketDrop || cfg.UDPNodePortPacketDrop {
 		udp.UDPPacketDropAvailable = func(context.Context) (bool, error) { return true, nil }
 	}
 	writer.Routes = graph.RouteSources{route, tcp, udp}

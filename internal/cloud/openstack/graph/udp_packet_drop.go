@@ -152,8 +152,7 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 				if err == nil {
 					continue
 				}
-				result, handled, deleteErr := p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP default after security validation failed")
-				return result, handled, errors.Join(err, deleteErr)
+				return p.handleUDPPacketDropSecurityError(ctx, desired, actual, index, err)
 			}
 		}
 
@@ -185,8 +184,7 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 			continue
 		}
 		if err := p.validateUDPPacketDropSecurity(ctx, desired, route, owned[0].ProtocolPort); err != nil {
-			result, handled, deleteErr := p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP default after security validation failed")
-			return result, handled, errors.Join(err, deleteErr)
+			return p.handleUDPPacketDropSecurityError(ctx, desired, actual, index, err)
 		}
 		if pendingBatch && !changed {
 			delay := p.transportReplayDelay(observed.pool.ID, observed.udpDrop.UpdatedAt, time.Now())
@@ -230,6 +228,18 @@ func staleUDPDestinations(route desiredRoute, observed observedRouteGraph) bool 
 		_, unreported := observed.memberBatchUnreported[member.ID]
 		return (!wanted || member.SubnetID != subnet) && (unreported || member.AdminStateUp && member.Weight > 0)
 	})
+}
+
+func (p *Provider) handleUDPPacketDropSecurityError(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int, err error) (cloud.GatewayGraphResult, bool, error) {
+	route, observed := desired.routes[index], actual.routes[index]
+	category, _ := cloud.ErrorCategoryOf(classifyOpenStackError(err))
+	temporary := category == cloud.ErrorCategoryTimeout || category == cloud.ErrorCategoryRateLimit || category == cloud.ErrorCategoryRetryableService
+	if route.spec.MemberMode == cloud.MemberModeNodePort && temporary && !staleUDPDestinations(route, observed) {
+		actual.outcome = p.progressingOutcome("Waiting to verify OpenStack UDP NodePort security")
+		return p.waitForUDPPacketDrop(ctx, desired, actual, index)
+	}
+	result, handled, deleteErr := p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP default after security validation failed")
+	return result, handled, errors.Join(err, deleteErr)
 }
 
 func (p *Provider) waitForUDPPacketDrop(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int) (cloud.GatewayGraphResult, bool, error) {

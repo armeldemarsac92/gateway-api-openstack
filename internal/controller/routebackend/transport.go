@@ -60,9 +60,15 @@ func ValidateNodePortService(service *corev1.Service, port *corev1.ServicePort) 
 	return nil
 }
 
+// TransportMemberOptions constrain which NodePort destinations can serve a transport listener.
+type TransportMemberOptions struct {
+	MatchVIPFamily     bool
+	RequireUnicastIPv4 bool
+}
+
 // TransportMembers resolves a TCP or UDP Service through the Gateway's frozen member mode.
 // The caller authorizes the Service reference before reading it.
-func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress, matchVIPFamily bool) ([]cloud.Member, *model.Diagnostic, error) {
+func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress, options TransportMemberOptions) ([]cloud.Member, *model.Diagnostic, error) {
 	if !service.DeletionTimestamp.IsZero() {
 		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: "The backend Service is being deleted"}, nil
 	}
@@ -91,7 +97,7 @@ func TransportMembers(ctx context.Context, reader client.Reader, service *corev1
 		return nil, nil, fmt.Errorf("incomplete backend EndpointSlice list")
 	}
 	if mode == cloud.MemberModeNodePort {
-		if matchVIPFamily {
+		if options.MatchVIPFamily {
 			// Count only workers of the VIP's address family before assigning
 			// weighted shares. IPVS also omits real servers of other families.
 			// A published floating IP and its private VIP are both IPv4.
@@ -108,7 +114,7 @@ func TransportMembers(ctx context.Context, reader client.Reader, service *corev1
 			}
 			endpoints.Items = slices.DeleteFunc(endpoints.Items, func(endpoint discoveryv1.EndpointSlice) bool { return endpoint.AddressType != family })
 		}
-		return NodePortMembers(ctx, reader, service, selected, topology.NodeAddressType, endpoints.Items)
+		return nodePortMembers(ctx, reader, service, selected, topology.NodeAddressType, endpoints.Items, options.RequireUnicastIPv4)
 	}
 	members, diagnostic := EndpointMembers(service, model.ResolveServiceEndpoints(service, selected, endpoints.Items))
 	return members, diagnostic, nil
