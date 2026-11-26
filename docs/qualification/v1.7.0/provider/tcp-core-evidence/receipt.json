@@ -1,0 +1,921 @@
+{
+  "campaignExit": 0,
+  "channels": {
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "cases": {
+        "GatewayClassObservedGenerationBump": {
+          "durationSeconds": 0.23,
+          "result": "Passed"
+        },
+        "GatewayInvalidRouteKind": {
+          "durationSeconds": 0.64,
+          "result": "Passed"
+        },
+        "GatewayInvalidTLSConfiguration": {
+          "durationSeconds": 1.8,
+          "result": "Passed"
+        },
+        "GatewayListenerUnsupportedProtocol": {
+          "durationSeconds": 1.53,
+          "result": "Passed"
+        },
+        "GatewayModifyListeners": {
+          "durationSeconds": 52.78,
+          "result": "Passed"
+        },
+        "GatewayNameMaximumLength": {
+          "durationSeconds": 1.92,
+          "result": "Passed"
+        },
+        "GatewayObservedGenerationBump": {
+          "durationSeconds": 9.56,
+          "result": "Passed"
+        },
+        "GatewayPreserveForeignConditions": {
+          "durationSeconds": 6.9,
+          "result": "Passed"
+        },
+        "GatewaySecretInvalidReferenceGrant": {
+          "durationSeconds": 6.79,
+          "result": "Passed"
+        },
+        "GatewaySecretMissingReferenceGrant": {
+          "durationSeconds": 5.66,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantAllInNamespace": {
+          "durationSeconds": 7.57,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantSpecific": {
+          "durationSeconds": 9.03,
+          "result": "Passed"
+        },
+        "TCPRouteInvalidBackendRefNonexistent": {
+          "durationSeconds": 5.96,
+          "result": "Passed"
+        },
+        "TCPRouteInvalidCrossNamespaceBackendRef": {
+          "durationSeconds": 4.53,
+          "result": "Passed"
+        },
+        "TCPRouteInvalidNonTCPListener": {
+          "durationSeconds": 4.97,
+          "result": "Passed"
+        },
+        "TCPRouteMultipleRoutesAttachment": {
+          "durationSeconds": 12.31,
+          "result": "Passed"
+        },
+        "TCPRouteParentRefAttachAll": {
+          "durationSeconds": 20.62,
+          "result": "Passed"
+        },
+        "TCPRouteParentRefPortAndSectionName": {
+          "durationSeconds": 28.38,
+          "result": "Passed"
+        },
+        "TCPRouteReferenceGrant": {
+          "durationSeconds": 10.09,
+          "result": "Passed"
+        },
+        "TCPRouteWeightedRouting": {
+          "durationSeconds": 10.58,
+          "result": "Passed"
+        }
+      },
+      "clusterDeleteObserved": true,
+      "echoBackendPods": {
+        "imageDigests": [
+          "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+        ],
+        "ready": 2,
+        "total": 2
+      },
+      "fixtureError": null,
+      "frontendSecretEnrollment": {
+        "barbicanPKCS12ReadbackVerified": true,
+        "exactUIDAndResourceVersionVerified": true,
+        "materialGeneratedByUnmodifiedUpstreamCLI": true,
+        "secrets": [
+          "gateway-conformance-infra/tls-validity-checks-certificate",
+          "gateway-conformance-web-backend/certificate"
+        ]
+      },
+      "gatewayClassSupportedFeatures": [
+        "GatewayAddressRoutability"
+      ],
+      "managerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--octavia-https-listener-isolation",
+        "--octavia-http-header-exact",
+        "--octavia-http-request-redirect",
+        "--octavia-request-header-modifier",
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-weighted-http-targets",
+        "--octavia-l7policy-initial-rules",
+        "--octavia-l7policy-batch-activation",
+        "--octavia-microversion=2.8",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "nativeHAProxyReloads": 66,
+      "nativeReloadLogSHA256": "76c01d0c5fb6a67298b2b17b0e70410ad5266ddd8da5365202ce2103f00303a2",
+      "reportSHA256": "d16078f1c4bdff98e7a8bfe0b919136ce866803e89eb55bbf66061962d1bb936",
+      "runnerExit": 0,
+      "runningManagerSHA256": "a0dd97f7b47818887591dfbdf1c414052b0b9e2aefb3a846628b7d33b45a713d",
+      "tcpGraphs": {
+        "activations": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": 15,
+          "gateway-conformance-infra/tcp-gateway-invalid-backend": 1,
+          "gateway-conformance-infra/tcp-invalid-cross-namespace-backend-ref-gateway": 1,
+          "gateway-conformance-infra/tcp-multi-listener-gateway": 11,
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": 3,
+          "gateway-conformance-infra/tcp-reference-grant-gateway": 3,
+          "gateway-conformance-infra/tcp-weighted-gateway": 3
+        },
+        "boundEndpointExamples": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": {
+            "9310": {
+              "configSHA256": "9de10a7536fb181729b03bcee350eb1e5f8782b0e79b63e8e6bc392c0465d530",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            },
+            "9311": {
+              "configSHA256": "90556cf3d36192621091933bcab34d83aac40e3bf61bb0f969955d32465a36bb",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            },
+            "9312": {
+              "configSHA256": "4270a84f6fe88d73496c983454cfe7f3ec05afa8ea4466bce62be875e5352de6",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            },
+            "9313": {
+              "configSHA256": "d83ad2bc4be67d7f21761e065bf555a821d6d2135474c6969ab485d031c2b39e",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-listener-gateway": {
+            "9300": {
+              "configSHA256": "50d2af87896bfb0af7158fbb31c2e83eef4f4126e1a1f68fd3da481bac7e25c6",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-by-port"
+            },
+            "9301": {
+              "configSHA256": "78956c95065311b708ce3f4fdac179347512c281d734225873d711d55d8820fb",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-by-section"
+            },
+            "9302": {
+              "configSHA256": "4776f69e13d2131d2397472ce198be7dda8ed28cd539f4247966cd67a8c049a8",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-by-section-and-port"
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": {
+            "9310": {
+              "configSHA256": "6f20d54e13b6ea7d6638ecea9e7515e9fff65da0ade95e6c161388fa12b38cc2",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcproute-attach-older"
+            }
+          },
+          "gateway-conformance-infra/tcp-reference-grant-gateway": {
+            "9320": {
+              "configSHA256": "ddfa12beddaa075f3006f75b3d86b25ac73ee3247cb8cefa678edc1dbb38b294",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-reference-grant"
+            }
+          },
+          "gateway-conformance-infra/tcp-weighted-gateway": {
+            "9300": {
+              "configSHA256": "c74aa9d0892bba24f4322192474edc25e96fd99922eea7e9579cda75234fcabe",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                3,
+                7
+              ],
+              "route": "tcp-weighted-route"
+            }
+          }
+        },
+        "detachedListenersWithPoolsStillPresent": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": {
+            "9310": {
+              "at": "2026-11-25T18:25:03.847+00:00",
+              "configSHA256": "90556cf3d36192621091933bcab34d83aac40e3bf61bb0f969955d32465a36bb",
+              "retainedPoolMemberCount": 1
+            },
+            "9311": {
+              "at": "2026-11-25T18:25:04.275+00:00",
+              "configSHA256": "4270a84f6fe88d73496c983454cfe7f3ec05afa8ea4466bce62be875e5352de6",
+              "retainedPoolMemberCount": 1
+            },
+            "9312": {
+              "at": "2026-11-25T18:25:04.618+00:00",
+              "configSHA256": "d83ad2bc4be67d7f21761e065bf555a821d6d2135474c6969ab485d031c2b39e",
+              "retainedPoolMemberCount": 1
+            },
+            "9313": {
+              "at": "2026-11-25T18:25:05.616+00:00",
+              "configSHA256": "a5618eb0be61453a1c646fbeacaca694e853d21a7bdedddc7665782a28eaac9a",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-listener-gateway": {
+            "9300": {
+              "at": "2026-11-25T18:25:35.646+00:00",
+              "configSHA256": "f7cf1b32bb5d2f1b1bd719e70a0f6977aeb0186da144c2043e0cedc6cac196a5",
+              "retainedPoolMemberCount": 1
+            },
+            "9301": {
+              "at": "2026-11-25T18:25:32.891+00:00",
+              "configSHA256": "50d2af87896bfb0af7158fbb31c2e83eef4f4126e1a1f68fd3da481bac7e25c6",
+              "retainedPoolMemberCount": 1
+            },
+            "9302": {
+              "at": "2026-11-25T18:25:29.486+00:00",
+              "configSHA256": "78956c95065311b708ce3f4fdac179347512c281d734225873d711d55d8820fb",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": {
+            "9310": {
+              "at": "2026-11-25T18:24:49.237+00:00",
+              "configSHA256": "152eb3093e0a682e2227402608802f5116301efe520f0bb42b294fb8ffb2af61",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-reference-grant-gateway": {
+            "9320": {
+              "at": "2026-11-25T18:25:47.985+00:00",
+              "configSHA256": "5cb432808006ceee2d5f5ec3ad7491a23dfb5c56b84e35852044f54446baf38e",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-weighted-gateway": {
+            "9300": {
+              "at": "2026-11-25T18:25:57.182+00:00",
+              "configSHA256": "6f57ebe8590fb21a28e0131c54fe5b1707326a1fb03b1ee6159f2b6de79ecab4",
+              "retainedPoolMemberCount": 2
+            }
+          }
+        },
+        "listenerPorts": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": [
+            9310,
+            9311,
+            9312,
+            9313
+          ],
+          "gateway-conformance-infra/tcp-gateway-invalid-backend": [
+            9300
+          ],
+          "gateway-conformance-infra/tcp-invalid-cross-namespace-backend-ref-gateway": [
+            9321
+          ],
+          "gateway-conformance-infra/tcp-multi-listener-gateway": [
+            9300,
+            9301,
+            9302
+          ],
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": [
+            9310
+          ],
+          "gateway-conformance-infra/tcp-reference-grant-gateway": [
+            9320
+          ],
+          "gateway-conformance-infra/tcp-weighted-gateway": [
+            9300
+          ]
+        }
+      },
+      "tcpRouteLiveDiscovery": {
+        "bundleVersion": "v1.7.0",
+        "channel": "experimental",
+        "servedVersions": [
+          "v1",
+          "v1alpha2"
+        ]
+      },
+      "tcpUpstreamLogObservations": {
+        "connectedMessages": {
+          "TCPRouteMultipleRoutesAttachment": 7,
+          "TCPRouteParentRefAttachAll": 43,
+          "TCPRouteParentRefPortAndSectionName": 82,
+          "TCPRouteReferenceGrant": 13
+        },
+        "validatedEchoMessages": {
+          "TCPRouteMultipleRoutesAttachment": 1,
+          "TCPRouteParentRefAttachAll": 4,
+          "TCPRouteParentRefPortAndSectionName": 3,
+          "TCPRouteReferenceGrant": 1
+        }
+      },
+      "upstreamLogSHA256": "0bdfc4ab39fef762b279b88314df7f849e4ededd65e78f318d8efa1741e18c81",
+      "upstreamRun": {
+        "cases": {
+          "GatewayClassObservedGenerationBump": "PASS",
+          "GatewayInvalidRouteKind": "PASS",
+          "GatewayInvalidTLSConfiguration": "PASS",
+          "GatewayListenerUnsupportedProtocol": "PASS",
+          "GatewayModifyListeners": "PASS",
+          "GatewayNameMaximumLength": "PASS",
+          "GatewayObservedGenerationBump": "PASS",
+          "GatewayPreserveForeignConditions": "PASS",
+          "GatewaySecretInvalidReferenceGrant": "PASS",
+          "GatewaySecretMissingReferenceGrant": "PASS",
+          "GatewaySecretReferenceGrantAllInNamespace": "PASS",
+          "GatewaySecretReferenceGrantSpecific": "PASS",
+          "TCPRouteInvalidBackendRefNonexistent": "PASS",
+          "TCPRouteInvalidCrossNamespaceBackendRef": "PASS",
+          "TCPRouteInvalidNonTCPListener": "PASS",
+          "TCPRouteMultipleRoutesAttachment": "PASS",
+          "TCPRouteParentRefAttachAll": "PASS",
+          "TCPRouteParentRefPortAndSectionName": "PASS",
+          "TCPRouteReferenceGrant": "PASS",
+          "TCPRouteWeightedRouting": "PASS"
+        },
+        "counts": {
+          "PASS": 20
+        },
+        "durationSeconds": 190.42,
+        "exit": 0,
+        "globalDeadlineDisabled": true,
+        "setupFailed": false,
+        "upstreamCoreReport": {
+          "result": "success",
+          "statistics": {
+            "Failed": 0,
+            "Passed": 20,
+            "Skipped": 0
+          }
+        },
+        "upstreamReportProduced": true
+      },
+      "vmCasesExit": 0
+    },
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "cases": {
+        "GatewayClassObservedGenerationBump": {
+          "durationSeconds": 0.24,
+          "result": "Passed"
+        },
+        "GatewayInvalidRouteKind": {
+          "durationSeconds": 0.55,
+          "result": "Passed"
+        },
+        "GatewayInvalidTLSConfiguration": {
+          "durationSeconds": 1.8,
+          "result": "Passed"
+        },
+        "GatewayListenerUnsupportedProtocol": {
+          "durationSeconds": 2.15,
+          "result": "Passed"
+        },
+        "GatewayModifyListeners": {
+          "durationSeconds": 54.8,
+          "result": "Passed"
+        },
+        "GatewayNameMaximumLength": {
+          "durationSeconds": 2.22,
+          "result": "Passed"
+        },
+        "GatewayObservedGenerationBump": {
+          "durationSeconds": 10.18,
+          "result": "Passed"
+        },
+        "GatewayPreserveForeignConditions": {
+          "durationSeconds": 6.98,
+          "result": "Passed"
+        },
+        "GatewaySecretInvalidReferenceGrant": {
+          "durationSeconds": 7.86,
+          "result": "Passed"
+        },
+        "GatewaySecretMissingReferenceGrant": {
+          "durationSeconds": 6.36,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantAllInNamespace": {
+          "durationSeconds": 10.45,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantSpecific": {
+          "durationSeconds": 8.18,
+          "result": "Passed"
+        },
+        "TCPRouteInvalidBackendRefNonexistent": {
+          "durationSeconds": 6.25,
+          "result": "Passed"
+        },
+        "TCPRouteInvalidCrossNamespaceBackendRef": {
+          "durationSeconds": 5.5,
+          "result": "Passed"
+        },
+        "TCPRouteInvalidNonTCPListener": {
+          "durationSeconds": 5.05,
+          "result": "Passed"
+        },
+        "TCPRouteMultipleRoutesAttachment": {
+          "durationSeconds": 9.42,
+          "result": "Passed"
+        },
+        "TCPRouteParentRefAttachAll": {
+          "durationSeconds": 20.08,
+          "result": "Passed"
+        },
+        "TCPRouteParentRefPortAndSectionName": {
+          "durationSeconds": 27.92,
+          "result": "Passed"
+        },
+        "TCPRouteReferenceGrant": {
+          "durationSeconds": 11.69,
+          "result": "Passed"
+        },
+        "TCPRouteWeightedRouting": {
+          "durationSeconds": 10.79,
+          "result": "Passed"
+        }
+      },
+      "clusterDeleteObserved": true,
+      "echoBackendPods": {
+        "imageDigests": [
+          "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+        ],
+        "ready": 2,
+        "total": 2
+      },
+      "fixtureError": null,
+      "frontendSecretEnrollment": {
+        "barbicanPKCS12ReadbackVerified": true,
+        "exactUIDAndResourceVersionVerified": true,
+        "materialGeneratedByUnmodifiedUpstreamCLI": true,
+        "secrets": [
+          "gateway-conformance-infra/tls-validity-checks-certificate",
+          "gateway-conformance-web-backend/certificate"
+        ]
+      },
+      "gatewayClassSupportedFeatures": [],
+      "managerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=standard",
+        "--octavia-https-listener-isolation",
+        "--octavia-http-header-exact",
+        "--octavia-http-request-redirect",
+        "--octavia-request-header-modifier",
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-weighted-http-targets",
+        "--octavia-l7policy-initial-rules",
+        "--octavia-l7policy-batch-activation",
+        "--octavia-microversion=2.8",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "nativeHAProxyReloads": 66,
+      "nativeReloadLogSHA256": "471893057d98581774b87da43d81521847d81b336e6a2d267e4a2b6c9ae1e85b",
+      "reportSHA256": "6a5d72f9d76dacc33a6c86b6e215f1ab24f62fe042f489dbf753a4b7169661e4",
+      "runnerExit": 0,
+      "runningManagerSHA256": "a0dd97f7b47818887591dfbdf1c414052b0b9e2aefb3a846628b7d33b45a713d",
+      "tcpGraphs": {
+        "activations": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": 15,
+          "gateway-conformance-infra/tcp-gateway-invalid-backend": 1,
+          "gateway-conformance-infra/tcp-invalid-cross-namespace-backend-ref-gateway": 1,
+          "gateway-conformance-infra/tcp-multi-listener-gateway": 11,
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": 3,
+          "gateway-conformance-infra/tcp-reference-grant-gateway": 3,
+          "gateway-conformance-infra/tcp-weighted-gateway": 3
+        },
+        "boundEndpointExamples": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": {
+            "9310": {
+              "configSHA256": "ca09032db5f0eebf48df9cdcfdfafef151a0344105a2e1e4be5fadb578575121",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            },
+            "9311": {
+              "configSHA256": "032517a0120ca2f64e42a5a538733cd41048fb8b3c8e7a915fa0e012efd712da",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            },
+            "9312": {
+              "configSHA256": "2fc9c8e6968b056d0fc85b99d17eb900494cf8b96eb34074067fc51abbb19d72",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            },
+            "9313": {
+              "configSHA256": "6201e43d134b5fdc52077a9895a65de4c9e7fc33801a828f89e0dee90ffed87c",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-attach-all"
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-listener-gateway": {
+            "9300": {
+              "configSHA256": "6ff1e4bc854ac3f2d2d26c1b53a5973a1a3c8bd9f891cc0d4363e128f6d55ad4",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-by-port"
+            },
+            "9301": {
+              "configSHA256": "cee84266ab00010640efbd52acc20534605e616572cb587d86eb88b58144bdc7",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-by-section"
+            },
+            "9302": {
+              "configSHA256": "e5e9c6ca7eafb0eafca14255a1300a5584f54017aa3bfc5674220bd467c02cee",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-route-by-section-and-port"
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": {
+            "9310": {
+              "configSHA256": "6ed5214857895df3f555cecfa4ab7d1052b6bc3997a51f53420a752b42016a9e",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcproute-attach-older"
+            }
+          },
+          "gateway-conformance-infra/tcp-reference-grant-gateway": {
+            "9320": {
+              "configSHA256": "d1486cdbdb746ed4ccc48c45c7c02d24799403bc39a2d797a7cd42c15e1339c6",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                1
+              ],
+              "route": "tcp-reference-grant"
+            }
+          },
+          "gateway-conformance-infra/tcp-weighted-gateway": {
+            "9300": {
+              "configSHA256": "5f95b14a21f8e74661800e9ef17eb4af45f567c9802f5a5248332a04b78e6cb7",
+              "endpointPorts": [
+                3000
+              ],
+              "memberWeights": [
+                3,
+                7
+              ],
+              "route": "tcp-weighted-route"
+            }
+          }
+        },
+        "detachedListenersWithPoolsStillPresent": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": {
+            "9310": {
+              "at": "2026-11-25T18:19:08.636+00:00",
+              "configSHA256": "032517a0120ca2f64e42a5a538733cd41048fb8b3c8e7a915fa0e012efd712da",
+              "retainedPoolMemberCount": 1
+            },
+            "9311": {
+              "at": "2026-11-25T18:19:09.038+00:00",
+              "configSHA256": "2fc9c8e6968b056d0fc85b99d17eb900494cf8b96eb34074067fc51abbb19d72",
+              "retainedPoolMemberCount": 1
+            },
+            "9312": {
+              "at": "2026-11-25T18:19:09.372+00:00",
+              "configSHA256": "6201e43d134b5fdc52077a9895a65de4c9e7fc33801a828f89e0dee90ffed87c",
+              "retainedPoolMemberCount": 1
+            },
+            "9313": {
+              "at": "2026-11-25T18:19:09.702+00:00",
+              "configSHA256": "1f408ba34a19e6702dcdb42d2face3cb0d47776f195af45d2acb9a18982e0a27",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-listener-gateway": {
+            "9300": {
+              "at": "2026-11-25T18:19:35.606+00:00",
+              "configSHA256": "03b3585d8f154ced86f513315e7b5127506d54c124be8613d104bcefe91389de",
+              "retainedPoolMemberCount": 1
+            },
+            "9301": {
+              "at": "2026-11-25T18:19:32.984+00:00",
+              "configSHA256": "6ff1e4bc854ac3f2d2d26c1b53a5973a1a3c8bd9f891cc0d4363e128f6d55ad4",
+              "retainedPoolMemberCount": 1
+            },
+            "9302": {
+              "at": "2026-11-25T18:19:29.599+00:00",
+              "configSHA256": "cee84266ab00010640efbd52acc20534605e616572cb587d86eb88b58144bdc7",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": {
+            "9310": {
+              "at": "2026-11-25T18:18:53.835+00:00",
+              "configSHA256": "134bc4353c3d72104eab443bb34997a44d5cf4d5231e5da03b3a4a41d87ca4dc",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-reference-grant-gateway": {
+            "9320": {
+              "at": "2026-11-25T18:19:52.449+00:00",
+              "configSHA256": "0a24f05f19d2299063ffb0f979135c4e450290747c97eb09b091dbad49dba3ea",
+              "retainedPoolMemberCount": 1
+            }
+          },
+          "gateway-conformance-infra/tcp-weighted-gateway": {
+            "9300": {
+              "at": "2026-11-25T18:20:03.030+00:00",
+              "configSHA256": "22195c1b5ac361b3ef8088f5ddf0eb68570b89ff1bec0ceae2b9b1d8e8c17e64",
+              "retainedPoolMemberCount": 2
+            }
+          }
+        },
+        "listenerPorts": {
+          "gateway-conformance-infra/tcp-attach-all-gateway": [
+            9310,
+            9311,
+            9312,
+            9313
+          ],
+          "gateway-conformance-infra/tcp-gateway-invalid-backend": [
+            9300
+          ],
+          "gateway-conformance-infra/tcp-invalid-cross-namespace-backend-ref-gateway": [
+            9321
+          ],
+          "gateway-conformance-infra/tcp-multi-listener-gateway": [
+            9300,
+            9301,
+            9302
+          ],
+          "gateway-conformance-infra/tcp-multi-route-attach-gateway": [
+            9310
+          ],
+          "gateway-conformance-infra/tcp-reference-grant-gateway": [
+            9320
+          ],
+          "gateway-conformance-infra/tcp-weighted-gateway": [
+            9300
+          ]
+        }
+      },
+      "tcpRouteLiveDiscovery": {
+        "bundleVersion": "v1.7.0",
+        "channel": "standard",
+        "servedVersions": [
+          "v1"
+        ]
+      },
+      "tcpUpstreamLogObservations": {
+        "connectedMessages": {
+          "TCPRouteMultipleRoutesAttachment": 1,
+          "TCPRouteParentRefAttachAll": 34,
+          "TCPRouteParentRefPortAndSectionName": 55,
+          "TCPRouteReferenceGrant": 22
+        },
+        "validatedEchoMessages": {
+          "TCPRouteMultipleRoutesAttachment": 1,
+          "TCPRouteParentRefAttachAll": 4,
+          "TCPRouteParentRefPortAndSectionName": 3,
+          "TCPRouteReferenceGrant": 1
+        }
+      },
+      "upstreamLogSHA256": "e496a72e4603ead09b4fd2da2fe23da159ecaa473fbffc1605ebb68ad39f4855",
+      "upstreamRun": {
+        "cases": {
+          "GatewayClassObservedGenerationBump": "PASS",
+          "GatewayInvalidRouteKind": "PASS",
+          "GatewayInvalidTLSConfiguration": "PASS",
+          "GatewayListenerUnsupportedProtocol": "PASS",
+          "GatewayModifyListeners": "PASS",
+          "GatewayNameMaximumLength": "PASS",
+          "GatewayObservedGenerationBump": "PASS",
+          "GatewayPreserveForeignConditions": "PASS",
+          "GatewaySecretInvalidReferenceGrant": "PASS",
+          "GatewaySecretMissingReferenceGrant": "PASS",
+          "GatewaySecretReferenceGrantAllInNamespace": "PASS",
+          "GatewaySecretReferenceGrantSpecific": "PASS",
+          "TCPRouteInvalidBackendRefNonexistent": "PASS",
+          "TCPRouteInvalidCrossNamespaceBackendRef": "PASS",
+          "TCPRouteInvalidNonTCPListener": "PASS",
+          "TCPRouteMultipleRoutesAttachment": "PASS",
+          "TCPRouteParentRefAttachAll": "PASS",
+          "TCPRouteParentRefPortAndSectionName": "PASS",
+          "TCPRouteReferenceGrant": "PASS",
+          "TCPRouteWeightedRouting": "PASS"
+        },
+        "counts": {
+          "PASS": 20
+        },
+        "durationSeconds": 197.29,
+        "exit": 0,
+        "globalDeadlineDisabled": true,
+        "setupFailed": false,
+        "upstreamCoreReport": {
+          "result": "success",
+          "statistics": {
+            "Failed": 0,
+            "Passed": 20,
+            "Skipped": 0
+          }
+        },
+        "upstreamReportProduced": true
+      },
+      "vmCasesExit": 0
+    }
+  },
+  "completePair": true,
+  "guestPoweroffObserved": true,
+  "path": "Private loopback VIP to native HAProxy to a routed TCP member (kind Pod IP) over the TUN/SSH L3 bridge",
+  "providers": {
+    "octavia": {
+      "source": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+      "tree": "11dcf653dc0e7d4642256ac90618d8bc99670ffa",
+      "wheelSHA256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb"
+    },
+    "octaviaLib": {
+      "source": "eb4c646b59758334629feb99d517f938c8af3712",
+      "tree": "d82d52461368d70ceb4436388d7403081702234a",
+      "wheelSHA256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d"
+    }
+  },
+  "registryImage": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ece9bf11d672ffe1af201d394ddd24a47debc5ff3bc4d0eb04fc461a53b0e11e",
+  "sameInputs": {
+    "HAProxy": {
+      "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+      "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1"
+    },
+    "adapter": {
+      "amphoraCPUsPerLoadBalancer": 2,
+      "caseTimeoutOverrides": {},
+      "l7Batch": "installed Octavia ApplyL7PolicyActivation task dispatched from captured local API RPC; installed Amphora driver and real HAProxy",
+      "nativeFixtureSHA256": "b218ecc66f8ba509a8de16389f68a7ee79e32fc4a6fca2f389630de3cca840d5",
+      "pendingStatusProjection": "one transaction updates pending rows of the owning LB",
+      "publication": "render and validate real HAProxy; check new PID socket; drain old workers separately"
+    },
+    "controllerRevision": "9388be4580dd0fac002e160c3433d65cf1665a86",
+    "discoveredL7ManagerFlags": [
+      "--octavia-l7policy-initial-rules",
+      "--octavia-l7policy-batch-activation"
+    ],
+    "echoArchiveV01SHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+    "echoArchiveV02SHA256": "60951109f49e2cffe3a41de08d09be7e6d454cfb09268625447de002b16a069d",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+    "kindWireSHA256": "374ac0972ae97aa671839a4f0cdd7efc9080d9d70ce001decc7c3417adaee37f",
+    "octavia": {
+      "filesVerified": 672,
+      "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+      "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+      "version": "19.0.1.dev93"
+    },
+    "octaviaAdvertisedCapabilities": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1",
+      "request_header_operations_v1",
+      "http_request_redirect_v1",
+      "l7policy_initial_rules_v1",
+      "l7policy_batch_activation_v1",
+      "http_header_exact_v1",
+      "backend_h2c_v1",
+      "backend_tls_hostname_v1",
+      "https_listener_isolation_v1"
+    ],
+    "octaviaLib": {
+      "filesVerified": 24,
+      "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+      "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+      "version": "3.12.1.dev21"
+    },
+    "unmodifiedUpstreamConformanceExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+    "upstreamBaseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "upstreamSelection": {
+      "eligibleCases": [
+        "GatewayClassObservedGenerationBump",
+        "GatewayInvalidRouteKind",
+        "GatewayInvalidTLSConfiguration",
+        "GatewayListenerUnsupportedProtocol",
+        "GatewayModifyListeners",
+        "GatewayNameMaximumLength",
+        "GatewayObservedGenerationBump",
+        "GatewayPreserveForeignConditions",
+        "GatewaySecretInvalidReferenceGrant",
+        "GatewaySecretMissingReferenceGrant",
+        "GatewaySecretReferenceGrantAllInNamespace",
+        "GatewaySecretReferenceGrantSpecific",
+        "TCPRouteInvalidBackendRefNonexistent",
+        "TCPRouteInvalidCrossNamespaceBackendRef",
+        "TCPRouteInvalidNonTCPListener",
+        "TCPRouteMultipleRoutesAttachment",
+        "TCPRouteParentRefAttachAll",
+        "TCPRouteParentRefPortAndSectionName",
+        "TCPRouteReferenceGrant",
+        "TCPRouteWeightedRouting"
+      ],
+      "globalGoTestTimeoutDisabled": true,
+      "profile": "GATEWAY-TCP",
+      "skippedTestsArgument": null,
+      "supportedFeatures": [
+        "Gateway",
+        "ReferenceGrant",
+        "TCPRoute"
+      ]
+    }
+  },
+  "scope": "Private Octavia WSGI/SQLite and Barbican APIs, installed Amphora renderer, HAProxy and disposable kind Pod endpoints"
+}

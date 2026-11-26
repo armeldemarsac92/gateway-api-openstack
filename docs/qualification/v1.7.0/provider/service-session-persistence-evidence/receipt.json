@@ -1,0 +1,248 @@
+{
+  "feature": "XBackendTrafficPolicy.sessionPersistence targeting a Service",
+  "controller": {
+    "sourceRevision": "30f8464d41ade415dd94d594ad71b858932df2fd",
+    "sourceTree": "01906c6d6047715ac03dc2e92c765ed083977eed",
+    "manifestDigest": "sha256:2a9230c9fd530a416b4bff2e1ef16ef71344d5613f74a2982a4c78a22791834e",
+    "configDigest": "sha256:bbfb450f2db2d9c0d4f1270d7cf2742a68d5bc0ac65345dfe7365920d5906774",
+    "managerSHA256": "78e9489b43579e131176c32cd785c4e88b4a33275c20b282e39e6838833c47ee",
+    "ociArchiveSHA256": "f71833b11a0d9fa938f28128028aa365a346207976a7ffecee23ae5963c25419"
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "optIn": {
+    "controllerFlag": "--octavia-xbackend-session-persistence",
+    "regionalAmphoraCapability": "http_header_persistence_v1"
+  },
+  "octavia": {
+    "sourceRevision": "7a105668b87e4e1c9be8915ec3929cb827c1f949",
+    "sourceTree": "846dcd8a0237ef64e59662d53bab7d96b4c04267",
+    "wheelSHA256": "c3ba4ab584decfd78b9a6fb6f75f4368be72c72ece144174ebdb91ef800da59a",
+    "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-otlp-span-attributes-7a105668b87e"
+  },
+  "octaviaLib": {
+    "sourceRevision": "eb4c646b59758334629feb99d517f938c8af3712",
+    "sourceTree": "d82d52461368d70ceb4436388d7403081702234a",
+    "wheelSHA256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+    "release": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-header-persistence-eb4c646b5975"
+  },
+  "HAProxy": {
+    "sha256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1",
+    "amphoraHeaderCapabilityProbe": true
+  },
+  "channels": {
+    "standard": {
+      "fixtureBackendSHA256": "c5651573692bddd611e4a3805b864c0181e4a0278533c731d3f3a89c7a67c25f",
+      "fixtureBackendSourceSHA256": "b2c58483036dfa7eb03914fc47563c6842010d064ab7851c45ae8a3b220118ab",
+      "scenarioSHA256": "26ee0721800fea48242999aedd6809a4e113365d80b3ad82fcdfdd58c188265e",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kindNodeImageDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "policyCRD": {
+        "installed": false,
+        "discovered": false
+      },
+      "regionalHeaderCapabilityEnabled": false,
+      "managerUsesManifestServiceAccount": true,
+      "installedWheels": {
+        "octavia": {
+          "version": "19.0.1.dev84",
+          "filesVerified": 669
+        },
+        "octaviaLib": {
+          "version": "3.12.1.dev21",
+          "filesVerified": 24
+        }
+      },
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "ordinaryRoute": {
+        "http200Responses": 2,
+        "responsesWithSessionHeader": 0,
+        "routeStatus": {
+          "observedGeneration": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          }
+        }
+      }
+    },
+    "experimental": {
+      "fixtureBackendSHA256": "a9f2e0b478f68d2a407443e132c67aa22b4c2e6fe026efdc4fbe7d6c86f671c4",
+      "fixtureBackendSourceSHA256": "b2c58483036dfa7eb03914fc47563c6842010d064ab7851c45ae8a3b220118ab",
+      "scenarioSHA256": "38eb885dce7899718917d1f7e2b15418819ebebfc9af06b7a5400736417d69b5",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kindNodeImageDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "policyCRD": {
+        "installed": true,
+        "discovered": true
+      },
+      "regionalHeaderCapabilityEnabled": true,
+      "managerUsesManifestServiceAccount": true,
+      "installedWheels": {
+        "octavia": {
+          "version": "19.0.1.dev84",
+          "filesVerified": 669
+        },
+        "octaviaLib": {
+          "version": "3.12.1.dev21",
+          "filesVerified": 24
+        }
+      },
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed",
+        "AddressesAssigned": "True/AddressesAssigned"
+      },
+      "ordinaryRoute": {
+        "http200Responses": 2,
+        "responsesWithSessionHeader": 0,
+        "routeStatus": {
+          "observedGeneration": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          }
+        }
+      },
+      "readyPodEndpointSliceTargets": 2,
+      "sameServicePoolAcrossPhases": true,
+      "witnessUsesSeparateStablePoolOnSameListener": true,
+      "servicePhases": {
+        "beforePolicy": {
+          "http200Responses": 4,
+          "responsesWithSessionHeader": 0,
+          "podRequests": {
+            "affinitySelectedPod": 2,
+            "otherPod": 2
+          },
+          "routeStatus": {
+            "observedGeneration": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "poolProvisioningStatus": "ACTIVE",
+          "backendHTTPVersion": "HTTP/1.1",
+          "persistenceType": null,
+          "activeHAProxyHeaderResponse": false,
+          "activeHAProxyServerSelectors": 0,
+          "witness": {
+            "http200Responses": 2,
+            "responsesWithSessionHeader": 0,
+            "routeStatus": {
+              "observedGeneration": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          }
+        },
+        "headerAffinity": {
+          "http200Responses": 4,
+          "responsesWithSessionHeader": 4,
+          "podRequests": {
+            "affinitySelectedPod": 4,
+            "otherPod": 0
+          },
+          "routeStatus": {
+            "observedGeneration": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+            }
+          },
+          "poolProvisioningStatus": "ACTIVE",
+          "backendHTTPVersion": "HTTP/1.1",
+          "persistenceType": "HTTP_HEADER",
+          "activeHAProxyHeaderResponse": true,
+          "activeHAProxyServerSelectors": 2,
+          "witness": {
+            "http200Responses": 2,
+            "responsesWithSessionHeader": 0,
+            "routeStatus": {
+              "observedGeneration": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "policyStatus": {
+            "observedGeneration": 1,
+            "conditions": {
+              "Accepted": "True/Accepted"
+            }
+          },
+          "workerConfirmedActiveConfiguration": true,
+          "initialHeaderIssues": 1,
+          "sameHeaderReplays": 3
+        },
+        "afterPolicyDeletion": {
+          "http200Responses": 4,
+          "responsesWithSessionHeader": 0,
+          "podRequests": {
+            "affinitySelectedPod": 2,
+            "otherPod": 2
+          },
+          "routeStatus": {
+            "observedGeneration": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "poolProvisioningStatus": "ACTIVE",
+          "backendHTTPVersion": "HTTP/1.1",
+          "persistenceType": null,
+          "activeHAProxyHeaderResponse": false,
+          "activeHAProxyServerSelectors": 0,
+          "witness": {
+            "http200Responses": 2,
+            "responsesWithSessionHeader": 0,
+            "routeStatus": {
+              "observedGeneration": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "policyDeleted": true,
+          "requestsWithFormerHeader": 2,
+          "bothPodsReachedWithFormerHeader": true
+        }
+      }
+    }
+  },
+  "scope": {
+    "exercised": [
+      "Local kind and real Pods with HTTP/1.1 origins",
+      "Endpoint mode HTTPRoute to a core Service",
+      "Octavia REST, database and TaskFlow",
+      "HAProxy data plane and worker-confirmed configuration publication"
+    ],
+    "fixtures": [
+      "Keystone, Neutron and Amphora provisioning and agent transport",
+      "Namespace tunnel between HAProxy and Pod network"
+    ],
+    "unverified": [
+      "Deployed Hibiscus region or packaged Amphora VM",
+      "GRPCRoute and Cookie traffic for this Service policy",
+      "Full Gateway API conformance"
+    ]
+  }
+}

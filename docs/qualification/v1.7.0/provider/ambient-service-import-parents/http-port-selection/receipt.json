@@ -1,0 +1,66 @@
+{
+  "gatewayAPI": "v1.7.0",
+  "image": {
+    "sourceRevision": "83c1506b09b1eafc259180e5e9c2d94acd34900c",
+    "manifestDigest": "sha256:3e3a699c82f7e8b9ab6d597289885767bc3ccce9a3df4f0d5f79d651e33782c8",
+    "managerSHA256": "fb1289e5125bec2bb54558611d34131525da3a42a4fe89f3acf7aa22ed33199a",
+    "ociArchiveSHA256": "345a84b5e696c3112d0084ec5ab02fa762e82b024e40be38eb7f2afa7fe78473",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "correctedController": {
+    "kubernetesCheck": "TestServiceImportProjectionEnvtest",
+    "envtestLogSHA256": "ddf6a6ed1dd40eafee98d12619a39eb62f0ff17f0e604a56d4e4439e314aed07",
+    "testOverlaySHA256": "682b9b071552459b4ea3027c95cdbceffbc28c3f88c071bc7fc4afce820bf947",
+    "linter": "golangci-lint 2.15.0",
+    "linterLogSHA256": "a52c6d109e3c69d439d4327fd0df1ca51a3289554f08d18112a8c08272ece1ce",
+    "cases": [
+      {
+        "name": "web",
+        "appProtocol": "http",
+        "projection": "HTTP"
+      },
+      {
+        "name": "http-west",
+        "appProtocol": null,
+        "projection": "HTTP with one endpoint"
+      },
+      {
+        "name": "http-west",
+        "appProtocol": "kubernetes.io/h2c",
+        "projection": "removed"
+      }
+    ]
+  },
+  "waypointTraffic": {
+    "controller": {
+      "sourceRevision": "be7ec0bd26c5d4c1ebd9ccbda2ee6fe663f42455",
+      "manifestDigest": "sha256:30b8d641b7aa902aee7fd7e6e25396eca9eb3d655a593f116f6f346f913c29f5",
+      "managerSHA256": "d066bf7af7399a5aa560138fdf53e2bb53f3528694b5266c968fb6c6a9f3ec87"
+    },
+    "pilot": {
+      "sourcePackage": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+      "istioTree": "0a438180e12df1f42a81cab18364956addbc5e6e",
+      "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
+      "manifestDigest": "sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+      "archiveSHA256": "45aaf310b52740321d479c67ec204231da805a84a1fe214f6dce3637711b6bd5",
+      "build": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45743103190"
+    },
+    "gatewayChannels": [
+      "experimental",
+      "standard"
+    ],
+    "trials": {
+      "standard": {
+        "published": "85df0623610df4c8ed9bf75a8323048c855a59594eaabe8bfaed151d6b5ee3f0",
+        "candidate": "fb68b42a356e20789d740ed194c00306c2e4110b52986dbd2b058ec92e5fd356"
+      },
+      "experimental": {
+        "published": "100af2b3e542896bee0ba3648624603f2de6a3bbf1d9f04a1ab026dc122fc01b",
+        "candidate": "95434f816e2e32391215754c34a935c235a3f9328211eab5ee714a1545a3a1dc"
+      }
+    },
+    "recordURL": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-istio-82213f2b4cf5/campaign-k-82213f2b4cf5.json",
+    "recordSHA256": "18415010f2739f07d3041a53966048b9b34055e75242d7da0cbcd80329c32bfb"
+  },
+  "scope": "The port-selection checks ran against a local Kubernetes API and the corrected controller source. The four earlier kind traffic trials used the identified preceding controller revision and both Istio pilot versions."
+}

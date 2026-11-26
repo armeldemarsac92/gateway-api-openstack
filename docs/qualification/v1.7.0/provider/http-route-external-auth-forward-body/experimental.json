@@ -1,0 +1,299 @@
+{
+  "channel": "experimental",
+  "scope": "signed",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "kubernetesVersion": "v1.36.2",
+  "schema": {
+    "servesExternalAuth": true,
+    "sha256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d",
+    "servesForwardBody": true
+  },
+  "controller": {
+    "sourceRevision": "13a6870cb63abafa131527b7b1b67048d962cd57",
+    "managerSHA256": "503fb37ac7f738c3e1fe55853423472bff8966c67c0fd44ca6a203e9c7dcb3f1",
+    "manifestDigest": "sha256:3c4eb3b1be49b95133f447be47b107a56730d3046b1dd995895108bf5e5f713b",
+    "ociArchiveSHA256": "70ac3cde8b42981aac14c41edfea4ae75b092ae2e01e47a282310478bb98b24d"
+  },
+  "octavia": {
+    "revision": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543",
+    "version": "19.0.1.dev99",
+    "sha256": "33cc7ef8de6f0372e711ce4a7b1f23bf6a8b07a34c30808b7ff442e9b4c82f90",
+    "filesVerified": 673
+  },
+  "octaviaLib": {
+    "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+    "version": "3.12.1.dev22",
+    "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+    "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+    "nativeExternalAuth": true
+  },
+  "octaviaAPIVersion": "v2.30",
+  "passed": true,
+  "case": "HTTPRoute ExternalAuth.forwardBody",
+  "bodyCapabilities": {
+    "provider": true,
+    "httpRuntime": true,
+    "grpcRuntime": true
+  },
+  "runningAdapterSHA256": "4dd3095799f67fc6bdfb2e5b0bd11c2880d979b065ab2fa267536bb46eac51c7",
+  "runningEnvoyPeerSHA256": "8f9e050fe5601829da99f58a1221f3b3625801bbe06cfa1aa00d31f4e9f10449",
+  "phases": {
+    "configured": {
+      "kubernetes": {
+        "routeGeneration": 1,
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "gateway": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed",
+          "AddressesAssigned": "True/AddressesAssigned"
+        },
+        "listener": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "Conflicted": "False/NoConflicts",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 1
+      },
+      "policyReadback": {
+        "publicUnfiltered": true,
+        "protected": {
+          "HTTP": {
+            "forwardBodyMaxSize": 65536,
+            "linkedOrigin": true,
+            "linkedAuthorizer": true,
+            "collectionAndDetailAgree": true
+          },
+          "GRPC": {
+            "forwardBodyMaxSize": 65536,
+            "linkedOrigin": true,
+            "linkedAuthorizer": true,
+            "collectionAndDetailAgree": true
+          }
+        }
+      },
+      "render": {
+        "sha256": "818bde541dd05cd6b17ebe86bc4ae4755d326902209e918f8e7fb08a9aa0aefc",
+        "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "httpBodyLimits": [
+          "65536"
+        ],
+        "grpcBodyLimits": [
+          "65536"
+        ],
+        "grpcCollectors": [
+          "65536"
+        ],
+        "configuredLuaSHA256": "6846878663284ff6930a7e9810be3c3629e8f781c0fd99a864e52fcc86ef02bc"
+      },
+      "traffic": {
+        "publicOverLimit": {
+          "status": 200,
+          "clientBytes": 65537,
+          "clientSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+          "originEchoedExactBytes": true,
+          "calls": {
+            "origin": 1,
+            "HTTP": 0,
+            "GRPC": 0
+          },
+          "origin": [
+            {
+              "bodyBytes": 65537,
+              "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7"
+            }
+          ],
+          "httpAuthorizer": [],
+          "grpcAuthorizer": []
+        },
+        "HTTP": {
+          "atLimit": {
+            "status": 200,
+            "clientBytes": 65536,
+            "clientSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+            "originEchoedExactBytes": true,
+            "calls": {
+              "origin": 1,
+              "HTTP": 1,
+              "GRPC": 0
+            },
+            "origin": [
+              {
+                "bodyBytes": 65536,
+                "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2"
+              }
+            ],
+            "httpAuthorizer": [
+              {
+                "bodyBytes": 65536,
+                "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2"
+              }
+            ],
+            "grpcAuthorizer": []
+          },
+          "overLimit": {
+            "status": 413,
+            "clientBytes": 65537,
+            "clientSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+            "originEchoedExactBytes": false,
+            "calls": {
+              "origin": 0,
+              "HTTP": 0,
+              "GRPC": 0
+            },
+            "origin": [],
+            "httpAuthorizer": [],
+            "grpcAuthorizer": []
+          }
+        },
+        "GRPC": {
+          "atLimit": {
+            "status": 200,
+            "clientBytes": 65536,
+            "clientSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+            "originEchoedExactBytes": true,
+            "calls": {
+              "origin": 1,
+              "HTTP": 0,
+              "GRPC": 1
+            },
+            "origin": [
+              {
+                "bodyBytes": 65536,
+                "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2"
+              }
+            ],
+            "httpAuthorizer": [],
+            "grpcAuthorizer": [
+              {
+                "Size": 65536,
+                "RawBodyBytes": 65536,
+                "SHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                "HasTextBody": false
+              }
+            ]
+          },
+          "overLimit": {
+            "status": 413,
+            "clientBytes": 65537,
+            "clientSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+            "originEchoedExactBytes": false,
+            "calls": {
+              "origin": 0,
+              "HTTP": 0,
+              "GRPC": 0
+            },
+            "origin": [],
+            "httpAuthorizer": [],
+            "grpcAuthorizer": []
+          }
+        }
+      }
+    },
+    "zero": {
+      "kubernetes": {
+        "routeGeneration": 2,
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "gateway": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed",
+          "AddressesAssigned": "True/AddressesAssigned"
+        },
+        "listener": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "Conflicted": "False/NoConflicts",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 1
+      },
+      "policyReadback": {
+        "publicUnfiltered": true,
+        "protected": {
+          "HTTP": {
+            "forwardBodyMaxSize": null,
+            "linkedOrigin": true,
+            "linkedAuthorizer": true,
+            "collectionAndDetailAgree": true
+          },
+          "GRPC": {
+            "forwardBodyMaxSize": 65536,
+            "linkedOrigin": true,
+            "linkedAuthorizer": true,
+            "collectionAndDetailAgree": true
+          }
+        }
+      },
+      "render": {
+        "sha256": "811895dc3a5d704c7e5902755eb18bbd18d53c7a61f7916145d4974a1db36833",
+        "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "httpBodyLimits": [],
+        "grpcBodyLimits": [
+          "65536"
+        ],
+        "grpcCollectors": [
+          "65536"
+        ],
+        "configuredLuaSHA256": "6846878663284ff6930a7e9810be3c3629e8f781c0fd99a864e52fcc86ef02bc"
+      },
+      "traffic": {
+        "publicOverLimit": {
+          "status": 200,
+          "clientBytes": 65537,
+          "clientSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+          "originEchoedExactBytes": true,
+          "calls": {
+            "origin": 1,
+            "HTTP": 0,
+            "GRPC": 0
+          },
+          "origin": [
+            {
+              "bodyBytes": 65537,
+              "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7"
+            }
+          ],
+          "httpAuthorizer": [],
+          "grpcAuthorizer": []
+        },
+        "HTTP": {
+          "status": 200,
+          "clientBytes": 65537,
+          "clientSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+          "originEchoedExactBytes": true,
+          "calls": {
+            "origin": 1,
+            "HTTP": 1,
+            "GRPC": 0
+          },
+          "origin": [
+            {
+              "bodyBytes": 65537,
+              "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7"
+            }
+          ],
+          "httpAuthorizer": [
+            {
+              "bodyBytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          ],
+          "grpcAuthorizer": []
+        }
+      }
+    }
+  }
+}
