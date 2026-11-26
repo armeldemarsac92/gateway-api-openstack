@@ -99,10 +99,12 @@ func (r *Reconciler) gatewayClass(ctx context.Context, gateway *gatewayv1.Gatewa
 
 func (r *Reconciler) attachment(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, ref gatewayv1.ParentReference, namespaces routeNamespaceCache) ([]*gatewayv1.Listener, model.Diagnostic, error) {
 	noMatch := model.Diagnostic{Reason: string(gatewayv1.RouteReasonNoMatchingParent), Message: "parent reference does not select a live Gateway listener"}
+	unsupported := model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}
 	if !gateway.DeletionTimestamp.IsZero() {
 		return nil, noMatch, nil
 	}
 	selected := false
+	unsupportedSelection := false
 	var admitted, supported []*gatewayv1.Listener
 	for i := range gateway.Spec.Listeners {
 		candidate := &gateway.Spec.Listeners[i]
@@ -120,16 +122,20 @@ func (r *Reconciler) attachment(ctx context.Context, route *transportRoute, gate
 		if supported == nil {
 			supported, err = gatewaycontroller.SupportedListenersForConfig(r.Config, gateway)
 			if err != nil {
-				return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}, nil
+				return nil, unsupported, nil
 			}
 		}
 		if !slices.Contains(supported, candidate) {
-			return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}, nil
+			unsupportedSelection = true
+			continue
 		}
 		admitted = append(admitted, candidate)
 	}
 	if len(admitted) != 0 {
 		return admitted, model.Diagnostic{}, nil
+	}
+	if unsupportedSelection {
+		return nil, unsupported, nil
 	}
 	if !selected {
 		return nil, noMatch, nil

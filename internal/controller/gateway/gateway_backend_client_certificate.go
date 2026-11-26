@@ -165,7 +165,8 @@ func (r *Reconciler) observeBackendClientCertificate(ctx context.Context, gatewa
 	if BackendClientCertificateRef(gateway) == nil {
 		return cloud.BackendClientCertificate{}, "", ""
 	}
-	if len(gateway.Spec.Listeners) == 1 && terminatesTLS(&gateway.Spec.Listeners[0]) {
+	sections, _ := listenerSectionsWithoutTCPConflicts(r.Config, gateway)
+	if len(sections) == 1 && terminatesTLS(sections[0]) {
 		return cloud.BackendClientCertificate{Denied: true}, tcpBackendClientCertificateReason, tcpBackendClientCertificateMessage
 	}
 	if !r.Config.BackendTLSPolicy || !r.Config.BackendClientCertificate {

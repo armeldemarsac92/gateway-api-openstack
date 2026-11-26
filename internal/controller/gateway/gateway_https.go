@@ -50,14 +50,11 @@ type CertificateResolver interface {
 	ReferenceStatus(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) gatewayv1.ListenerConditionReason
 }
 
-func hasHTTPS(gateway *gatewayv1.Gateway) bool {
-	return slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
-		return listener.Protocol == gatewayv1.HTTPSProtocolType
-	})
-}
-
 func usesHTTPSProfile(config controller.Config, gateway *gatewayv1.Gateway) bool {
-	return hasHTTPS(gateway) && (config.OperatorHTTPS || controller.GatewayListenerScope(config, gateway) == gatewayv1.HTTPProtocolType)
+	return (config.OperatorHTTPS || controller.GatewayListenerScope(config, gateway) == gatewayv1.HTTPProtocolType) &&
+		slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+			return listener.Protocol == gatewayv1.HTTPSProtocolType && !tcpListenerProtocolConflict(config, gateway.Spec.Listeners, listener)
+		})
 }
 
 type httpsListenerIssue struct {
@@ -90,6 +87,9 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	}
 	if listener.Port < 1 || listener.Port > 65535 {
 		return invalid(gatewayv1.ListenerReasonPortUnavailable, "Listener port must be between 1 and 65535")
+	}
+	if tcpListenerProtocolConflict(config, gateway.Spec.Listeners, *listener) {
+		return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonProtocolConflict, tcpProtocolConflictMessage}
 	}
 	for i := range gateway.Spec.Listeners {
 		peer := &gateway.Spec.Listeners[i]
@@ -205,11 +205,12 @@ func listenerFamily(listener *gatewayv1.Listener) gatewayv1.ProtocolType {
 // the frozen per-port ownership checkpoint before any route can program.
 func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gateway) bool {
 	if usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(config, gateway) ||
-		config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(gateway) {
+		config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(config, gateway) {
 		return true
 	}
-	listeners, err := HTTPListeners(config, gateway)
-	return err == nil && len(listeners) == len(gateway.Spec.Listeners) && !model.GatewayDisallowsListenerSets(gateway)
+	sections, _ := listenerSectionsWithoutTCPConflicts(config, gateway)
+	listeners, err := httpListeners(config, gateway, sections)
+	return err == nil && len(listeners) == len(sections) && !model.GatewayDisallowsListenerSets(gateway)
 }
 
 type tlsResolution struct {
@@ -505,6 +506,17 @@ func (r *Reconciler) liveTLSListeners(ctx context.Context, expected *gatewayv1.G
 		// A rejected Gateway spec cannot authorize termination, but its
 		// HTTPS ports still cannot fall back to a plaintext frontend.
 		profile = httpsProfileListeners(r.Config, &live)
+	} else {
+		// Keep a denied TLS intent even when the only serving section is
+		// plaintext. Withdrawal needs it to close a former HTTP frontend.
+		for i := range live.Spec.Listeners {
+			listener := &live.Spec.Listeners[i]
+			if listener.Protocol == gatewayv1.HTTPSProtocolType && listener.Port > 0 && listener.Port <= 65535 &&
+				tcpListenerProtocolConflict(r.Config, live.Spec.Listeners, *listener) && !slices.Contains(profile, listener) {
+				profile = append(profile, listener)
+			}
+		}
+		slices.SortStableFunc(profile, func(a, b *gatewayv1.Listener) int { return cmp.Compare(a.Port, b.Port) })
 	}
 	sections := httpsSections(profile)
 	for _, listener := range profile {
@@ -515,13 +527,17 @@ func (r *Reconciler) liveTLSListeners(ctx context.Context, expected *gatewayv1.G
 		if len(listeners) != 0 && listeners[len(listeners)-1].Port == port {
 			continue
 		}
-		tls, delegated := sets.https[port]
-		if !delegated && profileErr == nil {
-			resolution := r.resolveHTTPSPort(ctx, &live, sections[port])
-			if resolution.err != nil {
-				return nil, resolution.err
+		var tls cloud.ListenerTLS
+		if !tcpListenerProtocolConflict(r.Config, live.Spec.Listeners, *listener) {
+			var delegated bool
+			tls, delegated = sets.https[port]
+			if !delegated && profileErr == nil {
+				resolution := r.resolveHTTPSPort(ctx, &live, sections[port])
+				if resolution.err != nil {
+					return nil, resolution.err
+				}
+				tls = resolution.tls
 			}
-			tls = resolution.tls
 		}
 		listeners = append(listeners, cloud.ScopedListener{
 			Name: resourceDisplayName(strconv.Itoa(port), live.Namespace, live.Name, string(listener.Name)),

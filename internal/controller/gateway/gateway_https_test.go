@@ -306,6 +306,76 @@ func TestHTTPSGatewayWithdrawsRevokedPortAndPreservesSiblings(t *testing.T) {
 	}
 }
 
+func TestHTTPSGatewayTCPProtocolConflictWithdrawsPortAndPreservesSibling(t *testing.T) {
+	cfg := testConfig()
+	cfg.OperatorHTTPS = true
+	gw := programmedTestGateway(cfg)
+	gw.Spec.Listeners = append(gw.Spec.Listeners, testHTTPSListener("https", 443), testHTTPSListener("sibling", 8443))
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class).WithObjects(gw, class).Build()
+	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"})
+	ready.ScopedListenerReadyPorts = []int{80, 443, 8443}
+	provider := &recordingProvider{gatewayResult: &ready}
+	var conflict bool
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
+		Certificates: testHTTPSReferenceResolver{
+			resolveHTTPSFunc: func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+				if conflict && listener.Port == 443 {
+					t.Fatal("conflicted HTTPS section reached provider certificate resolution")
+				}
+				return "approved-" + string(listener.Name), ""
+			},
+			referenceStatus: func(*gatewayv1.Listener) gatewayv1.ListenerConditionReason { return "" },
+		}}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if spec := provider.gatewaySpecs[0]; spec.ScopedListeners[1].TLS == nil || spec.ScopedListeners[1].TLS.CertificateRef != "approved-https" {
+		t.Fatalf("initial HTTPS frontend = %#v", spec.ScopedListeners)
+	}
+	if err := kube.Get(t.Context(), request.NamespacedName, gw); err != nil {
+		t.Fatal(err)
+	}
+	gw.Spec.Listeners = append(gw.Spec.Listeners, gatewayv1.Listener{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 443})
+	gw.Generation++
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	conflict = true
+	ready.ScopedListenerReadyPorts = []int{80, 8443}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	spec := provider.gatewaySpecs[len(provider.gatewaySpecs)-1]
+	if len(provider.deletedGateways) != 0 || len(spec.ScopedListeners) != 3 ||
+		spec.ScopedListeners[1].Port != 443 || spec.ScopedListeners[1].TLS == nil || spec.ScopedListeners[1].TLS.CertificateRef != "" ||
+		spec.ScopedListeners[2].Port != 8443 || spec.ScopedListeners[2].TLS == nil || spec.ScopedListeners[2].TLS.CertificateRef != "approved-sibling" {
+		t.Fatalf("HTTPS withdrawal and sibling graph = %#v", spec)
+	}
+	if err := kube.Get(t.Context(), request.NamespacedName, gw); err != nil {
+		t.Fatal(err)
+	}
+	for _, listener := range gw.Status.Listeners {
+		if listener.Name == "https" || listener.Name == "tcp" {
+			assertTCPProtocolConflict(t, listener)
+		} else if !meta.IsStatusConditionTrue(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+			t.Fatalf("distinct listener %q is not programmed: %#v", listener.Name, listener.Conditions)
+		}
+	}
+	accepted := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.Reason != string(gatewayv1.GatewayReasonListenersNotValid) ||
+		!meta.IsStatusConditionTrue(gw.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) {
+		t.Fatalf("partial Gateway status = %#v", gw.Status.Conditions)
+	}
+	routes, err := HTTPRouteListeners(cfg, gw)
+	if err != nil || len(routes) != 2 || routes[0].Name != "http" || routes[1].Name != "sibling" {
+		t.Fatalf("route sections = %#v, error = %v", routes, err)
+	}
+}
+
 type httpsGraphProvider func(context.Context, cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error)
 
 func (f httpsGraphProvider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
@@ -609,6 +679,7 @@ func TestHTTPSGatewayWithdrawsUsingLiveAuthorityAfterGraphFailure(t *testing.T) 
 	for _, tc := range []struct {
 		name                      string
 		removeHTTPS               bool
+		conflictHTTPS             bool
 		terminatingClass          bool
 		unmanagedClass            bool
 		editAddressDuringProvider bool
@@ -618,6 +689,7 @@ func TestHTTPSGatewayWithdrawsUsingLiveAuthorityAfterGraphFailure(t *testing.T) 
 		portRefs                  map[int]string
 	}{
 		{name: "last HTTPS removed while routes are unavailable", removeHTTPS: true},
+		{name: "last HTTPS shares its port with TCP while routes are unavailable", conflictHTTPS: true, portRefs: map[int]string{443: ""}},
 		{name: "class terminates before snapshot", terminatingClass: true},
 		{name: "class controller leaves before snapshot", unmanagedClass: true},
 		{name: "unrelated Gateway edit during provider call", editAddressDuringProvider: true, portRefs: map[int]string{443: "approved-https", 8443: "approved-second"}},
@@ -636,6 +708,10 @@ func TestHTTPSGatewayWithdrawsUsingLiveAuthorityAfterGraphFailure(t *testing.T) 
 			controller.SetGatewayListenerScope(cfg, gw, gatewayv1.HTTPProtocolType)
 			if tc.removeHTTPS {
 				gw.Spec.Listeners = gw.Spec.Listeners[:1]
+				gw.Generation++
+			}
+			if tc.conflictHTTPS {
+				gw.Spec.Listeners[2] = gatewayv1.Listener{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 443}
 				gw.Generation++
 			}
 			class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
@@ -709,7 +785,7 @@ func TestHTTPSGatewayWithdrawsUsingLiveAuthorityAfterGraphFailure(t *testing.T) 
 			wantErr := error(providerErr)
 			var err error
 			switch {
-			case tc.removeHTTPS:
+			case tc.removeHTTPS || tc.conflictHTTPS:
 				r.Writer.(*graph.Writer).Routes = failingHTTPSRouteSource{err: routeErr}
 				wantErr = routeErr
 				_, err = r.ensureGateway(ctx, gw)

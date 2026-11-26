@@ -88,10 +88,12 @@ func mixedTLSBinding(config controller.Config, gateway *gatewayv1.Gateway, port 
 		return false
 	}
 	var terminate, passthrough bool
+	sectionsOnPort := 0
 	for _, listener := range gateway.Spec.Listeners {
 		if listener.Port != port || listener.Protocol != gatewayv1.TLSProtocolType {
 			continue
 		}
+		sectionsOnPort++
 		if terminatesTLS(&listener) {
 			terminate = true
 		} else {
@@ -102,7 +104,7 @@ func mixedTLSBinding(config controller.Config, gateway *gatewayv1.Gateway, port 
 		gateway.Annotations[config.GatewayListenerPortAnnotation()] == strconv.Itoa(int(port))
 	// A single remaining section can use its own profile. Several
 	// terminating sections can still share their existing mixed frontend.
-	return terminate && (passthrough || boundMixed && len(gateway.Spec.Listeners) > 1)
+	return terminate && (passthrough || boundMixed && sectionsOnPort > 1)
 }
 
 func mixedTLSModes(listeners []gatewayv1.Listener, listener gatewayv1.Listener) bool {
@@ -415,6 +417,12 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 		r.updateSNIRouteParents(target, snapshot.gateway, func(status *gatewayv1.RouteParentStatus) bool {
 			if statusErr == nil {
 				entry := sections.forParent(status.ParentRef)
+				if entry.acceptedReason == gatewayv1.RouteReasonNoMatchingParent {
+					if reason, message := r.sniParentListenerRejection(snapshot.gateway.Spec.Listeners, status.ParentRef); reason != "" {
+						r.setRejectedSNIParent(status, reason, message, base.Generation)
+						return true
+					}
+				}
 				statusErr = r.reportSNIParent(snapshot.gateway, status, entry, outcome, mixedUnavailable)
 			}
 			return statusErr == nil
