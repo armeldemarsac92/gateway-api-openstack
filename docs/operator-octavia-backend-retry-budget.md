@@ -88,6 +88,8 @@ When every primary rule for the target Service at a Gateway uses inline affinity
 
 In the local Experimental qualification, a Service policy issued a signed header and pinned three HTTPRoute replays to the same Pod. After policy deletion, requests with and without the former header reached both Pods on the same pool. The witness route returned HTTP 200 throughout. The traffic run covered Header persistence for HTTPRoute in Endpoint mode. [Qualification receipt](qualification/v1.7.0/provider/service-session-persistence-evidence/receipt.json)
 
+A second local run applied the same Service policy to HTTPRoute and native gRPC over h2c. Both protocols issued a named Cookie, then a signed Header after a policy update. The gRPC client read `set-cookie` from initial metadata and sent `cookie` on later calls. For each mode and protocol, both endpoints issued a value and served all three replays of their own value. After deleting the policy, fresh calls and calls replaying former values reached both endpoints in turn. The same routes on Standard reached both endpoints and the XBackendTrafficPolicy CRD was absent from that release bundle. [Service policy conditions and traffic](qualification/v1.7.0/provider/service-session-persistence-evidence/cookie-and-grpc.json)
+
 On an update or removal of the policy, the controller can temporarily drain the affected pool while it verifies the new configuration. Remove `sessionPersistence` and verify the pool has cleared it before disabling the controller flag or rolling back the Octavia capability. [Named cookies, timeout and provider setup](reference/class-configuration.md#keep-a-session-on-one-selected-endpoint)
 
 ## Configure session persistence on a route rule
