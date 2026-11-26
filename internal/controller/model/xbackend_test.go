@@ -264,3 +264,40 @@ func TestXBackendHeaderPersistenceValidation(t *testing.T) {
 	profile.SessionPersistence = false
 	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), ValidateXBackend(spec, profile).Reason)
 }
+
+func TestTCPXBackendProfileLimits(t *testing.T) {
+	spec := gatewayx.BackendSpec{
+		Type:     gatewayx.BackendTypeEndpointSelector,
+		Protocol: ptr.To(gatewayx.BackendProtocolTCP),
+		Port:     gatewayx.BackendPort{Number: 5432},
+		TLS:      &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeNone},
+		EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+			MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "database"},
+		}},
+	}
+	require.Nil(t, ValidateTCPXBackend(spec, cloud.MemberModeEndpoint))
+	nodePort := ValidateTCPXBackend(spec, cloud.MemberModeNodePort)
+	require.NotNil(t, nodePort)
+	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), nodePort.Reason)
+	for _, test := range []struct {
+		name   string
+		change func(*gatewayx.BackendSpec)
+		reason gatewayv1.RouteConditionReason
+	}{
+		{"application protocol", func(spec *gatewayx.BackendSpec) { spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP) }, gatewayv1.RouteReasonUnsupportedProtocol},
+		{"authenticated TLS", func(spec *gatewayx.BackendSpec) { spec.TLS.Mode = gatewayx.BackendTLSModeServerOnly }, gatewayv1.RouteReasonUnsupportedValue},
+		{"HTTP persistence", func(spec *gatewayx.BackendSpec) { spec.SessionPersistence = &gatewayv1.SessionPersistence{} }, gatewayv1.RouteReasonUnsupportedValue},
+		{"external hostname", func(spec *gatewayx.BackendSpec) {
+			spec.Type, spec.EndpointSelector = gatewayx.BackendTypeExternalHostname, nil
+			spec.ExternalHostname = &gatewayx.ExternalHostnameBackend{Hostname: "database.example.test"}
+		}, gatewayv1.RouteReasonUnsupportedValue},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := spec.DeepCopy()
+			test.change(backend)
+			diagnostic := ValidateTCPXBackend(*backend, cloud.MemberModeEndpoint)
+			require.NotNil(t, diagnostic)
+			require.Equal(t, string(test.reason), diagnostic.Reason)
+		})
+	}
+}

@@ -19,6 +19,7 @@ package httproute
 import (
 	"cmp"
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"sync"
@@ -43,8 +44,8 @@ import (
 const maxXBackendAncestors = 32
 const xBackendClientCertificateResyncInterval = 5 * time.Second
 
-// xBackendStatusReconciler only publishes status. HTTPRoute reconciles the
-// backend's cloud resources through the existing Gateway graph writer.
+// xBackendStatusReconciler publishes status for attached HTTPRoute and TCPRoute
+// consumers. The route reconcilers own their cloud resources.
 type xBackendStatusReconciler struct {
 	routes *Reconciler
 }
@@ -111,6 +112,13 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		}
 	}
 	ancestors := make(map[types.NamespacedName]metav1.Condition, len(byGateway))
+	if r.routes.TCPRoutes != nil {
+		tcpAncestors, err := r.routes.TCPRoutes.ObserveXBackendAncestors(ctx, backend)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(ancestors, tcpAncestors)
+	}
 	persistenceCapability := r.routes.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.routes.xBackendH2CDiagnostic(ctx) })
 	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
@@ -123,6 +131,13 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			continue
 		}
 		profile, err := r.routes.xBackendProfile(gateway)
+		if errors.Is(err, cloud.ErrOwnershipConflict) {
+			// This checkpoint is local to one ancestor. Other Gateways can
+			// still report their decision for the current XBackend generation.
+			ancestors[gatewayKey] = controller.Condition(string(gatewayx.BackendConditionAccepted), metav1.ConditionUnknown,
+				controller.ProviderReasonOwnershipConflict, "Gateway member topology binding is invalid", backend.Generation)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

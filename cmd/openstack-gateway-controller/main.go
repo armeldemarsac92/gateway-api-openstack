@@ -454,6 +454,7 @@ func run(ctx context.Context) error {
 		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
 		TCPConnectionRejectionAvailable: openStackProvider.TCPConnectionRejectionAvailable,
 	}
+	routeReconciler.TCPRoutes = tcpReconciler
 	udpReconciler := &l4route.Reconciler{
 		Protocol:               gatewayv1.UDPProtocolType,
 		UDPPacketDropAvailable: openStackProvider.UDPPacketDropAvailable,

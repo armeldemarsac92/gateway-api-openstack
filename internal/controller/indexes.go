@@ -59,6 +59,8 @@ const (
 	ServiceImportIndexAll                  = "*"
 	// IndexHTTPRouteByXBackend indexes same-namespace XBackend reference targets.
 	IndexHTTPRouteByXBackend = "spec.xBackend"
+	// IndexTCPRouteByXBackend indexes same-namespace TCPRoute XBackend reference targets.
+	IndexTCPRouteByXBackend = "spec.tcpXBackend"
 	// IndexXBackendByPodLabel indexes each matchLabels pair in an EndpointSelector.
 	IndexXBackendByPodLabel = "spec.podLabel"
 	// IndexXBackendByCA indexes the scoped trust reference in inline TLS validation.
@@ -308,6 +310,17 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				}
 				keys := make(map[string]struct{})
 				for _, key := range model.LocalXBackendReferences(route) {
+					keys[ObjectKeyString(key)] = struct{}{}
+				}
+				return sortedIndexKeys(keys)
+			}},
+			controllerFieldIndex{object: &gatewayv1.TCPRoute{}, field: IndexTCPRouteByXBackend, extract: func(object client.Object) []string {
+				route, ok := object.(*gatewayv1.TCPRoute)
+				if !ok {
+					return nil
+				}
+				keys := make(map[string]struct{})
+				for _, key := range model.LocalTCPXBackendReferences(route) {
 					keys[ObjectKeyString(key)] = struct{}{}
 				}
 				return sortedIndexKeys(keys)

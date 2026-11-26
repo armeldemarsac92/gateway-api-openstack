@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -46,6 +47,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -57,6 +59,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -1409,6 +1412,115 @@ func TestXBackendStatusDuringDeletion(t *testing.T) {
 					t.Fatalf("active Gateway lost current acceptance: %+v", ancestors[1])
 				}
 			}
+		})
+	}
+}
+
+func TestXBackendStatusIsolatesInvalidGatewayTopology(t *testing.T) {
+	for _, invalid := range []string{"tcp", "http"} {
+		t.Run(invalid, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			cfg.GatewayAPIChannel = "experimental"
+			class, httpGateway, httpRoute, _, _ := endpointRouteFixture(t)
+			tcpGateway := httpGateway.DeepCopy()
+			tcpGateway.Name, tcpGateway.UID = "tcp-edge", "tcp-gateway-uid"
+			tcpGateway.Spec.Listeners = []gatewayv1.Listener{{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 5432}}
+			tcpGateway.Annotations[cfg.GatewayListenerPortAnnotation()] = "5432"
+			tcpGateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.TCPProtocolType)
+			ref := &httpRoute.Spec.Rules[0].BackendRefs[0]
+			ref.Group, ref.Kind, ref.Port = ptr.To(gatewayv1.Group(gatewayx.GroupName)), ptr.To(gatewayv1.Kind("XBackend")), nil
+			tcpRoute := &gatewayv1.TCPRoute{
+				ObjectMeta: metav1.ObjectMeta{Namespace: httpRoute.Namespace, Name: "tcp-route"},
+				Spec: gatewayv1.TCPRouteSpec{
+					CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(tcpGateway.Name)}}},
+					Rules:           []gatewayv1.TCPRouteRule{{BackendRefs: []gatewayv1.BackendRef{ref.BackendRef}}},
+				},
+			}
+			backend := &gatewayx.XBackend{
+				ObjectMeta: metav1.ObjectMeta{Namespace: httpRoute.Namespace, Name: string(ref.Name), Generation: 1},
+				Spec: gatewayx.BackendSpec{
+					Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 5432},
+					EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+						MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "backend"},
+					}},
+				},
+			}
+			scheme := testScheme(t)
+			require.NoError(t, gatewayx.Install(scheme))
+			kube := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(backend).
+				WithObjects(class, httpGateway, httpRoute, tcpGateway, tcpRoute, backend).Build()
+			status := &xBackendStatusReconciler{routes: &Reconciler{
+				Client: kube, APIReader: kube, Config: cfg,
+				TCPRoutes: &l4route.Reconciler{Client: kube, APIReader: kube, Config: cfg},
+			}}
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(backend)}
+			conditions := func() map[gatewayv1.ObjectName]metav1.Condition {
+				t.Helper()
+				require.NoError(t, kube.Get(ctx, request.NamespacedName, backend))
+				require.Len(t, backend.Status.Ancestors, 2)
+				byGateway := make(map[gatewayv1.ObjectName]metav1.Condition)
+				for _, ancestor := range backend.Status.Ancestors {
+					require.Equal(t, cfg.ControllerName, ancestor.ControllerName)
+					condition := meta.FindStatusCondition(ancestor.Conditions, string(gatewayx.BackendConditionAccepted))
+					require.NotNil(t, condition)
+					require.Equal(t, backend.Generation, condition.ObservedGeneration, "Gateway %s", ancestor.AncestorRef.Name)
+					byGateway[ancestor.AncestorRef.Name] = *condition
+				}
+				return byGateway
+			}
+
+			_, err := status.Reconcile(ctx, request)
+			require.NoError(t, err)
+			bothAccepted := conditions()
+			httpKey, tcpKey := gatewayv1.ObjectName(httpGateway.Name), gatewayv1.ObjectName(tcpGateway.Name)
+			require.Equal(t, metav1.ConditionTrue, bothAccepted[httpKey].Status)
+			require.Equal(t, metav1.ConditionTrue, bothAccepted[tcpKey].Status)
+
+			damaged := tcpGateway
+			if invalid == "http" {
+				damaged = httpGateway
+			}
+			damagedKey := client.ObjectKeyFromObject(damaged)
+			previousStatus := backend.Status.DeepCopy()
+			backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolTCP)
+			backend.Generation = 2
+			require.NoError(t, kube.Update(ctx, backend))
+
+			timeout := apierrors.NewTimeoutError("reading Gateway", 0)
+			reader := interceptor.NewClient(kube, interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, object client.Object, opts ...client.GetOption) error {
+					if _, isGateway := object.(*gatewayv1.Gateway); isGateway && key == damagedKey {
+						return timeout
+					}
+					return c.Get(ctx, key, object, opts...)
+				},
+			})
+			status.routes.APIReader, status.routes.TCPRoutes.APIReader = reader, reader
+			_, err = status.Reconcile(ctx, request)
+			require.ErrorIs(t, err, timeout)
+			require.NoError(t, kube.Get(ctx, request.NamespacedName, backend))
+			require.Equal(t, *previousStatus, backend.Status)
+			status.routes.APIReader, status.routes.TCPRoutes.APIReader = kube, kube
+
+			require.NoError(t, kube.Get(ctx, damagedKey, damaged))
+			delete(damaged.Annotations, cfg.GatewayTopologyAnnotation())
+			require.NoError(t, kube.Update(ctx, damaged))
+			_, err = controller.StoredGatewayTopology(cfg, damaged)
+			require.ErrorIs(t, err, cloud.ErrOwnershipConflict)
+			_, err = status.Reconcile(ctx, request)
+			require.NoError(t, err)
+			current := conditions()
+			if invalid == "tcp" {
+				require.Equal(t, metav1.ConditionFalse, current[httpKey].Status)
+				require.Equal(t, string(gatewayv1.RouteReasonUnsupportedProtocol), current[httpKey].Reason)
+			} else {
+				require.Equal(t, metav1.ConditionTrue, current[tcpKey].Status)
+				require.Equal(t, string(gatewayx.BackendReasonAccepted), current[tcpKey].Reason)
+			}
+			conflict := current[gatewayv1.ObjectName(damaged.Name)]
+			require.Equal(t, metav1.ConditionUnknown, conflict.Status)
+			require.Equal(t, controller.ProviderReasonOwnershipConflict, conflict.Reason)
 		})
 	}
 }

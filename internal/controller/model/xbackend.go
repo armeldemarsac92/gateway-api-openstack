@@ -112,6 +112,19 @@ func LocalXBackendReferences(route *gatewayv1.HTTPRoute) []types.NamespacedName 
 	return keys
 }
 
+// LocalTCPXBackendReferences lists local XBackends with a well-formed TCPRoute reference.
+func LocalTCPXBackendReferences(route *gatewayv1.TCPRoute) []types.NamespacedName {
+	var keys []types.NamespacedName
+	for _, rule := range route.Spec.Rules {
+		for _, ref := range rule.BackendRefs {
+			if key, supported := XBackendReference(route.Namespace, ref.BackendObjectReference); supported && key.Namespace == route.Namespace && ref.Port == nil {
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
+}
+
 func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.NamespacedName, input Input) BackendGroup {
 	if group.Reference.Port != nil {
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backendRef.port must be omitted for XBackend")
@@ -231,13 +244,8 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	}
 	switch spec.Type {
 	case gatewayx.BackendTypeEndpointSelector:
-		if spec.ExternalHostname != nil || spec.EndpointSelector == nil || len(spec.EndpointSelector.MatchLabels) == 0 {
-			return backendDiagnostic(unsupported, "XBackend EndpointSelector requires a nonempty endpointSelector.matchLabels")
-		}
-		for key, value := range spec.EndpointSelector.MatchLabels {
-			if len(validation.IsQualifiedName(string(key))) != 0 || len(validation.IsValidLabelValue(string(value))) != 0 {
-				return backendDiagnostic(unsupported, "XBackend endpointSelector contains an invalid label")
-			}
+		if diagnostic := validateXBackendEndpointSelector(spec); diagnostic != nil {
+			return diagnostic
 		}
 	case gatewayx.BackendTypeExternalHostname:
 		if !profile.ExternalHostname {
@@ -305,6 +313,39 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend WSS requires ServerOnly or ClientAndServer TLS")
 	}
 	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported by the configured HTTP backend profile", protocol))
+}
+
+// ValidateTCPXBackend checks the backend in a raw Gateway TCPRoute context.
+func ValidateTCPXBackend(spec gatewayx.BackendSpec, mode cloud.MemberMode) *Diagnostic {
+	const unsupported = gatewayv1.RouteReasonUnsupportedValue
+	switch {
+	case mode != "" && mode != cloud.MemberModeEndpoint:
+		return backendDiagnostic(unsupported, "TCP XBackend requires Endpoint member mode with Unmanaged backend security")
+	case spec.Type != gatewayx.BackendTypeEndpointSelector:
+		return backendDiagnostic(unsupported, "TCP XBackend requires type EndpointSelector")
+	case spec.Port.Number < 1 || spec.Port.Number > 65535:
+		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
+	case ptr.Deref(spec.Protocol, gatewayx.BackendProtocolTCP) != gatewayx.BackendProtocolTCP:
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "TCPRoute XBackend requires protocol TCP or an omitted protocol")
+	case spec.TLS != nil && (spec.TLS.Mode != gatewayx.BackendTLSModeNone || spec.TLS.Validation != nil || spec.TLS.ClientCertificateRef != nil):
+		return backendDiagnostic(unsupported, "TCP XBackend requires TLS mode None without validation or a client certificate")
+	case spec.SessionPersistence != nil:
+		return backendDiagnostic(unsupported, "HTTP Cookie and Header session persistence is unsupported on TCP XBackend")
+	}
+	return validateXBackendEndpointSelector(spec)
+}
+
+func validateXBackendEndpointSelector(spec gatewayx.BackendSpec) *Diagnostic {
+	const unsupported = gatewayv1.RouteReasonUnsupportedValue
+	if spec.ExternalHostname != nil || spec.EndpointSelector == nil || len(spec.EndpointSelector.MatchLabels) == 0 {
+		return backendDiagnostic(unsupported, "XBackend EndpointSelector requires a nonempty endpointSelector.matchLabels")
+	}
+	for key, value := range spec.EndpointSelector.MatchLabels {
+		if len(validation.IsQualifiedName(string(key))) != 0 || len(validation.IsValidLabelValue(string(value))) != 0 {
+			return backendDiagnostic(unsupported, "XBackend endpointSelector contains an invalid label")
+		}
+	}
+	return nil
 }
 
 func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gatewayx.BackendProtocol, persistence gatewayv1.SessionPersistence, profile XBackendProfile) *Diagnostic {

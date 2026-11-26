@@ -346,7 +346,7 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	}
 	if r.Config.XBackendEnabled() && r.kind() == model.HTTPRouteKind {
 		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
-			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(xBackendPodPredicate()))
+			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(controller.XBackendPodPredicate()))
 	}
 	if r.retryBudgetPolicyServed && (r.Config.BackendRetryBudgetEnabled() || r.Config.XBackendSessionPersistenceEnabled()) {
 		setup.Watches(&gatewayx.XBackendTrafficPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForRetryBudget), builder.WithPredicates(r.retryBudgetRoutePredicate()))
