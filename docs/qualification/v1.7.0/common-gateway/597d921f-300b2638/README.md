@@ -1,6 +1,6 @@
-# Standard HTTP Gateway qualification on controller 597d921f and Octavia 300b2638
+# HTTP Gateway qualification on controller 597d921f and Octavia 300b2638
 
-On November 26, 2026, three local runs used Gateway API v1.7.0, controller `597d921fd083bb71f9ad3fc024f5f6bf0891e0ba`, and Octavia `300b2638c072c10f9f1e59403eedb792b9cd98a5` (19.0.1.dev109). Staging verified both Git source signatures and the artifact hashes. The controller OCI archive was verified by hash only. The upstream suite executable was built from `e26d183dbbc1bb782b78addbd26faba03955c152` and ran without modifications to the cases or their deadlines. [Input and evidence digests](receipt.json)
+On November 26, 2026, three Standard runs used Gateway API v1.7.0, controller `597d921fd083bb71f9ad3fc024f5f6bf0891e0ba`, and Octavia `300b2638c072c10f9f1e59403eedb792b9cd98a5` (19.0.1.dev109). Staging verified both Git source signatures and the artifact hashes. The controller OCI archive was verified by hash only. The upstream suite executable was built from `e26d183dbbc1bb782b78addbd26faba03955c152` and ran without modifications to the cases or their deadlines. [Input and evidence digests](receipt.json)
 
 | Standard GATEWAY-HTTP selection | Passed | Failed | Skipped in subset | Suite / fixture exit | Upstream report |
 | --- | ---: | ---: | ---: | --- | --- |
@@ -8,7 +8,7 @@ On November 26, 2026, three local runs used Gateway API v1.7.0, controller `597d
 | Extended, default parallelism | 50 | 13 | 0 | 1 / 1 | [Extended YAML](gateway-http-standard-extended-default.yaml) |
 | Extended, `-test.parallel=1` | 53 | 10 | 0 | 1 / 1 | [Serial Extended YAML](gateway-http-standard-extended-serial.yaml) |
 
-All three runs used the default listener configuration for their selection. The first two ran Core and Extended separately with default Go test parallelism. The third ran Extended with `-test.parallel=1`. Both Extended runs explicitly excluded all 40 Core cases, which appear in the Core section of its report as skips. The Standard channel excluded the case `HTTPRouteInvalidParentRefNotMatchingListenerPort`, which requires `HTTPRouteDestinationPortMatching`. Four other Extended profile features have no registered test: `ClusterTrustBundle`, `GatewayAddressRoutability`, `GatewayAddressRoutabilityCluster`, and `GatewayListenerFilters`. The reports cover Standard GATEWAY-HTTP on this pair. [Profile inventory](../../matrix/README.md)
+All three runs used the default listener configuration for their selection. The first two ran Core and Extended separately with default Go test parallelism. The third ran Extended with `-test.parallel=1`. Both Extended runs explicitly excluded all 40 Core cases, which appear in the Core section of its report as skips. The Standard channel excluded the case `HTTPRouteInvalidParentRefNotMatchingListenerPort`, which requires `HTTPRouteDestinationPortMatching`. Four other Extended profile features have no registered test: `ClusterTrustBundle`, `GatewayAddressRoutability`, `GatewayAddressRoutabilityCluster`, and `GatewayListenerFilters`. The three reports above cover Standard GATEWAY-HTTP on this pair. [Profile inventory](../../matrix/README.md)
 
 ## Extended observations
 
@@ -38,6 +38,25 @@ Two cases passed only with the default parallelism. `BackendTLSPolicyInvalidCACe
 Eight cases failed in both runs. `BackendTLSPolicy`, `BackendTLSPolicyInvalidKind`, `BackendTLSPolicySANValidation`, `GatewayFrontendClientCertificateValidation`, `GatewayFrontendClientCertificateValidationInsecureFallback`, `GatewayHTTPListenerIsolation`, `HTTPRouteRedirectPortAndScheme`, `ListenerSetAllowedRoutesNamespaces`.
 
 After `HTTPRouteRedirectPortAndScheme` timed out during cleanup, two TLS cases overlapped on the shared listener. The DNS SAN request in `BackendTLSPolicySANValidation` ran from 06:12:02.685 to 06:12:32.685 CET. The request in `BackendTLSPolicyInvalidKind` ran from 06:12:05.384 to 06:12:35.385 CET, an overlap of 27.3 seconds. These observations come from lines 29972, 30006, 31024 and 31137 of the local upstream log (SHA-256 `aa4b97e0b0b81c89e19381011147e45dd9ac666cb51cf926ebfb5e9bc3da7bc9`). Determining why seven verdicts changed and why eight cases failed twice requires further evidence.
+
+## Experimental HTTP with default parallelism
+
+Two separate local clusters ran the Core and Extended selections with the Experimental CRDs. They used the controller, Octavia version and upstream executable pinned above. [Run inputs and report digests](experimental-http.json)
+
+| Experimental GATEWAY-HTTP selection | Passed | Failed | Skipped in subset | Suite / fixture exit | Upstream report |
+| --- | ---: | ---: | ---: | --- | --- |
+| Core | 40 | 0 | 0 | 0 / 0 | [Core YAML](gateway-http-experimental-core-default.yaml) |
+| Extended | 53 | 11 | 0 | 1 / 1 | [Extended YAML](gateway-http-experimental-extended-default.yaml) |
+
+The Experimental Extended selection contained one case beyond the 63 selected on Standard. `HTTPRouteInvalidParentRefNotMatchingListenerPort` passed. The 40 Core tests were excluded from this Extended selection.
+
+The Experimental Extended report lists these failures (11). `BackendTLSPolicy`, `BackendTLSPolicyInvalidKind`, `BackendTLSPolicySANValidation`, `GatewayFrontendClientCertificateValidation`, `GatewayFrontendClientCertificateValidationInsecureFallback`, `GatewayFrontendInvalidDefaultClientCertificateValidation`, `GatewayHTTPListenerIsolation`, `GatewayTLSBackendClientCertificate`, `HTTPRouteRedirectPortAndScheme`, `ListenerSetAllowedRoutesNamespaces`, `ListenerSetHTTPRouting`.
+
+## Isolated Standard backend TLS case
+
+The three full Extended runs on this pair failed `BackendTLSPolicyInvalidKind`. On a fresh Standard cluster, the same signed pair ran just that case with the original timeouts. It passed, with 62 other Extended cases skipped by selection. The backend TLS policy reported `Accepted=False/NoValidCACertificate` and `ResolvedRefs=False/InvalidKind`. The upstream client saw seven HTTP 404 responses before accepting a 5xx. HAProxy loaded the route to a pool with no servers 1.278 seconds after route creation, and a separate probe received HTTP 503. [Isolated upstream report](gateway-http-standard-extended-invalid-kind-isolated.yaml) · [Conditions, traffic and timings](backend-tls-invalid-kind-isolated.json)
+
+The isolated run completed cleanup. Its final grouped observation could not be decoded, so the exact instant at which Kubernetes stopped returning the HTTPRoute is unknown. The cause of the longer delay during the full suites remains open.
 
 ## Environment and scope
 

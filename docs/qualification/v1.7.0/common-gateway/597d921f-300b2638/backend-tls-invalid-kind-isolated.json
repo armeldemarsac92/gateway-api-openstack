@@ -1,0 +1,138 @@
+{
+  "official": {
+    "case": "BackendTLSPolicyInvalidKind",
+    "verdict": "PASS",
+    "profile": "GATEWAY-HTTP",
+    "subset": "extended",
+    "channel": "standard",
+    "statistics": {
+      "Failed": 0,
+      "Passed": 1,
+      "Skipped": 62
+    },
+    "reportSHA256": "5d80da712b5db295a4b115e9481c0f8e6ded3e83ffa9924b16dc0ecfc9dd13d8",
+    "upstreamExit": 0,
+    "fixtureExit": 0
+  },
+  "identity": {
+    "controller": "597d921fd083bb71f9ad3fc024f5f6bf0891e0ba",
+    "managerSHA256": "83cc52dbae43238325247b91268b5283051e1f2c50b5d7014a619d7d9e0734ae",
+    "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+    "gatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "conformanceSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e"
+  },
+  "route": {
+    "uid": "a9781833-70c9-449f-8dcf-d9cea7ac08d8",
+    "generation": 1,
+    "gatewayUid": "73c99369-e782-42f2-bb2b-9b3edb709d82",
+    "frontend": [
+      "192.0.2.30",
+      80
+    ],
+    "servicePort": 443,
+    "path": "/backendtlspolicy-invalid-kind",
+    "create": {
+      "line": 697,
+      "at": "2026-11-26T07:02:37.647096539+01:00"
+    },
+    "parentsMatched": {
+      "line": 702,
+      "at": "2026-11-26T07:02:38.221394081+01:00"
+    },
+    "conditions": [
+      {
+        "type": "Accepted",
+        "status": "True",
+        "reason": "Accepted",
+        "observedGeneration": 1
+      },
+      {
+        "type": "ResolvedRefs",
+        "status": "True",
+        "reason": "ResolvedRefs",
+        "observedGeneration": 1
+      },
+      {
+        "type": "gateway-api-openstack.github.io/Programmed",
+        "status": "False",
+        "reason": "Pending",
+        "observedGeneration": 1
+      }
+    ]
+  },
+  "backendTLSPolicy": {
+    "uid": "30ed078b-3e9a-4fd4-a6b6-1f3b14db6e31",
+    "generation": 1,
+    "observedAt": "2026-11-26T06:02:38.080886+00:00",
+    "conditions": [
+      {
+        "type": "Accepted",
+        "status": "False",
+        "reason": "NoValidCACertificate",
+        "observedGeneration": 1
+      },
+      {
+        "type": "ResolvedRefs",
+        "status": "False",
+        "reason": "InvalidKind",
+        "observedGeneration": 1
+      }
+    ]
+  },
+  "publication": {
+    "policyAlias": "e65dcd78ad26f6f0",
+    "policyCreatedAt": "2026-11-26T06:02:38.329+00:00",
+    "enableStart": "2026-11-26T06:02:38.764940+00:00",
+    "activation": {
+      "at": "2026-11-26T06:02:38.925+00:00",
+      "loadBalancer": "def97664a4b95d13",
+      "configSHA256": "3b37837aa86c1487dfac58f8e7ea39bacf1f44083bcefcd1860df6fded8b44cf",
+      "pathAclCount": 1,
+      "actions": [
+        {
+          "action": "use_backend",
+          "backendAlias": "faea0e4c9cc11d56",
+          "status": null,
+          "serverCount": 0,
+          "poolAlias": "6b25d7452fd597cb",
+          "listenerAlias": "ada34444d2abb23b"
+        }
+      ]
+    },
+    "createToActivationMs": 1277.9
+  },
+  "traffic": {
+    "officialStart": {
+      "line": 706,
+      "at": "2026-11-26T07:02:38.231085506+01:00"
+    },
+    "preceding404": 7,
+    "officialPass": {
+      "line": 714,
+      "at": "2026-11-26T07:02:38.937550877+01:00"
+    },
+    "firstProbe503": {
+      "at": "2026-11-26T06:02:39.025495+00:00",
+      "code": 503
+    },
+    "officialWaitMs": 706.5
+  },
+  "cleanup": {
+    "routeDelete": {
+      "line": 718,
+      "at": "2026-11-26T07:02:38.952236329+01:00"
+    },
+    "withdrawnAt": "2026-11-26T06:02:39.415+00:00",
+    "policyAndRulesRemovedAt": "2026-11-26T06:02:39.613+00:00",
+    "poolDeleteStart": "2026-11-26T06:02:39.986404+00:00",
+    "poolDeleteStatus": 204,
+    "targetObjectsInFinalFixtureRead": false,
+    "officialCleanupPassed": true,
+    "guestDestroyed": true,
+    "lastObserverGet": {
+      "at": "2026-11-26T06:02:40.261319+00:00",
+      "error": "JSONDecodeError"
+    }
+  },
+  "desiredControllerGraphObserved": false
+}
