@@ -158,7 +158,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteRetryBudgetAncestorFull != nil && *request.HTTPRouteRetryBudgetAncestorFull != snapshot.retryBudgetAncestorFull {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
-			if requested && request.HTTPRouteUsesXBackendClientTLS != nil && *request.HTTPRouteUsesXBackendClientTLS != backends.routeUsesXBackendClientTLS(route) {
+			admitted := reconciler.routeWithAdmittedRules(route)
+			if requested && request.HTTPRouteNeedsXBackendTLSReadback != nil &&
+				*request.HTTPRouteNeedsXBackendTLSReadback != backends.routeNeedsXBackendTLSReadback(admitted) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			if requested && request.HTTPRouteServicePersistenceRevision != nil &&
@@ -166,11 +168,11 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			if requested && request.HTTPRouteXBackendPersistenceRevision != nil &&
-				*request.HTTPRouteXBackendPersistenceRevision != xBackendPersistenceRevision(route, backends.input.XBackends) {
+				*request.HTTPRouteXBackendPersistenceRevision != xBackendPersistenceRevision(admitted, backends.input.XBackends) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			if requested && request.HTTPRouteXBackendTransportRevision != nil &&
-				*request.HTTPRouteXBackendTransportRevision != xBackendTransportRevision(route, backends.input.XBackends) {
+				*request.HTTPRouteXBackendTransportRevision != xBackendTransportRevision(admitted, backends.input.XBackends) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			if requested && request.HTTPRouteServiceImportObservations != nil {

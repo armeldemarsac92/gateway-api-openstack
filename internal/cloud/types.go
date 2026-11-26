@@ -402,7 +402,7 @@ type HTTPRedirectRequest struct {
 	ReplacePrefixMatch *string
 }
 
-// HTTPFixedRule groups the matches that require a local HTTP 500 response.
+// HTTPFixedRule groups matches for a local HTTP 500 or gRPC UNAVAILABLE response.
 type HTTPFixedRule struct {
 	RuleIndex int
 	Matches   []HTTPPathMatch

@@ -205,12 +205,13 @@ func (r *Reconciler) patchHTTPRouteStatus(
 			}
 		}
 		if plan.xBackendTransportRevision != nil {
-			observations, err := r.liveXBackendRevisions(ctx, current)
+			admitted := r.routeWithAdmittedRules(current)
+			observations, err := r.liveXBackendRevisions(ctx, admitted)
 			if err != nil {
 				return err
 			}
-			if xBackendTransportRevision(current, observations) != *plan.xBackendTransportRevision ||
-				plan.persistenceRevision != nil && xBackendPersistenceRevision(current, observations) != *plan.persistenceRevision {
+			if xBackendTransportRevision(admitted, observations) != *plan.xBackendTransportRevision ||
+				plan.persistenceRevision != nil && xBackendPersistenceRevision(admitted, observations) != *plan.persistenceRevision {
 				return errHTTPRouteChanged
 			}
 		}

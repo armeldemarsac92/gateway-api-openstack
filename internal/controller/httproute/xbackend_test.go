@@ -160,7 +160,7 @@ func TestXBackendExternalHostnameGRPCRequiresH2CProviderSupport(t *testing.T) {
 			routeStatus := pendingRouteStatus("Waiting for test listener")
 			require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &routeStatus))
 			require.Equal(t, tc.status, routeStatus.resolved)
-			ancestors, err := (&xBackendStatusReconciler{routes: r}).observeAncestors(t.Context(), client.ObjectKeyFromObject(backend), backend)
+			ancestors, _, err := (&xBackendStatusReconciler{routes: r}).observeAncestors(t.Context(), client.ObjectKeyFromObject(backend), backend)
 			require.NoError(t, err)
 			require.Len(t, ancestors, 1)
 			ancestor := ancestors[client.ObjectKeyFromObject(f.gateway)]
@@ -500,7 +500,7 @@ func TestXBackendApplicationHeaderPersistence(t *testing.T) {
 
 				status := programmedRouteStatus()
 				require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &status))
-				ancestors, err := (&xBackendStatusReconciler{routes: r}).observeAncestors(t.Context(), client.ObjectKeyFromObject(backend), backend)
+				ancestors, _, err := (&xBackendStatusReconciler{routes: r}).observeAncestors(t.Context(), client.ObjectKeyFromObject(backend), backend)
 				require.NoError(t, err)
 				ancestor := ancestors[client.ObjectKeyFromObject(f.gateway)]
 				backends := f.observe(t).Nodes[0].Spec.HTTPBackends

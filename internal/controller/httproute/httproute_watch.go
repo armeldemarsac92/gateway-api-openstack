@@ -351,7 +351,7 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 			setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForListenerSet))
 		}
 	}
-	if r.Config.XBackendEnabled() && r.kind() == model.HTTPRouteKind {
+	if r.Config.XBackendEnabled() {
 		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(controller.XBackendPodPredicate()))
 	}

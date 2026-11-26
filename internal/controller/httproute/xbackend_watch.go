@@ -102,25 +102,34 @@ func (r *Reconciler) enqueueHTTPRoutesForXBackendPod(ctx context.Context, object
 func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 	status := &xBackendStatusReconciler{routes: r}
 	// Map both route revisions so a detached backend is also reconciled.
+	grpc := r.forRouteKind(model.GRPCRouteKind)
 	mapRoute := func(ctx context.Context, object client.Object) []reconcile.Request {
 		var direct []types.NamespacedName
-		if route, ok := object.(*gatewayv1.HTTPRoute); ok {
+		switch route := object.(type) {
+		case *gatewayv1.HTTPRoute:
 			direct = model.LocalXBackendReferences(route)
+		case *gatewayv1.GRPCRoute:
+			direct = model.LocalXBackendReferences(model.ProjectGRPCRoute(route))
 		}
-		return r.xBackendsForRouteRequests(ctx, r.enqueueHTTPRoutePeers(ctx, object), direct)
+		return append(r.xBackendsForRouteRequests(ctx, r.enqueueHTTPRoutePeers(ctx, object), direct),
+			grpc.xBackendsForRouteRequests(ctx, grpc.enqueueHTTPRoutePeers(ctx, object), nil)...)
 	}
-	mapRoutes := func(mapper handler.MapFunc) handler.MapFunc {
+	mapRoutes := func(http, grpcRoutes handler.MapFunc) handler.MapFunc {
 		return func(ctx context.Context, object client.Object) []reconcile.Request {
-			return r.xBackendsForRouteRequests(ctx, mapper(ctx, object), nil)
+			requests := r.xBackendsForRouteRequests(ctx, http(ctx, object), nil)
+			if grpcRoutes != nil {
+				requests = append(requests, grpc.xBackendsForRouteRequests(ctx, grpcRoutes(ctx, object), nil)...)
+			}
+			return requests
 		}
 	}
 	setup := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayx.XBackend{}).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(mapRoute), builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(mapRoute), builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
-		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
-		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
+		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGateway, grpc.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
+		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGatewayClass, grpc.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForNamespace, grpc.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
 	if r.Config.BackendTLSPolicy {
 		setup.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueXBackendsForCA))
 		if watch := r.Config.ClusterTrustBundles.Watch(r.enqueueXBackendsForCA); watch != nil {
@@ -132,7 +141,7 @@ func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 		return err
 	}
 	if served {
-		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForListenerSet)))
+		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForListenerSet, nil)))
 	}
 	if r.TCPRoutes != nil {
 		r.TCPRoutes.WatchXBackendAncestors(setup)
@@ -148,7 +157,7 @@ func (r *Reconciler) xBackendsForRouteRequests(ctx context.Context, requests []r
 	}
 	for _, request := range requests {
 		var route gatewayv1.HTTPRoute
-		if err := r.Get(ctx, request.NamespacedName, &route); err != nil {
+		if err := r.readRoute(ctx, r.Client, request.NamespacedName, &route); err != nil {
 			if err := client.IgnoreNotFound(err); err != nil {
 				log.FromContext(ctx).Error(err, "Could not get HTTPRoute for XBackend", "route", request.NamespacedName)
 			}
