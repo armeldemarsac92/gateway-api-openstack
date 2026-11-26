@@ -885,10 +885,6 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 	return nil
 }
 
-func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identity, graph *observedRouteGraph) error {
-	return p.observeRoutePoolChildrenWithRole(ctx, routeGraphOwner{identity: identity}, graph, "")
-}
-
 func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner routeGraphOwner, graph *observedRouteGraph, backend string) error {
 	var err error
 	strictChildren := backend != "" || owner.expectsBackendTLS || hasObservedBackendTLS(*graph.pool, graph.backendTLS)
