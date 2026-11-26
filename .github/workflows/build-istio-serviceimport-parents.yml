@@ -1,4 +1,4 @@
-name: Build the Hibiscus Istio ServiceImport pilot
+name: Build the Hibiscus Istio ambient pilot
 
 on:
   push:
@@ -38,12 +38,14 @@ jobs:
           test "$(git -C istio rev-parse HEAD)" = "$(jq -r .istioBase "$inputs")"
           jq -r '.patches[] | "\(.sha256)  \(.path)"' "$inputs" | sha256sum --check --strict
           mapfile -t patches < <(jq -r '.patches[].path' "$inputs")
-          test "${#patches[@]}" = 3
+          test "${#patches[@]}" = 4
           git -C istio apply --index --binary --whitespace=nowarn "../${patches[0]}"
           test "$(git -C istio write-tree)" = "$(jq -r .consumerTree "$inputs")"
           git -C istio apply --index --binary --whitespace=error-all "../${patches[1]}"
           test "$(git -C istio write-tree)" = "$(jq -r .producerTree "$inputs")"
           git -C istio apply --index --binary --whitespace=error-all "../${patches[2]}"
+          test "$(git -C istio write-tree)" = "$(jq -r .serviceImportConsumerTree "$inputs")"
+          git -C istio apply --index --binary --whitespace=error-all "../${patches[3]}"
           test "$(git -C istio write-tree)" = "$(jq -r .istioTree "$inputs")"
           git -C istio diff --exit-code
           test "$(go env GOVERSION)" = go1.27.4
@@ -53,15 +55,15 @@ jobs:
           git -C istio write-tree > result/pilot-tree.txt
           git -C istio -c tar.umask=0002 archive --format=tar --mtime=2026-01-01T00:00:00Z "$(cat result/pilot-tree.txt)" |
             sha256sum | sed 's/  -$/  istio-source.tar/' > result/pilot-source-sha256.txt
-      - name: Validate ServiceImport projection, HTTPRoute status, and waypoint configuration
+      - name: Validate HTTP and gRPC consumer routes and waypoint configuration
         working-directory: istio
         run: |
           set -euo pipefail
           export REPO_ROOT="$PWD"
-          go test -count=1 -v ./pilot/pkg/config/kube/gateway -run '^Test(ServiceImportRouteReconciliation|ServiceImportRouteOptOutPreservesForeignStatus|WaypointConsumerHTTPRouteContract)$' | tee ../result/gateway-tests.log
+          go test -count=1 -v ./pilot/pkg/config/kube/gateway -run '^Test(ServiceImportRouteReconciliation|ServiceImportRouteOptOutPreservesForeignStatus|WaypointConsumerHTTPRouteContract|WaypointConsumerGRPCRouteStatus)$' | tee ../result/gateway-tests.log
           go test -count=1 -v ./pilot/pkg/serviceregistry/ambient ./pkg/config/gateway/kube -run '^Test(AmbientServiceEntryFilterHandlesDeleteTombstone|ReadMCSImportRejectsUnsupportedTraffic)$' | tee ../result/projection-tests.log
-          go test -count=1 -v ./pilot/pkg/xds -run '^Test(WaypointServiceImportProducerRoute|WaypointServiceConsumerRoute)$' | tee ../result/waypoint-tests.log
-          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointConsumerHTTPRouteContract AmbientServiceEntryFilterHandlesDeleteTombstone ReadMCSImportRejectsUnsupportedTraffic WaypointServiceImportProducerRoute WaypointServiceConsumerRoute; do
+          go test -count=1 -v ./pilot/pkg/xds -run '^Test(WaypointServiceImportProducerRoute|WaypointServiceConsumerRoute|WaypointServiceConsumerGRPCRoute)$' | tee ../result/waypoint-tests.log
+          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointConsumerHTTPRouteContract AmbientServiceEntryFilterHandlesDeleteTombstone ReadMCSImportRejectsUnsupportedTraffic WaypointServiceImportProducerRoute WaypointServiceConsumerRoute WaypointServiceConsumerGRPCRoute WaypointConsumerGRPCRouteStatus; do
             grep -F -- "--- PASS: Test$test (" ../result/*-tests.log
           done
           grep -F -- "--- PASS: TestServiceImportRouteReconciliation/resolve_a_consumer_backend_independently_of_parent_acceptance (" ../result/gateway-tests.log
