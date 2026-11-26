@@ -124,9 +124,10 @@ func derive(imported *mcs.ServiceImport, endpointSlices []discoveryv1.EndpointSl
 	// An explicitly enrolled import can declare HTTP using appProtocol=http
 	// or use the conventional http[-suffix] port name with no appProtocol.
 	appProtocol := ptr.Deref(port.AppProtocol, "")
+	httpPort := appProtocol == "http" || appProtocol == "" && (port.Name == "http" || strings.HasPrefix(port.Name, "http-"))
 	if port.Port < 1 || port.Port > 65535 ||
 		port.Protocol != "" && port.Protocol != corev1.ProtocolTCP ||
-		appProtocol != "http" && !(appProtocol == "" && (port.Name == "http" || strings.HasPrefix(port.Name, "http-"))) {
+		!httpPort {
 		return projection{}, "SingleHTTPPortRequired"
 	}
 	portName := port.Name
