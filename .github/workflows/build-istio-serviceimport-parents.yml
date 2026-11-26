@@ -38,7 +38,7 @@ jobs:
           test "$(git -C istio rev-parse HEAD)" = "$(jq -r .istioBase "$inputs")"
           jq -r '.patches[] | "\(.sha256)  \(.path)"' "$inputs" | sha256sum --check --strict
           mapfile -t patches < <(jq -r '.patches[].path' "$inputs")
-          test "${#patches[@]}" = 4
+          test "${#patches[@]}" = 5
           git -C istio apply --index --binary --whitespace=nowarn "../${patches[0]}"
           test "$(git -C istio write-tree)" = "$(jq -r .consumerTree "$inputs")"
           git -C istio apply --index --binary --whitespace=error-all "../${patches[1]}"
@@ -46,6 +46,8 @@ jobs:
           git -C istio apply --index --binary --whitespace=error-all "../${patches[2]}"
           test "$(git -C istio write-tree)" = "$(jq -r .serviceImportConsumerTree "$inputs")"
           git -C istio apply --index --binary --whitespace=error-all "../${patches[3]}"
+          test "$(git -C istio write-tree)" = "$(jq -r .serviceConsumerGRPCTree "$inputs")"
+          git -C istio apply --index --binary --whitespace=error-all "../${patches[4]}"
           test "$(git -C istio write-tree)" = "$(jq -r .istioTree "$inputs")"
           git -C istio diff --exit-code
           test "$(go env GOVERSION)" = go1.27.4
@@ -60,14 +62,18 @@ jobs:
         run: |
           set -euo pipefail
           export REPO_ROOT="$PWD"
-          go test -count=1 -v ./pilot/pkg/config/kube/gateway -run '^Test(ServiceImportRouteReconciliation|ServiceImportRouteOptOutPreservesForeignStatus|WaypointConsumerHTTPRouteContract|WaypointConsumerGRPCRouteStatus)$' | tee ../result/gateway-tests.log
+          go test -count=1 -v ./pilot/pkg/config/kube/gateway -run '^Test(ServiceImportRouteReconciliation|ServiceImportRouteOptOutPreservesForeignStatus|WaypointConsumerHTTPRouteContract|WaypointConsumerHTTPRoutePolicyStatus|WaypointConsumerGRPCRouteStatus)$' | tee ../result/gateway-tests.log
           go test -count=1 -v ./pilot/pkg/serviceregistry/ambient ./pkg/config/gateway/kube -run '^Test(AmbientServiceEntryFilterHandlesDeleteTombstone|ReadMCSImportRejectsUnsupportedTraffic)$' | tee ../result/projection-tests.log
-          go test -count=1 -v ./pilot/pkg/xds -run '^Test(WaypointServiceImportProducerRoute|WaypointServiceConsumerRoute|WaypointServiceConsumerGRPCRoute)$' | tee ../result/waypoint-tests.log
-          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointConsumerHTTPRouteContract AmbientServiceEntryFilterHandlesDeleteTombstone ReadMCSImportRejectsUnsupportedTraffic WaypointServiceImportProducerRoute WaypointServiceConsumerRoute WaypointServiceConsumerGRPCRoute WaypointConsumerGRPCRouteStatus; do
+          go test -count=1 -v ./pilot/pkg/xds -run '^Test(WaypointServiceImportProducerRoute|WaypointServiceConsumerRoute|WaypointServiceConsumerGRPCRoute|WaypointRequestAuth|CrossNamespaceWaypointRequestAuth)$' | tee ../result/waypoint-tests.log
+          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointConsumerHTTPRouteContract WaypointConsumerHTTPRoutePolicyStatus AmbientServiceEntryFilterHandlesDeleteTombstone ReadMCSImportRejectsUnsupportedTraffic WaypointServiceImportProducerRoute WaypointServiceConsumerRoute WaypointServiceConsumerGRPCRoute WaypointConsumerGRPCRouteStatus WaypointRequestAuth CrossNamespaceWaypointRequestAuth; do
             grep -F -- "--- PASS: Test$test (" ../result/*-tests.log
           done
           grep -F -- "--- PASS: TestServiceImportRouteReconciliation/resolve_a_consumer_backend_independently_of_parent_acceptance (" ../result/gateway-tests.log
           grep -F -- "--- PASS: TestWaypointServiceImportProducerRoute/restrict_consumer_routes_to_their_caller_namespace (" ../result/waypoint-tests.log
+          grep -F -- "--- PASS: TestWaypointServiceConsumerRoute/preserve_owner_authorization (" ../result/waypoint-tests.log
+          for scenario in direct_forwarding request_header_modification empty_request_header_modifier request_and_response_header_modification; do
+            grep -F -- "--- PASS: TestWaypointConsumerHTTPRouteContract/$scenario (" ../result/gateway-tests.log
+          done
       - name: Build pilot-discovery from the verified tree
         working-directory: istio
         run: |
