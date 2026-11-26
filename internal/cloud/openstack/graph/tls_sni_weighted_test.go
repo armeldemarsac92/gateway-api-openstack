@@ -104,6 +104,68 @@ func TestSNIWeightedMembersAreStagedBeforePolicyActivation(t *testing.T) {
 	require.False(t, fragment.matches(target))
 }
 
+func TestSNIServiceImportOmitsMemberSubnetAndPreservesWeightedRejection(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := weightedSNITestRoute(id)
+	route.BackendSubnetID = "class-member-subnet"
+	route.BackendServices[1].UID = "service-import"
+	route.Members[1].RoutedExternal = true
+	route.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 5}
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	target := targets[0]
+	fragment := activeWeightedSNIFragment(target, "import")
+	fragment.members[0].SubnetID = route.BackendSubnetID
+	require.True(t, fragment.matches(target))
+	fragment.members[1].SubnetID = route.BackendSubnetID
+	require.False(t, fragment.matches(target), "an imported VIP must be confirmed without a member subnet")
+
+	var writes []string
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		writes = append(writes, req.Method)
+		require.Equal(t, "/lbaas/pools/pool-import/members", req.URL.Path)
+		var body struct {
+			Member    map[string]any
+			Members   []map[string]any
+			Rejection cloud.TCPConnectionRejection `json:"tcp_connection_rejection"`
+		}
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+		if req.Method == http.MethodPost {
+			require.Equal(t, route.Members[1].Address, body.Member["address"])
+			require.Equal(t, float64(route.Members[1].Port), body.Member["protocol_port"])
+			require.NotContains(t, body.Member, "subnet_id")
+			w.WriteHeader(http.StatusCreated)
+			safetyWriteJSON(t, w, map[string]any{"member": map[string]string{"id": "created"}})
+			return
+		}
+		require.Equal(t, http.MethodPut, req.Method)
+		require.Equal(t, *route.TCPConnectionRejection, body.Rejection)
+		require.Len(t, body.Members, 2)
+		require.Equal(t, route.BackendSubnetID, body.Members[0]["subnet_id"])
+		require.NotContains(t, body.Members[1], "subnet_id")
+		require.Equal(t, float64(2), body.Members[0]["weight"])
+		require.Equal(t, float64(6), body.Members[1]["weight"])
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	desired, actual := weightedSNITestGraph(id, targets)
+	require.NoError(t, provider.executeSNIMutation(t.Context(), desired, actual, sniMutation{
+		kind: sniReplaceTCPMembers, target: target, parentID: fragment.pool.ID,
+	}))
+	native := route
+	native.UseBackendPools([]cloud.TLSSNIBackendPool{
+		{Weight: 3, ServiceUID: "service-import", ServicePort: 443, Members: []cloud.Member{{Address: route.Members[1].Address, Port: 443, RoutedExternal: true}}},
+		{Weight: 2},
+	})
+	targets, err = buildSNITargets(id.Value(), []cloud.TLSSNIRoute{native})
+	require.NoError(t, err)
+	leaf := targets[0].backendPool(0)
+	require.NoError(t, provider.executeSNIMutation(t.Context(), desired, actual, sniMutation{
+		kind: sniCreateMember, target: leaf, parentID: fragment.pool.ID, member: leaf.route.Members[0], poolSlot: new(0),
+	}))
+	require.Equal(t, []string{http.MethodPut, http.MethodPost}, writes)
+}
+
 func TestSNIFailedDetachedBatchDoesNotBlockWithdrawalOrCleanup(t *testing.T) {
 	id := safetyTestIdentity(t)
 	route := weightedSNITestRoute(id)

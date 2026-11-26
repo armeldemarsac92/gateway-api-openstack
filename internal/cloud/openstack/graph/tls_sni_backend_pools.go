@@ -82,7 +82,9 @@ func normalizeSNIBackendPools(route *cloud.TLSSNIRoute) error {
 		if tls := backend.BackendTLS; tls != nil && (route.Passthrough || tls.Denied || len(tls.SubjectAltNames) != 0 || !validBackendTLS(tls)) {
 			return invalidSNI("weighted TLS SNI backend TLS requires an authorized CA and a DNS hostname")
 		}
-		members, err := normalizeSNIMembers(*route, backend.Members)
+		leaf := *route
+		leaf.BackendTLS = backend.BackendTLS
+		members, err := normalizeSNIMembers(leaf, backend.Members)
 		if err != nil {
 			return err
 		}
@@ -100,6 +102,7 @@ func normalizeSNIMembers(route cloud.TLSSNIRoute, members []cloud.Member) ([]clo
 		address, err := netip.ParseAddr(member.Address)
 		if err != nil || !address.Is4() || !address.IsGlobalUnicast() || address.IsLoopback() ||
 			member.Port < 1 || member.Port > 65535 || member.Draining || !validSNIMemberWeight(route, member.Weight) ||
+			member.RoutedExternal && (route.BackendTLS != nil || address.IsLinkLocalUnicast()) ||
 			i > 0 && members[i-1].Address == member.Address && members[i-1].Port == member.Port {
 			return nil, invalidSNI("invalid or duplicate IPv4 TLSRoute member")
 		}
@@ -577,7 +580,7 @@ func (fragment *observedSNIFragment) canKeepFlatSNI(key sniFragmentKey, target d
 		fragment.tcpRejection.Invalid || fragment.membersUnverified || len(fragment.members) == 0 {
 		return false
 	}
-	allowed := make(map[netip.AddrPort]bool)
+	allowed := make(map[netip.AddrPort]cloud.Member)
 	for slot, pool := range target.route.BackendPools {
 		// A missing reference can no longer prove which of the old,
 		// flattened destinations belonged to the withdrawn Service.
@@ -589,17 +592,22 @@ func (fragment *observedSNIFragment) canKeepFlatSNI(key sniFragmentKey, target d
 			if err != nil {
 				return false
 			}
-			allowed[netip.AddrPortFrom(address, uint16(member.Port))] = true
+			key := netip.AddrPortFrom(address, uint16(member.Port))
+			if previous, exists := allowed[key]; exists && previous.RoutedExternal != member.RoutedExternal {
+				return false
+			}
+			allowed[key] = member
 		}
 	}
 	proof := cloud.TLSSNIRoute{BackendSubnetID: target.route.BackendSubnetID}
 	for _, member := range fragment.members {
 		address, err := netip.ParseAddr(member.Address)
-		if err != nil || member.Weight < 1 || member.Weight > 256 ||
-			!allowed[netip.AddrPortFrom(address, uint16(member.ProtocolPort))] {
+		destination, found := allowed[netip.AddrPortFrom(address, uint16(member.ProtocolPort))]
+		if err != nil || !found || member.Weight < 1 || member.Weight > 256 {
 			return false
 		}
-		proof.Members = append(proof.Members, cloud.Member{Address: member.Address, Port: member.ProtocolPort, Weight: member.Weight})
+		destination.Weight = member.Weight
+		proof.Members = append(proof.Members, destination)
 	}
 	return fragment.matchesSNIMembers(proof)
 }

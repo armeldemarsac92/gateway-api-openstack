@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package httproute
+package controller
 
 import (
 	"context"
@@ -42,34 +42,42 @@ import (
 	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 	mcsclient "sigs.k8s.io/mcs-api/pkg/client/clientset/versioned/typed/apis/v1beta1"
 
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 const serviceImportCRDName = "serviceimports." + model.ServiceImportGroup
 
-// serviceImportWatch uses the existing metadata cache to notice CRD lifecycle changes.
+// ServiceImportWatch uses the existing metadata cache to notice CRD lifecycle changes.
 // The optional ServiceImport informer never gates the manager's required caches.
-type serviceImportWatch struct {
+type ServiceImportWatch struct {
 	reader      client.Reader
 	imports     mcsclient.ServiceImportInterface
 	refresh     workqueue.TypedRateLimitingInterface[string]
 	subscribers []chan event.GenericEvent
 }
 
-func newServiceImportWatch(manager ctrl.Manager) (*serviceImportWatch, error) {
+// SetupServiceImportWatch registers one optional informer shared by the route controllers.
+func SetupServiceImportWatch(manager ctrl.Manager, enabled bool) (*ServiceImportWatch, error) {
+	if !enabled {
+		return nil, nil
+	}
 	client, err := mcsclient.NewForConfigAndClient(manager.GetConfig(), manager.GetHTTPClient())
 	if err != nil {
 		return nil, fmt.Errorf("create ServiceImport watch client: %w", err)
 	}
-	return &serviceImportWatch{
+	watch := &ServiceImportWatch{
 		reader:  manager.GetAPIReader(),
 		imports: client.ServiceImports(metav1.NamespaceAll),
 		refresh: workqueue.NewTypedRateLimitingQueue(workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Second, 30*time.Second)),
-	}, nil
+	}
+	if err := manager.Add(watch); err != nil {
+		return nil, err
+	}
+	return watch, nil
 }
 
-func (w *serviceImportWatch) watchCRD(setup *builder.Builder) {
+// WatchCRD registers the CRD lifecycle watch on one controller.
+func (w *ServiceImportWatch) WatchCRD(setup *builder.Builder) {
 	setup.WatchesMetadata(&apiextensionsv1.CustomResourceDefinition{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request {
 		w.refresh.Add(serviceImportCRDName)
 		return nil
@@ -78,15 +86,16 @@ func (w *serviceImportWatch) watchCRD(setup *builder.Builder) {
 	})))
 }
 
-func (*serviceImportWatch) NeedLeaderElection() bool { return true }
+func (*ServiceImportWatch) NeedLeaderElection() bool { return true }
 
-func (w *serviceImportWatch) subscribe(mapEvent handler.MapFunc) source.Source {
+// Subscribe returns a controller source for import and CRD lifecycle events.
+func (w *ServiceImportWatch) Subscribe(mapEvent handler.MapFunc) source.Source {
 	events := make(chan event.GenericEvent, 128)
 	w.subscribers = append(w.subscribers, events)
 	return source.Channel(events, handler.EnqueueRequestsFromMapFunc(mapEvent))
 }
 
-func (w *serviceImportWatch) Start(ctx context.Context) error {
+func (w *ServiceImportWatch) Start(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		w.refresh.ShutDown()
@@ -126,7 +135,7 @@ func (w *serviceImportWatch) Start(ctx context.Context) error {
 	}
 }
 
-func (w *serviceImportWatch) servedCRD(ctx context.Context) (types.UID, error) {
+func (w *ServiceImportWatch) servedCRD(ctx context.Context) (types.UID, error) {
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var crd apiextensionsv1.CustomResourceDefinition
@@ -146,7 +155,7 @@ func (w *serviceImportWatch) servedCRD(ctx context.Context) (types.UID, error) {
 	return crd.UID, nil
 }
 
-func (w *serviceImportWatch) watchResource(ctx context.Context) error {
+func (w *ServiceImportWatch) watchResource(ctx context.Context) error {
 	informer := cache.NewSharedIndexInformer(&cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			return w.imports.List(ctx, options)
@@ -187,7 +196,7 @@ func equalServiceImportReadiness(previous, current *mcs.ServiceImport) bool {
 	return *before == *after
 }
 
-func (w *serviceImportWatch) notify(ctx context.Context, object client.Object) {
+func (w *ServiceImportWatch) notify(ctx context.Context, object client.Object) {
 	for _, events := range w.subscribers {
 		select {
 		case events <- event.GenericEvent{Object: object}:
@@ -195,17 +204,4 @@ func (w *serviceImportWatch) notify(ctx context.Context, object client.Object) {
 			return
 		}
 	}
-}
-
-func (r *Reconciler) enqueueRoutesForServiceImport(ctx context.Context, object client.Object) []reconcile.Request {
-	value := controller.ServiceImportIndexAll
-	if object.GetName() != "" {
-		value = controller.ObjectKeyString(client.ObjectKeyFromObject(object))
-	}
-	routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByServiceImport: value})
-	if err != nil {
-		log.FromContext(ctx).Error(err, "Could not list routes for ServiceImport", "serviceImport", client.ObjectKeyFromObject(object))
-		return nil
-	}
-	return r.enqueueHTTPRouteConsumers(ctx, routes)
 }

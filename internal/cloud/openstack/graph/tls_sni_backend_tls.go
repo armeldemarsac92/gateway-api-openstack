@@ -50,32 +50,60 @@ func sniTLSBackendServiceTag(uid string, port int) string {
 	return openstackidentity.Tag("sni-backend", fmt.Sprintf("%x", hash))
 }
 
-// An older protected pool without a destination tag still protects aliases
-// on its owning route. A tagged pool protects exactly its Service and port.
+func onlyRoutedSNIMembers(route cloud.TLSSNIRoute) bool {
+	return len(route.Members) != 0 && !slices.ContainsFunc(route.Members, func(member cloud.Member) bool {
+		return !member.RoutedExternal
+	})
+}
+
+// A protected pool with a known destination protects its exact Service port.
 func (fragment *observedSNIFragment) protectsService(key sniFragmentKey, target desiredSNIFragment) bool {
-	if !fragment.protectedBackendTLS() {
+	sameSelector := fragment.selectorHostname() == target.route.Hostname
+	return fragment.protectsBackend(key, target, sameSelector)
+}
+
+func (fragment *observedSNIFragment) protectsBackend(key sniFragmentKey, target desiredSNIFragment, sameSelector bool) bool {
+	if onlyRoutedSNIMembers(target.route) || !fragment.protectedBackendTLS() {
 		return false
 	}
 	if fragment.backendPools != nil {
 		for _, leaf := range fragment.backendPools {
-			if leaf.protectsService(key, target) {
+			if leaf.protectsBackend(key, target, sameSelector) {
 				return true
 			}
 		}
 		return false
 	}
-	if target.route.ServicePort != 0 && slices.Contains(fragment.pool.Tags, sniBackendServiceTag(target.route)) {
+	identity := sniKnownBackendServiceTag(fragment.pool.Tags)
+	if identity == "" {
+		// A legacy or ambiguous pool can still protect its owning Route or
+		// an exact selector that would otherwise succeed it in plaintext.
+		return sameSelector || key.sniRouteKey == target.key.sniRouteKey
+	}
+	if target.route.ServicePort != 0 && identity == sniBackendServiceTag(target.route) {
 		return true
 	}
 	for _, service := range target.route.BackendServices {
-		if slices.Contains(fragment.pool.Tags, sniTLSBackendServiceTag(service.UID, service.Port)) {
+		if identity == sniTLSBackendServiceTag(service.UID, service.Port) {
 			return true
 		}
 	}
-	return key.sniRouteKey == target.key.sniRouteKey && !slices.ContainsFunc(fragment.pool.Tags, func(tag string) bool {
-		name, _, valid := openstackidentity.ParseTag(tag)
-		return valid && name == "sni-backend"
-	})
+	return sameSelector && target.route.ServicePort == 0 && len(target.route.BackendServices) == 0
+}
+
+func sniKnownBackendServiceTag(tags []string) string {
+	var identity string
+	for _, tag := range tags {
+		name, encoded, valid := openstackidentity.ParseTag(tag)
+		if !valid || name != "sni-backend" {
+			continue
+		}
+		if identity != "" || !openstackidentity.ValidSNITarget(encoded) {
+			return ""
+		}
+		identity = tag
+	}
+	return identity
 }
 
 // Keep one obsolete authenticated pool per Service port until Octavia
@@ -131,7 +159,7 @@ func sniBackendTLSWitnesses(wanted map[sniFragmentKey]desiredSNIFragment, observ
 			for _, service := range target.route.BackendServices {
 				destination := target
 				destination.route.ServiceUID, destination.route.ServicePort = service.UID, service.Port
-				destination.route.BackendServices = nil
+				destination.route.BackendServices, destination.route.Members = nil, nil
 				retain(destination)
 			}
 		}
@@ -281,10 +309,11 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 			target.backendTLS = p.observeBackendTLS(ctx, route, observed, func(bool, bool) bool { return authorized },
 				desired.spec.Gateway.BackendCAOwned, clientIdentity)
 			blocked = target.backendTLS.denies()
-		} else if !target.route.Deny && (!capable || !desired.spec.Gateway.SNIPoliciesObserved) {
+		} else if !target.route.Deny && !onlyRoutedSNIMembers(target.route) && (!capable || !desired.spec.Gateway.SNIPoliciesObserved) {
+			includesImport := slices.ContainsFunc(target.route.Members, func(member cloud.Member) bool { return member.RoutedExternal })
 			for key, fragment := range actual.sni {
 				if fragment.protectsService(key, target) ||
-					fragment.protectedBackendTLS() && fragment.selectorHostname() == target.route.Hostname {
+					!includesImport && fragment.protectedBackendTLS() && fragment.selectorHostname() == target.route.Hostname {
 					blocked = true
 					break
 				}

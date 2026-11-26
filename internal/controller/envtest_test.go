@@ -355,6 +355,19 @@ func TestControllerEnvtest(t *testing.T) {
 		startManager(t, managerConfig, importsConfig, provider)
 		testServiceImportBackends(t, restConfig, apiClient, importsConfig, provider, probe)
 	})
+	t.Run("TLSRoute ServiceImport backend lifecycle", func(t *testing.T) {
+		importsConfig := config
+		importsConfig.ControllerName = "tls-import.example.com/gateway-api-openstack"
+		importsConfig.MulticlusterServiceImports, importsConfig.FixedHTTPResponses = true, true
+		importsConfig.TLSSNIPassthrough, importsConfig.TCPConnectionRejection, importsConfig.BackendTLSPolicy = true, true, true
+		importsConfig.OpenStackResyncInterval = 5 * time.Minute
+		provider := &recordingProvider{}
+		probe := &serviceImportAPITestProbe{}
+		managerConfig := rest.CopyConfig(restConfig)
+		managerConfig.Wrap(probe.wrap)
+		startManager(t, managerConfig, importsConfig, provider)
+		testTLSRouteServiceImportBackends(t, restConfig, apiClient, importsConfig, provider, probe)
+	})
 	t.Run("BackendTLSPolicy follows authorized Service and CA changes", func(t *testing.T) {
 		tlsConfig := config
 		tlsConfig.ControllerName = "backendtls.example.com/gateway-api-openstack"

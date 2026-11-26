@@ -570,14 +570,21 @@ func (fragment *observedSNIFragment) matchesSNISelector(wanted desiredSNIFragmen
 		fragment.rule.Key == "" && fragment.rule.Value == wanted.route.Hostname
 }
 
+func sniMemberSubnet(route cloud.TLSSNIRoute, member cloud.Member) string {
+	if member.RoutedExternal {
+		return ""
+	}
+	return route.BackendSubnetID
+}
+
 func (fragment *observedSNIFragment) matchesSNIMembers(route cloud.TLSSNIRoute) bool {
 	type memberAddress struct {
 		address string
 		port    int
 	}
-	wanted := make(map[memberAddress]int, len(route.Members))
+	wanted := make(map[memberAddress]cloud.Member, len(route.Members))
 	for _, member := range route.Members {
-		wanted[memberAddress{member.Address, member.Port}] = max(1, member.Weight)
+		wanted[memberAddress{member.Address, member.Port}] = member
 	}
 	seen := make(map[netip.AddrPort]bool)
 	for _, member := range fragment.members {
@@ -586,9 +593,11 @@ func (fragment *observedSNIFragment) matchesSNIMembers(route cloud.TLSSNIRoute) 
 			return false
 		}
 		key := netip.AddrPortFrom(address, uint16(member.ProtocolPort))
-		if seen[key] || member.ProvisioningStatus != "ACTIVE" || !member.AdminStateUp || member.Backup ||
-			route.BackendSubnetID != "" && member.SubnetID != route.BackendSubnetID ||
-			member.Weight < 1 || wanted[memberAddress{member.Address, member.ProtocolPort}] != member.Weight {
+		destination, found := wanted[memberAddress{member.Address, member.ProtocolPort}]
+		subnet := sniMemberSubnet(route, destination)
+		if !found || seen[key] || member.ProvisioningStatus != "ACTIVE" || !member.AdminStateUp || member.Backup ||
+			(destination.RoutedExternal || subnet != "") && member.SubnetID != subnet ||
+			member.Weight != max(1, destination.Weight) {
 			return false
 		}
 		seen[key] = true
@@ -856,6 +865,27 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 				message:  "Suspending TLS SNI suffix policy without its regional capability"})
 		}
 	}
+	if actual.listener != nil && actual.listener.AdminStateUp {
+		for _, key := range retire {
+			fragment := actual.sni[key]
+			hostname := fragment.forwardingHostname()
+			target, claimed := byHostname[hostname]
+			if !claimed || target.route.Deny || !fragment.hasForwardingMembers() || !hasSNIFallback(hostname, desired.sni, actual.sni) {
+				continue
+			}
+			changedOwner := key.sniRouteKey != target.key.sniRouteKey
+			changedImport := key != target.key && fragment.backendPools == nil && !fragment.weighted() &&
+				!target.weighted() && onlyRoutedSNIMembers(target.route)
+			if !changedOwner && !changedImport {
+				continue
+			}
+			// Keep the selector ahead of the fallback while the successor
+			// is staged, even if allocation of its new pool cannot proceed.
+			if leaf := fragment.firstOpenPool(); leaf != nil {
+				return plan(sniRestrictMembers(leaf))
+			}
+		}
+	}
 	if step, needed, waiting := stageSNIBackendPoolSuccessor(desired, actual, keys); needed {
 		return plan(step)
 	} else if waiting {
@@ -894,20 +924,6 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 				}
 			}
 			return plan(step)
-		}
-		for _, key := range retire {
-			fragment := actual.sni[key]
-			hostname := fragment.forwardingHostname()
-			target, claimed := byHostname[hostname]
-			if claimed && !target.route.Deny && key.sniRouteKey != target.key.sniRouteKey && fragment.hasForwardingMembers() &&
-				hasSNIFallback(hostname, desired.sni, actual.sni) {
-				// Keep the selector ahead of the fallback while the successor
-				// is staged. Its former owner's destinations can be withdrawn
-				// even if Octavia cannot allocate a replacement pool.
-				if leaf := fragment.firstOpenPool(); leaf != nil {
-					return plan(sniRestrictMembers(leaf))
-				}
-			}
 		}
 		// Stage new negative claims first. Enabling their empty target can
 		// only restrict the existing frontend.
@@ -1225,7 +1241,7 @@ func (p *Provider) executeSNIMutation(ctx context.Context, desired desiredGatewa
 		return err
 	case sniCreateMember:
 		_, err := p.octavia.CreateMember(ctx, step.parentID, pools.CreateMemberOpts{
-			Address: step.member.Address, ProtocolPort: step.member.Port, SubnetID: step.target.route.BackendSubnetID,
+			Address: step.member.Address, ProtocolPort: step.member.Port, SubnetID: sniMemberSubnet(step.target.route, step.member),
 			AdminStateUp: boolPointer(true), Weight: new(max(1, step.member.Weight)), Tags: tagsFor(roleSNIMember),
 		})
 		return err

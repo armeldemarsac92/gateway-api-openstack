@@ -31,6 +31,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
+	"github.com/stretchr/testify/require"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
@@ -1324,6 +1325,51 @@ func testTCPTLSFrontendLifecycle(t *testing.T, protocol, requiredCapability stri
 			}
 			current = profile.provider
 		}
+	}
+}
+
+func TestSNIRotatesImportedVIPBeforeAllocatingReplacement(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTLSSNI, cloud.ListenerProtocolTLSTerminate} {
+		t.Run(protocol, func(t *testing.T) {
+			id := safetyTestIdentity(t)
+			exact := cloud.TLSSNIRoute{Identity: id.Value(), Hostname: "api.example.test", ServiceUID: "import-uid", ServicePort: 443,
+				Members: []cloud.Member{{Address: "10.4.0.21", Port: 443, RoutedExternal: true}}}
+			wildcard := cloud.TLSSNIRoute{Identity: id.Value(), Hostname: "*.example.test", ServiceUID: "service-uid", ServicePort: 443,
+				Members: []cloud.Member{{Address: "192.0.2.30", Port: 8443}}}
+			wildcard.Identity.RouteName, wildcard.Identity.RouteUID = "fallback", "fallback-uid"
+			old, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{exact, wildcard})
+			require.NoError(t, err)
+			exact.Members = []cloud.Member{{Address: "10.4.0.22", Port: 443, RoutedExternal: true}}
+			targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{exact, wildcard})
+			require.NoError(t, err)
+			desired, actual := weightedSNITestGraph(id, targets)
+			desired.protocol, actual.protocol = protocol, protocol
+			actual.rawTLSVerified, actual.rawTLSCapabilityVerified = true, true
+			obsolete := activeSNIFragment(old[0], "old-vip")
+			fallback := activeSNIFragment(old[1], "fallback")
+			actual.sni[old[0].key], actual.sni[old[1].key] = obsolete, fallback
+
+			provider := &Provider{}
+			next := func() graphMutation {
+				t.Helper()
+				steps, _, err := provider.buildSNIGraphPlan(desired, actual)
+				require.NoError(t, err)
+				require.Len(t, steps, 1)
+				return steps[0]
+			}
+			first := next()
+			require.True(t, first.isRestrictiveSNI())
+			require.Equal(t, sniClearMembers, first.sni.kind)
+			require.Equal(t, obsolete.pool.ID, first.sni.parentID)
+			// Once Octavia confirms the empty pool, a quota failure on the next
+			// create leaves the exact selector rejecting ahead of the wildcard.
+			obsolete.members = nil
+			allocation := next()
+			require.Equal(t, sniCreatePool, allocation.sni.kind)
+			require.Equal(t, targets[0].key, allocation.sni.target.key)
+			require.True(t, obsolete.hasActiveSelector(exact.Hostname))
+			require.True(t, fallback.hasActiveSelector(wildcard.Hostname))
+		})
 	}
 }
 

@@ -78,7 +78,11 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 			Region: region, Endpoint: "https://barbican.example", Reader: manager.GetAPIReader(),
 		}
 	}
-	if err := gateway.SetupWithManager(manager); err != nil {
+	importWatch, err := controller.SetupServiceImportWatch(manager, cfg.MulticlusterServiceImports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gateway.SetupWithManager(manager, importWatch); err != nil {
 		t.Fatal(err)
 	}
 	if err := listenerset.SetupWithManager(t.Context(), manager, cfg.ControllerName); err != nil {
@@ -102,7 +106,7 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	if err := udp.SetupWithManager(manager); err != nil {
 		t.Fatal(err)
 	}
-	if err := route.SetupWithManager(manager); err != nil {
+	if err := route.SetupWithManager(manager, importWatch); err != nil {
 		t.Fatal(err)
 	}
 	return writer
