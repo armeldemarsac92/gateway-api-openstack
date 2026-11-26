@@ -341,6 +341,49 @@ By default, the controller withdraws forwarding for the whole route if any posit
 
 To expose more than one TCP port on this Gateway, configure every listener as TCP and give each a distinct name and port. Use one rule per TCPRoute. Standard and Experimental both support several explicit Gateway parents. Each Gateway attaches and programs the route independently on its own VIP. Experimental also supports default attachment. A Gateway-wide parent attaches to every eligible TCP listener. A parent with `sectionName`, `port` or both selects the exact matching listener. Each listener elects the oldest eligible route, breaking equal creation timestamps by namespace and name. A port with an unusable winning backend stays without forwarding until that route recovers or loses the listener election. A route that wins on multiple ports of one Gateway shares its pool across those ports. Verify that your VIP security group allows each port. Complete the controller rollout before adding the second port to an existing Gateway. After updating the Gateway or a route, check `Programmed=True` for the current generation on each Gateway and its selected listeners and check the route’s `<controller-domain>/Programmed` condition for each parent. Test a fresh connection to each port. [Enrollment and rollback](operator-recovery.md#multiport-tcp-upgrades)
 
+### Forward TCP to an Experimental XBackend
+
+The local TCPRoute trial recorded binary echoes and connection closures during selector and readiness changes. [TCPRoute status and per-origin counts](qualification/v1.7.0/provider/tcproute-xbackend/README.md)
+
+Install the Gateway API v1.7.0 Experimental bundle, include the controller's `config/components/experimental` overlay, and pass `--gateway-api-channel=experimental`. Use a TCP Gateway with [Endpoint member mode and Unmanaged backend security](reference/class-configuration.md#direct-endpoint-members). The Amphora must reach the selected IPv4 Pod addresses on the XBackend port.
+
+The following example assumes a TCP listener named `postgres` on `database-edge` and ready Pods labeled `app: database` in the same namespace. The XBackend's `spec.port.number` supplies the destination port. Omit `port` from its route reference. Keep the XBackend in the route's namespace, even if the Gateway is elsewhere.
+
+```yaml
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XBackend
+metadata:
+  name: database-pods
+  namespace: gateway-api-openstack-demo
+spec:
+  type: EndpointSelector
+  protocol: TCP
+  port:
+    number: 5432
+  endpointSelector:
+    matchLabels:
+      app: database
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  name: database
+  namespace: gateway-api-openstack-demo
+spec:
+  parentRefs:
+    - name: database-edge
+      sectionName: postgres
+  rules:
+    - backendRefs:
+        - group: gateway.networking.x-k8s.io
+          kind: XBackend
+          name: database-pods
+```
+
+Omitting `protocol` inherits TCP from the route. Omit `tls` or set `tls.mode: None`. This profile supports Pod selectors for raw TCP. DNS `ExternalHostname` and controller-initiated TLS require separate transport support. Cookie and Header persistence apply to HTTP application traffic.
+
+A TCPRoute can combine XBackends and Endpoint Services using the same backend weights. Where an operator has enabled [proportional TCP connection rejection](operator-octavia-tcp-connection-rejection.md), an invalid XBackend or one without eligible Pods contributes its positive weight to rejection. Check `status.ancestors` for the XBackend's current-generation `Accepted` condition for the TCP Gateway. Check the TCPRoute's `ResolvedRefs` and `<controller-domain>/Programmed` conditions, then send an application request with a TCP client through the Gateway address. The local controller test observes programming intent and Kubernetes status with an API server. Amphora traffic and regional behavior require separate qualification.
+
 ## Forward UDP to a Service
 
 Create a dedicated Gateway with one UDP listener. This example assumes DNS pods labeled `app: example-dns` in `gateway-api-openstack-demo` that serve UDP on port 53. It uses the existing `openstack` GatewayClass in its default NodePort mode. Amphora needs to reach the allocated UDP NodePort on eligible workers, and the Service needs ready endpoints.

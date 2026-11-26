@@ -18,18 +18,14 @@ package httproute
 
 import (
 	"context"
-	"maps"
-	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
@@ -86,7 +82,7 @@ func (r *Reconciler) enqueueXBackendRoutesForCA(ctx context.Context, object clie
 func (r *Reconciler) enqueueHTTPRoutesForXBackendPod(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
 	var consumers []gatewayv1.HTTPRoute
-	for _, request := range r.enqueueXBackendsForPod(ctx, object) {
+	for _, request := range controller.XBackendsForPod(ctx, r.Client, object) {
 		routes, err := r.listXBackendConsumers(ctx, request.NamespacedName)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for XBackend", "xBackend", request.NamespacedName)
@@ -101,52 +97,6 @@ func (r *Reconciler) enqueueHTTPRoutesForXBackendPod(ctx context.Context, object
 		}
 	}
 	return r.enqueueHTTPRouteConsumers(ctx, consumers)
-}
-
-func (r *Reconciler) enqueueXBackendsForPod(ctx context.Context, object client.Object) []reconcile.Request {
-	pod, ok := object.(*corev1.Pod)
-	if !ok || !model.XBackendPodReady(pod) {
-		return nil
-	}
-	keys := map[types.NamespacedName]struct{}{}
-	for key, value := range pod.Labels {
-		var backends gatewayx.XBackendList
-		if err := r.List(ctx, &backends, client.InNamespace(pod.Namespace), client.MatchingFields{
-			controller.IndexXBackendByPodLabel: controller.PodLabelIndexKey(key, value),
-		}); err != nil {
-			log.FromContext(ctx).Error(err, "Could not list XBackends matching Pod labels", "pod", client.ObjectKeyFromObject(pod))
-			continue
-		}
-		for i := range backends.Items {
-			backend := &backends.Items[i]
-			if backend.DeletionTimestamp.IsZero() && model.XBackendSelectsLabels(backend.Spec, pod.Labels) {
-				keys[client.ObjectKeyFromObject(backend)] = struct{}{}
-			}
-		}
-	}
-	return controller.SortedRequests(keys)
-}
-
-func xBackendPodPredicate() predicate.Predicate {
-	ready := func(object client.Object) bool {
-		pod, ok := object.(*corev1.Pod)
-		return ok && model.XBackendPodReady(pod)
-	}
-	return predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool { return ready(e.Object) },
-		DeleteFunc: func(e event.DeleteEvent) bool { return ready(e.Object) },
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldPod, oldOK := e.ObjectOld.(*corev1.Pod)
-			newPod, newOK := e.ObjectNew.(*corev1.Pod)
-			if !oldOK || !newOK {
-				return false
-			}
-			oldReady, newReady := model.XBackendPodReady(oldPod), model.XBackendPodReady(newPod)
-			return oldReady != newReady || newReady &&
-				(!maps.Equal(oldPod.Labels, newPod.Labels) || oldPod.Status.PodIP != newPod.Status.PodIP ||
-					!slices.Equal(oldPod.Status.PodIPs, newPod.Status.PodIPs))
-		},
-	}
 }
 
 func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
@@ -183,6 +133,9 @@ func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 	}
 	if served {
 		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForListenerSet)))
+	}
+	if r.TCPRoutes != nil {
+		r.TCPRoutes.WatchXBackendAncestors(setup)
 	}
 	return setup.Named("xbackend").
 		Complete(status)

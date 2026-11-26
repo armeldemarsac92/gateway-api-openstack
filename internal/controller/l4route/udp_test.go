@@ -160,7 +160,7 @@ func TestUDPNodePortSelectsVIPFamilyOnDualStackWorker(t *testing.T) {
 	r := testReconciler(t, objects...)
 	r.Protocol = gatewayv1.UDPProtocolType
 	placement := classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeNodePort}, NodeAddressType: corev1.NodeInternalIP}
-	backends := []serviceBackend{{ref: serviceReference{port: ptr.To(gatewayv1.PortNumber(8080)), weight: 1}, service: service, port: &service.Spec.Ports[0]}}
+	backends := []transportBackend{{ref: backendReference{port: ptr.To(gatewayv1.PortNumber(8080)), weight: 1}, service: service, port: &service.Spec.Ports[0]}}
 	for _, tc := range []struct{ vip, workerIP string }{{"192.0.2.30", "192.0.2.44"}, {"2001:db8::30", "2001:db8::44"}} {
 		gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: tc.vip}}
 		spec, _, diagnostic, err := r.routeSpec(t.Context(), viewRoute(route), gateway, &gateway.Spec.Listeners[0], backends, placement)

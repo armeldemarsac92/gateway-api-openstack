@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -57,7 +58,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	}
 	routeChanges := builder.WithPredicates(r.routeChanges())
 	route := r.newRouteObject()
-	return ctrl.NewControllerManagedBy(manager).
+	setup := ctrl.NewControllerManagedBy(manager).
 		For(route, routeChanges).
 		Watches(route, handler.EnqueueRequestsFromMapFunc(r.enqueuePeers), routeChanges).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
@@ -68,8 +69,12 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.enqueueEndpointSlice), builder.WithPredicates(controller.EndpointSlicePredicate())).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.enqueueNode), builder.WithPredicates(controller.NodePredicate(""))).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueGrant), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
-		Named(strings.ToLower(string(r.kind()))).
-		Complete(r)
+		Named(strings.ToLower(string(r.kind())))
+	if r.tcpXBackendsEnabled() {
+		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
+			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTCPRoutesForXBackendPod), builder.WithPredicates(controller.XBackendPodPredicate()))
+	}
+	return setup.Complete(r)
 }
 
 func (r *Reconciler) routeChanges() predicate.Predicate {

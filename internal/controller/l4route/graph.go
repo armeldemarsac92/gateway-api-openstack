@@ -53,9 +53,10 @@ type listenerElection struct {
 }
 
 type routeBackendRevisions struct {
-	class    objectRevision
-	grants   []objectRevision
-	services []objectRevision
+	class     objectRevision
+	grants    []objectRevision
+	services  []objectRevision
+	xBackends []xBackendRevision
 }
 
 // routeCandidateRevision excludes status so observing an unbound route's
@@ -315,11 +316,12 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if collect {
 		mode = topology.Topology.MemberMode
 	}
-	services, invalid, err := r.backendServices(ctx, refs, "", mode, collect)
+	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, topology.Topology.MemberMode, collect)
+	revisions.services = invalid.services
+	revisions.xBackends = invalid.xBackends
 	if err != nil || invalid.active != nil && !collect {
 		return nil, "", revisions, err
 	}
-	revisions.services = invalid.services
 	rejectWeight := auth.rejectWeight + invalid.rejectWeight
 	if readErr := errors.Join(auth.readError, invalid.readError); readErr != nil {
 		if rejectWeight > 0 {
@@ -327,10 +329,10 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 		}
 		return nil, "", revisions, readErr
 	}
-	if len(services) == 0 && rejectWeight == 0 {
+	if len(backends) == 0 && rejectWeight == 0 {
 		return nil, "", revisions, nil
 	}
-	spec, target, diagnostic, err := r.buildRouteSpec(ctx, route, gateway, listener, services, rejectWeight, topology, ports...)
+	spec, target, diagnostic, err := r.buildRouteSpec(ctx, route, gateway, listener, backends, rejectWeight, topology, ports...)
 	if err != nil && rejectWeight > 0 {
 		return nil, "", revisions, nil
 	}
