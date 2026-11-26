@@ -55,6 +55,7 @@ import (
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/ambientmesh"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/ambientmesh/mcsprojection"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
@@ -116,6 +117,7 @@ func run(ctx context.Context) error {
 		apiBurst           int
 	)
 	var multiclusterServiceImports bool
+	var istioAmbientServiceImports bool
 	var istioAmbientXMesh bool
 	var istioAmbientXMeshName string
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
@@ -140,6 +142,7 @@ func run(ctx context.Context) error {
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
 	flag.BoolVar(&multiclusterServiceImports, "multicluster-service-imports", false, "enable IPv4 ClusterSetIP and Headless ServiceImport backends for Gateway HTTPRoute, GRPCRoute, TLSRoute, TCPRoute and UDPRoute (requires --octavia-fixed-http-responses)")
+	flag.BoolVar(&istioAmbientServiceImports, "istio-ambient-service-imports", false, "project enrolled MCS ClusterSetIP ServiceImports into Hibiscus Istio ambient")
 	flag.BoolVar(&istioAmbientXMesh, "istio-ambient-xmesh", false, "publish an Experimental XMesh for the opt-in Hibiscus Istio ambient integration")
 	flag.StringVar(&istioAmbientXMeshName, "istio-ambient-xmesh-name", ambientmesh.DefaultName, "name of the installation XMesh created when ambient XMesh reporting is enabled")
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
@@ -498,6 +501,11 @@ func run(ctx context.Context) error {
 		instance := ambientmesh.Instance(version, os.Getenv("GATEWAY_OPENSTACK_POD_NAMESPACE"))
 		if err := ambientmesh.SetupWithManager(ctx, manager, istioAmbientXMeshName, instance); err != nil {
 			return fmt.Errorf("set up Istio ambient XMesh controller: %w", err)
+		}
+	}
+	if istioAmbientServiceImports {
+		if err := mcsprojection.SetupWithManager(manager); err != nil {
+			return fmt.Errorf("set up Istio ambient ServiceImport projector: %w", err)
 		}
 	}
 	if err := manager.AddHealthzCheck("healthz", healthz.Ping); err != nil {
