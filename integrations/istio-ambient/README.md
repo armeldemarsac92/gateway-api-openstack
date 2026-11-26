@@ -29,7 +29,7 @@ To return to the standard pilot, remove the consumer routes and verify the produ
 
 ## Report mesh capabilities on Experimental
 
-On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. Pin an image built from a controller revision that includes `--istio-ambient-xmesh`. Use the existing cluster ID and OpenStack settings. An installation already based on Experimental can add the `config/components/istio-ambient-xmesh` component to its overlay. The component passes the flag and adds the API permissions for reporting.
+On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. Pin the reporting controller image from this release and enable `--istio-ambient-xmesh`. When upgrading to a Hibiscus ServiceImport pilot, roll out the updated reporting controller before istiod. Earlier reporting controllers leave XMesh at `Programmed=Unknown/Pending` with zero features when they see either ServiceImport pilot digest. Use the existing cluster ID and OpenStack settings. [Controller image digest](../../docs/qualification/v1.7.0/image.json) An installation already based on Experimental can add the `config/components/istio-ambient-xmesh` component to its overlay. The component passes the flag and adds the API permissions for reporting.
 
 For Magnum, render the dedicated workload overlay from the repository root. Record the exact rendered file's SHA-256 in `gateway_api_manifest_sha256` and the compatible controller image digest in `gateway_api_controller_image`. [Magnum addon configuration](../../docs/qualification/v1.7.0/magnum-operator.md#build-and-configure)
 
@@ -48,7 +48,7 @@ rtk kubectl --kubeconfig "$kubeconfig" --context "$context" get xmesh hibiscus-i
 
 The XMesh controller identity is `gateway-api-openstack.github.io/istio-ambient`. Every XMesh selecting it is reconciled. `Accepted=True` at the XMesh's generation means the reporting configuration was accepted. This integration has no XMesh parameters, so setting `spec.parametersRef` produces `Accepted=False` with reason `InvalidParameters`.
 
-`Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The two pinned pilot images advertise the same set. The consumer pilot extension supports the limited cross-namespace response header behavior described above.
+`Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The stock pilot, the limited Service consumer pilot and both Hibiscus ServiceImport pilot releases advertise these same 16 features when their rollouts are ready. The consumer pilot extension supports the limited cross-namespace response header behavior described above.
 
 The module sets `AMBIENT_ENABLED=true` and `AMBIENT_IPV6=false` directly in the CNI Pod template. Existing Pods keep their startup environment when a ConfigMap changes. For an installation that still reads these two values from a ConfigMap, rerun the module's install command with the same options. XMesh waits for the updated DaemonSet to finish rolling out before advertising features.
 
@@ -99,7 +99,7 @@ The operator must qualify the site's CNI, workload policies and provider topolog
 
 ## Mesh ServiceImport opt-in
 
-Append `--service-import-parents` to the render or install command to select the Hibiscus pilot with ServiceImport parent support. This image also includes consumer HTTPRoutes. The option enables `PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE` and disables Istio’s classic MCS host registration. [Pinned pilot image](service-import-parents.yaml) · [Signed source and build inputs](https://github.com/armeldemarsac92/gateway-api-openstack/blob/82213f2b4cf5996d628272ed99cedf90914eaa5f/istio-serviceimport-source.json)
+Append `--service-import-parents` to the render or install command to select the Hibiscus pilot with ServiceImport parent support. This image supports producer routes and namespace-scoped consumer routes on enrolled imports. It also includes the limited consumer routes for core Services. The option enables `PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE` and disables Istio’s classic MCS host registration. [Pinned pilot image](service-import-parents.yaml) · [Signed source and build inputs](https://github.com/armeldemarsac92/gateway-api-openstack/blob/2ec0ff5eab83af436cb16791c78ae5cf4862b70e/istio-serviceimport-source.json)
 
 Include the `config/components/istio-ambient-service-imports` Kustomize component in your deployment overlay, with either `config/default` or `config/experimental` as the base. The component adds `--istio-ambient-service-imports` and the corresponding Kubernetes permissions. The controller discovers the optional CRDs at runtime. They can be installed after startup. The MCS ingress backend and XMesh flags are independent.
 
@@ -110,6 +110,48 @@ An enrolled import must declare a single IPv4 `ClusterSetIP` and a single HTTP p
 Imported slices must carry the MCS service name, an exporting cluster listed in the ServiceImport status, and a controller owner reference to the import's current UID. A slice can also be labeled for a provider-derived core Service. The controller uses the matched TCP port's address and target port from the slice. Losing the last eligible endpoint leaves an empty static ServiceEntry. Losing the authoritative inventory, removing enrollment, deleting the import, or finding an overlapping host or VIP withdraws the projection. During provider slice replacement, duplicate records for the same cluster, address and port keep the endpoint available while either slice reports it ready. If the controller cannot list source objects needed to determine safe membership, it withdraws its own projections and retries. Once the inventories are readable, eligible imports are projected again. Rejection reasons for enrolled imports appear in the controller's verbose logs.
 
 Create the producer `HTTPRoute` in the same namespace as the import. Set its parent’s `group` to `multicluster.x-k8s.io`, `kind` to `ServiceImport`, and `name` to the import. An exact path can forward to another Service. For unmatched paths, add a rule whose backend is the same ServiceImport and port. A same-named core Service retains its separate VIP and routing. For a shared waypoint, the route must be visible in its namespace. Inspect the route’s `status.parents` entry from `istio.io/gateway-controller` for attachment and reference resolution.
+
+For calls from one application namespace, put an HTTPRoute in that namespace. Point its parent and each rule's sole backend at the same enrolled import and port. The waypoint selects the consumer's rules using the authenticated calling workload's namespace. In this example, a request from `cart` to `/catalog` gains a response header. The final rule forwards all other paths from `cart` directly to the import. Other client namespaces use their own rules or the producer's routing.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: catalog
+  namespace: cart
+spec:
+  parentRefs:
+    - group: multicluster.x-k8s.io
+      kind: ServiceImport
+      namespace: store
+      name: catalog
+      port: 80
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /catalog
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Tenant-Route
+                value: cart
+      backendRefs:
+        - group: multicluster.x-k8s.io
+          kind: ServiceImport
+          namespace: store
+          name: catalog
+          port: 80
+    - backendRefs:
+        - group: multicluster.x-k8s.io
+          kind: ServiceImport
+          namespace: store
+          name: catalog
+          port: 80
+```
+
+Use a single-network ambient installation with `AMBIENT_ENABLE_MULTI_NETWORK=false`. The import must be visible to the client namespace, and the consumer HTTPRoute must be visible to the waypoint's namespace. For example, `defaultVirtualServiceExportTo: ["."]` prevents a waypoint in `store` from using a route in `cart`. The import must have a single active service waypoint. The parent may omit its port when the backend supplies the import's port. Each consumer rule can forward directly or apply one response header modifier. The direct reference to the parent import needs no ReferenceGrant. Other destinations, backend filters and waypoint ingress forwarding are outside this consumer profile. While a namespace has applicable consumer routes, a request that matches none of their rules receives HTTP 404. Removing the last applicable consumer route restores the producer's routing for that namespace.
 
 Each projection is a `networking.istio.io/v1` ServiceEntry with host `<name>.<namespace>.svc.clusterset.local` and resolution `STATIC` in `MESH_INTERNAL`. Its namespace equals the ServiceImport's, and its object name starts with `hibiscus-mcs-` followed by the first 32 lowercase hexadecimal characters of SHA-256 of the import name. Its `gateway-api-openstack.github.io/managed-by` label is `hibiscus-mcs-projector`. Its sole owner reference has `controller: true` and identifies the ServiceImport by its name, UID and served MCS API version. The projected port retains the imported name and uses `http` for an unnamed import port. Reserve this ownership marker and these generated names for the projector.
 
