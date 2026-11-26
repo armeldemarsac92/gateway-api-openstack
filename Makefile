@@ -80,7 +80,7 @@ test-envtest: ## Run controller tests against a real API server and etcd.
 	KUBEBUILDER_ASSETS="$$assets" \
 	GATEWAY_API_CHANNEL="$(GATEWAY_API_CHANNEL)" \
 	GATEWAY_API_CRD_PATH="$$gateway_api_module/config/crd/$(GATEWAY_API_CHANNEL)" \
-	$(GO) test -tags=envtest -count=1 -run '^Test(Controller|AmbientMesh)Envtest$$' -timeout=5m ./internal/controller ./cmd/openstack-gateway-controller
+	$(GO) test -tags=envtest -count=1 -run '^Test(Controller|AmbientMesh|ServiceImportProjection)Envtest$$' -timeout=5m ./internal/controller ./cmd/openstack-gateway-controller ./internal/controller/ambientmesh/mcsprojection
 
 .PHONY: test-e2e-compile
 test-e2e-compile: ## Compile the opt-in OpenStack E2E suite without running it.

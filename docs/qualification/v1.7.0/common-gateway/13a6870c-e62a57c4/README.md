@@ -44,3 +44,5 @@ The campaign ran against local Kubernetes, Octavia and native HAProxy. Qualifica
 On Experimental, TLS Core recorded 20 passes and one failure. All 11 traffic subtests in `TLSRouteHostnameIntersection` passed. The suite reached its 30-second deadline waiting to confirm deletion of the Gateway with no listener hostname. [Observation and source log digest](results.json)
 
 The five follow-up attempts produced 5 upstream reports with the same controller and Octavia revisions. The UDP fixture was corrected before running the original selections. [Follow-up results](recovery/README.md)
+
+11 targeted upstream reports on the same controller and Octavia revisions record 16 passes and 1 failure across the selected cases and channels. The Experimental backend TLS conflict case completed its HTTP probes, then timed out while deleting its HTTPRoute. [Targeted case reports](targeted/README.md)

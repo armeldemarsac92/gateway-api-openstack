@@ -2,8 +2,8 @@
 set -euo pipefail
 
 usage() {
-    printf '%s\n' 'Usage: install.sh render CHART_DIR [--consumer-routes]' \
-        '       install.sh install CHART_DIR KUBECONFIG CONTEXT standard|experimental [--consumer-routes]' >&2
+    printf '%s\n' 'Usage: install.sh render CHART_DIR [--consumer-routes] [--service-import-parents]' \
+        '       install.sh install CHART_DIR KUBECONFIG CONTEXT standard|experimental [--consumer-routes] [--service-import-parents]' >&2
     exit 2
 }
 
@@ -11,10 +11,15 @@ mode=${1:-}
 charts=${2:-}
 [[ -n "$charts" ]] || usage
 consumer_routes=false
-if [[ ${!#} == --consumer-routes ]]; then
-    consumer_routes=true
+service_import_parents=false
+while (( $# )); do
+    case ${!#} in
+        --consumer-routes) consumer_routes=true ;;
+        --service-import-parents) service_import_parents=true ;;
+        *) break ;;
+    esac
     set -- "${@:1:$#-1}"
-fi
+done
 case "$mode" in
     render) [[ $# -eq 2 ]] || usage ;;
     install)
@@ -61,7 +66,9 @@ deploy_chart() {
 
 deploy_chart hibiscus-ambient-base base --set global.enableReaderRBAC=false
 pilot_values=(--values "$module/istiod.yaml")
-if [[ "$consumer_routes" == true ]]; then
+if [[ "$service_import_parents" == true ]]; then
+    pilot_values+=(--values "$module/service-import-parents.yaml")
+elif [[ "$consumer_routes" == true ]]; then
     pilot_values+=(--values "$module/consumer-routes.yaml")
 fi
 deploy_chart hibiscus-ambient-istiod istiod "${pilot_values[@]}"
