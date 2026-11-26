@@ -1,0 +1,6 @@
+# Istio 1.31.0 with Hibiscus ServiceImport and consumer HTTPRoute support, linux/amd64.
+image: ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849
+pilot:
+  env:
+    PILOT_ENABLE_AMBIENT_MCS_HTTPROUTE: "true"
+    ENABLE_MCS_HOST: "false"
