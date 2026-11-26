@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"slices"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
@@ -171,6 +172,12 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteXBackendTransportRevision != nil &&
 				*request.HTTPRouteXBackendTransportRevision != xBackendTransportRevision(route, backends.input.XBackends) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
+			}
+			if requested && request.HTTPRouteServiceImportObservations != nil {
+				imports := reconciler.snapshotServiceImports(snapshot.route, backends.input)
+				if imports == nil || !equality.Semantic.DeepEqual(imports.observed, *request.HTTPRouteServiceImportObservations) {
+					return graph.RouteInputs{}, errHTTPRouteChanged
+				}
 			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
 			ensures = append(ensures, snapshot)

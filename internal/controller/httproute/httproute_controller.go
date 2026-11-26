@@ -428,6 +428,10 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
 	resyncAfter := controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)
+	retryServiceImport := graphResult.serviceImports.retryRead()
+	if retryServiceImport {
+		resyncAfter = min(resyncAfter, 5*time.Second)
+	}
 	pollXBackendClientIdentity := r.Config.XBackendClientCertificate && len(model.LocalXBackendReferences(httpRoute)) != 0
 	if pollXBackendClientIdentity {
 		resyncAfter = min(resyncAfter, xBackendClientCertificateResyncInterval)
@@ -476,7 +480,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistenceRevisionUnverified)
 			}
 		}
-		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
+		if graphResult.usesXBackendClientTLS || graphResult.serviceImports != nil || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
 			graphResult.droppedInlineRules != "" || graphResult.allRulesRejected != "" ||
 			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
@@ -489,7 +493,11 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status.withAllRulesRejected(graphResult.allRulesRejected)}})
 		}
-		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
+		delay := controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)
+		if retryServiceImport {
+			delay = min(delay, resyncAfter)
+		}
+		return ctrl.Result{RequeueAfter: delay}, nil
 	}
 	status := programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot).
 		withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull)
@@ -502,6 +510,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	scope.statusPlan.persistenceRevision = graphResult.persistenceRevision
 	scope.statusPlan.servicePersistenceRevision = graphResult.servicePersistenceRevision
 	scope.statusPlan.xBackendTransportRevision = graphResult.xBackendTransportRevision
+	scope.statusPlan.serviceImports = graphResult.serviceImports
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: resyncAfter}, nil
 }

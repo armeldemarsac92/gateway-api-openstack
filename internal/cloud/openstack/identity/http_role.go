@@ -32,13 +32,16 @@ func HTTPBackendKey(namespace, name string, port int) string {
 	return httpTupleKey(namespace, name, strconv.Itoa(port))
 }
 
-// HTTPBackendPoolKey keeps Service identities stable and gives an XBackend
-// its own identity across edits to its port.
+// HTTPBackendPoolKey keeps Service identities stable and gives each backend
+// API kind its own identity. The XBackend's own spec selects its port.
 func HTTPBackendPoolKey(backend cloud.HTTPBackend) string {
 	if backend.Kind == cloud.HTTPBackendKindXBackend {
 		return httpTupleKey(string(backend.Kind), backend.Namespace, backend.Name)
 	}
 	service := HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
+	if backend.Kind == cloud.HTTPBackendKindServiceImport {
+		return httpTupleKey(string(backend.Kind), service, "")
+	}
 	if backend.SessionPersistenceRule != "" {
 		return httpTupleKey("session-persistence-rule/"+backend.SessionPersistenceRule, service, backend.SessionPersistenceServiceUID)
 	}

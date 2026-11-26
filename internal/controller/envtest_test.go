@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -69,6 +70,9 @@ func TestControllerEnvtest(t *testing.T) {
 	}
 	crdDirectory := requiredEnvtestDirectory(t, "GATEWAY_API_CRD_PATH")
 	scheme := testScheme(t)
+	if err := mcs.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
 
 	testEnvironment := &envtest.Environment{
 		Scheme:                   scheme,
@@ -102,8 +106,8 @@ func TestControllerEnvtest(t *testing.T) {
 	serverCertificateMap := filepath.Join(t.TempDir(), "listener-certificates.json")
 	// Status and binding indexes belong to one controller name. Keep the
 	// manager-driven watches separate from the manually stepped reconcilers.
-	startManager := func(t *testing.T, cfg controller.Config, provider *recordingProvider) ctrl.Manager {
-		manager, err := ctrl.NewManager(restConfig, ctrl.Options{
+	startManager := func(t *testing.T, managerConfig *rest.Config, cfg controller.Config, provider *recordingProvider) ctrl.Manager {
+		manager, err := ctrl.NewManager(managerConfig, ctrl.Options{
 			Scheme:                 scheme,
 			Metrics:                metricsserver.Options{BindAddress: "0"},
 			HealthProbeBindAddress: "0",
@@ -154,7 +158,7 @@ func TestControllerEnvtest(t *testing.T) {
 
 		return manager
 	}
-	manager := startManager(t, config, nil)
+	manager := startManager(t, restConfig, config, nil)
 	statusConfig := config
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
 	statusConfig.BackendTLSPolicy, statusConfig.BackendClientCertificate = true, true
@@ -166,7 +170,7 @@ func TestControllerEnvtest(t *testing.T) {
 		statusConfig.OpenStackResyncInterval = 3 * time.Second
 	}
 	statusProvider := &recordingProvider{}
-	startManager(t, statusConfig, statusProvider)
+	startManager(t, restConfig, statusConfig, statusProvider)
 
 	apiClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
@@ -227,7 +231,7 @@ func TestControllerEnvtest(t *testing.T) {
 			bundleConfig.OpenStackResyncInterval = 5 * time.Minute
 			bundleConfig.ClusterTrustBundles = newBundles(t, restConfig)
 			provider := &recordingProvider{}
-			startManager(t, bundleConfig, provider)
+			startManager(t, restConfig, bundleConfig, provider)
 			testClusterTrustBundleLifecycle(t, apiClient, bundleConfig, provider, serverCertificateMap)
 		})
 		t.Run("ClusterTrustBundle watch denied", func(t *testing.T) {
@@ -238,7 +242,7 @@ func TestControllerEnvtest(t *testing.T) {
 			bundleConfig := statusConfig
 			bundleConfig.ControllerName = "trustbundle-watch-denied.example.com/gateway-api-openstack"
 			bundleConfig.ClusterTrustBundles = newBundles(t, restricted)
-			startManager(t, bundleConfig, &recordingProvider{})
+			startManager(t, restConfig, bundleConfig, &recordingProvider{})
 			testClusterTrustBundleWatchDenied(t, apiClient, bundleConfig, restricted)
 		})
 	} else {
@@ -246,7 +250,7 @@ func TestControllerEnvtest(t *testing.T) {
 			bundleConfig := statusConfig
 			bundleConfig.ControllerName = "trustbundle-unserved.example.com/gateway-api-openstack"
 			bundleConfig.ClusterTrustBundles = newBundles(t, restConfig)
-			startManager(t, bundleConfig, &recordingProvider{})
+			startManager(t, restConfig, bundleConfig, &recordingProvider{})
 			waitForEnvtest(t, func(ctx context.Context) (bool, error) {
 				observation, err := bundleConfig.ClusterTrustBundles.Read(ctx, "ca")
 				return err == nil && observation.Invalid != nil, nil
@@ -334,15 +338,29 @@ func TestControllerEnvtest(t *testing.T) {
 		grpcConfig.ControllerName = "grpc.example.com/gateway-api-openstack"
 		grpcConfig.BackendH2C, grpcConfig.FixedHTTPResponses = true, true
 		provider := &recordingProvider{}
-		startManager(t, grpcConfig, provider)
+		startManager(t, restConfig, grpcConfig, provider)
 		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider)
+	})
+	t.Run("ServiceImport backend lifecycle", func(t *testing.T) {
+		importsConfig := config
+		importsConfig.ControllerName = "serviceimport.example.com/gateway-api-openstack"
+		importsConfig.MulticlusterServiceImports = true
+		importsConfig.FixedHTTPResponses, importsConfig.WeightedHTTPTargets, importsConfig.BackendH2C = true, true, true
+		importsConfig.OpenStackResyncInterval = 5 * time.Minute
+		importsConfig.RouteSessionPersistence = importsConfig.GatewayAPIChannel == "experimental"
+		provider := &recordingProvider{}
+		probe := &serviceImportAPITestProbe{}
+		managerConfig := rest.CopyConfig(restConfig)
+		managerConfig.Wrap(probe.wrap)
+		startManager(t, managerConfig, importsConfig, provider)
+		testServiceImportBackends(t, restConfig, apiClient, importsConfig, provider, probe)
 	})
 	t.Run("BackendTLSPolicy follows authorized Service and CA changes", func(t *testing.T) {
 		tlsConfig := config
 		tlsConfig.ControllerName = "backendtls.example.com/gateway-api-openstack"
 		tlsConfig.BackendTLSPolicy = true
 		provider := &recordingProvider{}
-		startManager(t, tlsConfig, provider)
+		startManager(t, restConfig, tlsConfig, provider)
 		testBackendTLSPolicy(t, apiClient, tlsConfig, provider)
 	})
 	if config.XBackendEnabled() {
@@ -354,7 +372,7 @@ func TestControllerEnvtest(t *testing.T) {
 				xBackendConfig.ClusterTrustBundles = newBundles(t, restConfig)
 			}
 			provider := &recordingProvider{}
-			startManager(t, xBackendConfig, provider)
+			startManager(t, restConfig, xBackendConfig, provider)
 			testXBackendEndpointSelector(t, apiClient, xBackendConfig, provider)
 		})
 	}

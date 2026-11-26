@@ -47,6 +47,7 @@ import (
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 	"sigs.k8s.io/gateway-api/pkg/features"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
@@ -114,6 +115,7 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
+	var multiclusterServiceImports bool
 	var istioAmbientXMesh bool
 	var istioAmbientXMeshName string
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
@@ -137,6 +139,7 @@ func run(ctx context.Context) error {
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
+	flag.BoolVar(&multiclusterServiceImports, "multicluster-service-imports", false, "enable IPv4 ClusterSetIP ServiceImport backends for Gateway HTTPRoute and GRPCRoute (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&istioAmbientXMesh, "istio-ambient-xmesh", false, "publish an Experimental XMesh for the opt-in Hibiscus Istio ambient integration")
 	flag.StringVar(&istioAmbientXMeshName, "istio-ambient-xmesh-name", ambientmesh.DefaultName, "name of the installation XMesh created when ambient XMesh reporting is enabled")
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
@@ -273,6 +276,7 @@ func run(ctx context.Context) error {
 		RequestHeaderModifier:         requestHeaderModifier,
 		ResponseHeaderModifier:        responseHeaderModifier,
 		BackendH2C:                    backendH2C,
+		MulticlusterServiceImports:    multiclusterServiceImports,
 		BackendRetryBudget:            backendRetryBudget,
 		TCPConnectionRejection:        tcpConnectionRejection,
 		UDPPacketDrop:                 udpPacketDrop,
@@ -528,6 +532,9 @@ func newControllerScheme(cfg controller.Config, istioAmbientXMesh bool) *runtime
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
 	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
+	if cfg.MulticlusterServiceImports {
+		utilruntime.Must(mcs.Install(scheme))
+	}
 	if cfg.XBackendEnabled() {
 		utilruntime.Must(gatewayx.Install(scheme))
 	} else {

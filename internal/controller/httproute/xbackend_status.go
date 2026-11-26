@@ -190,6 +190,10 @@ func (r *xBackendStatusReconciler) hasAttachedConsumer(ctx context.Context, gate
 }
 
 func (r *Reconciler) xBackendH2CDiagnostic(ctx context.Context) model.Diagnostic {
+	return r.backendH2CDiagnostic(ctx, "XBackends")
+}
+
+func (r *Reconciler) backendH2CDiagnostic(ctx context.Context, kind string) model.Diagnostic {
 	if r.BackendH2CAvailable != nil {
 		available, err := r.BackendH2CAvailable(ctx)
 		if err == nil {
@@ -197,7 +201,7 @@ func (r *Reconciler) xBackendH2CDiagnostic(ctx context.Context) model.Diagnostic
 				return model.Diagnostic{}
 			}
 			return model.Diagnostic{
-				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "The regional provider does not support cleartext HTTP/2 for XBackends",
+				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "The regional provider does not support cleartext HTTP/2 for " + kind,
 			}
 		}
 	}

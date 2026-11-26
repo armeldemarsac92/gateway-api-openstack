@@ -308,6 +308,9 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 		}
 		return nil
 	}
+	if _, imported := model.ServiceImportReference("", backend.BackendObjectReference); imported && r.Config.MulticlusterServiceImports {
+		return nil
+	}
 	if backend.Group != nil && *backend.Group != gatewayv1.Group("") {
 		return newRouteBuildError(routeErrorInvalidKind, "backendRef group %q is unsupported; use a core Service", *backend.Group)
 	}
@@ -641,8 +644,14 @@ type backendKey struct {
 	rule   string
 }
 
-func servicePoolKey(backend model.BackendGroup) backendKey {
+func httpBackendPoolKey(backend model.BackendGroup) backendKey {
 	key := backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}
+	if backend.ServiceImport.Name != "" {
+		return backendKey{kind: cloud.HTTPBackendKindServiceImport, object: backend.ServiceImport, port: key.port}
+	}
+	if backend.XBackend.Name != "" {
+		return backendKey{kind: cloud.HTTPBackendKindXBackend, object: backend.XBackend}
+	}
 	if backend.RouteSessionPersistence != nil {
 		key.rule = backend.RouteSessionPersistence.Rule
 	}
@@ -712,6 +721,9 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 				// Resolve the Kubernetes references without creating forwarding pools.
 				if backend.Diagnostic != nil {
 					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *backend.Diagnostic)
+				} else if backend.ServiceImport.Name != "" {
+					issue := serviceImportTransportIssue(backend, spec.MemberMode, inputs.serviceImportH2CIssue)
+					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, issue)
 				}
 				for _, mirror := range backend.RequestMirrors {
 					issue := inputs.requestMirrorDiagnostic(mirror.Backend, spec.GRPC, false)
@@ -812,7 +824,7 @@ func (inputs *routeModelInputs) attachHTTPBackendRetryBudgets(spec *cloud.RouteS
 		return
 	}
 	for backend := range activeRetryBudgetBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC)) {
-		resolved := groups[servicePoolKey(backend)]
+		resolved := groups[httpBackendPoolKey(backend)]
 		if resolved.index == nil || resolved.diagnostic.Reason != "" {
 			continue
 		}
@@ -827,7 +839,7 @@ func (inputs *routeModelInputs) attachHTTPServicePersistence(spec *cloud.RouteSp
 	}
 	full := false
 	for backend := range activeServicePersistenceBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC)) {
-		resolved := groups[servicePoolKey(backend)]
+		resolved := groups[httpBackendPoolKey(backend)]
 		if resolved.index == nil || resolved.diagnostic.Reason != "" {
 			continue
 		}
@@ -880,7 +892,7 @@ func (inputs *routeModelInputs) requestMirrorDiagnostic(backend model.BackendGro
 }
 
 func hasHTTPBackendKey(backend model.BackendGroup) bool {
-	return backend.XBackend.Name != "" || backend.Service.Name != "" && validBackendPort(backend.Reference.Port)
+	return backend.XBackend.Name != "" || backend.ServiceImport.Name != "" || backend.Service.Name != "" && validBackendPort(backend.Reference.Port)
 }
 
 type httpBackendUse uint8
@@ -901,10 +913,9 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		}
 		return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: "backendRef does not identify a Service port"}, nil
 	}
-	key := servicePoolKey(backend)
+	key := httpBackendPoolKey(backend)
 	port := key.port
-	if backend.XBackend.Name != "" {
-		key = backendKey{kind: cloud.HTTPBackendKindXBackend, object: backend.XBackend}
+	if key.kind == cloud.HTTPBackendKindXBackend {
 		port = backend.XBackendPort
 	}
 	result, observed := groups[key]
@@ -921,6 +932,16 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			result.diagnostic = inputs.xBackendTLSDiagnostic(backend)
 		case backend.XBackendUsesH2C && !h2cPending && inputs.xBackendH2CIssue.Reason != "":
 			result.diagnostic = inputs.xBackendH2CIssue
+		case backend.ServiceImport.Name != "":
+			switch {
+			case backend.Diagnostic != nil:
+				result.diagnostic = *backend.Diagnostic
+			default:
+				result.diagnostic = serviceImportTransportIssue(backend, spec.MemberMode, inputs.serviceImportH2CIssue)
+				if result.diagnostic.Reason == "" {
+					members = []cloud.Member{{Address: backend.ServiceImportVIP, Port: int(backend.Port.Port)}}
+				}
+			}
 		case backend.Diagnostic != nil && spec.GRPC:
 			result.diagnostic = *backend.Diagnostic
 		case tls == nil || !tls.Denied:
@@ -952,7 +973,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		// A gRPC client maps the empty pool's HTTP 503 to UNAVAILABLE.
 		// The HTTP fixed 500 response would instead map to UNKNOWN.
 		invalidReference := invalid && !spec.GRPC && result.diagnostic.Reason != string(gatewayv1.RouteReasonPending) &&
-			(key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
+			(key.kind != "" || r.Config.WeightedHTTPTargets ||
 				result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 				result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
 		var persistenceServiceUID string
@@ -963,12 +984,13 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
 			SessionPersistenceRule:       key.rule,
 			SessionPersistenceServiceUID: persistenceServiceUID,
-			RoutedExternal:               backend.XBackendRoutedExternal && !invalidReference,
-			SessionCookieName:            backend.XBackendCookieName,
-			SessionCookiePath:            backend.XBackendCookiePath,
-			SessionCookieDeadline:        backend.XBackendCookieDeadline,
-			SessionHeader:                backend.XBackendSessionHeader,
-			Members:                      members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
+			RoutedExternal: backend.XBackendRoutedExternal && !invalidReference ||
+				key.kind == cloud.HTTPBackendKindServiceImport && spec.MemberMode == cloud.MemberModeEndpoint,
+			SessionCookieName:     backend.XBackendCookieName,
+			SessionCookiePath:     backend.XBackendCookiePath,
+			SessionCookieDeadline: backend.XBackendCookieDeadline,
+			SessionHeader:         backend.XBackendSessionHeader,
+			Members:               members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendH2CPending: h2cPending, BackendTLS: tls,
 			XBackendClientCertificateReference: clientCertificate,
 		})

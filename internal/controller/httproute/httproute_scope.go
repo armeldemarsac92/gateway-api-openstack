@@ -61,6 +61,7 @@ type routeStatusPlan struct {
 	persistenceRevision        *string
 	servicePersistenceRevision *string
 	xBackendTransportRevision  *string
+	serviceImports             *routeServiceImportSnapshot
 }
 
 type routeProviderWarning struct {
@@ -195,6 +196,11 @@ func (r *Reconciler) patchHTTPRouteStatus(
 		}
 		if plan.validateOwnership {
 			if err := r.validateRouteStatusOwnership(ctx, current, plan); err != nil {
+				return err
+			}
+		}
+		if plan.serviceImports != nil {
+			if err := plan.serviceImports.validate(ctx, r.routePatchReader()); err != nil {
 				return err
 			}
 		}

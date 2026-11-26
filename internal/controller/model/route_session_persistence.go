@@ -53,9 +53,9 @@ func ValidateRouteSessionPersistence(rule gatewayv1.HTTPRouteRule, kind gatewayv
 	if len(rule.BackendRefs) == 0 || redirect {
 		return unsupported("rule sessionPersistence requires a forwarding rule with backendRefs", ScopeRule)
 	}
-	if kind == HTTPRouteKind && slices.ContainsFunc(rule.BackendRefs, func(ref gatewayv1.HTTPBackendRef) bool {
-		_, supported := XBackendReference("", ref.BackendObjectReference)
-		return supported
+	if slices.ContainsFunc(rule.BackendRefs, func(ref gatewayv1.HTTPBackendRef) bool {
+		_, service := BackendServiceReference("", ref.BackendObjectReference)
+		return !service
 	}) {
 		return unsupported("rule sessionPersistence requires core Service backendRefs", ScopeRule)
 	}

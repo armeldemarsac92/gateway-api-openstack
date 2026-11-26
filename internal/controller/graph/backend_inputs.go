@@ -19,6 +19,7 @@ package graph
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -26,11 +27,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -46,19 +49,19 @@ func CollectBackendInputs(ctx context.Context, reader client.Reader, gateway *ga
 	if err := collectRouteNamespaces(ctx, reader, &input); err != nil {
 		return model.Input{}, err
 	}
-	return CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, input.Namespaces)
+	return CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, input.Namespaces, false)
 }
 
 // CollectBackendInputsWithNamespaces reads the already-admitted route dependencies.
-func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (model.Input, error) {
-	input := model.Input{Gateway: gateway.DeepCopy(), Routes: make([]gatewayv1.HTTPRoute, 0, len(routes)), Namespaces: namespaces}
+func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, enableServiceImport bool) (model.Input, error) {
+	input := model.Input{Gateway: gateway.DeepCopy(), Routes: make([]gatewayv1.HTTPRoute, 0, len(routes)), Namespaces: namespaces, EnableServiceImport: enableServiceImport}
 	for i := range routes {
 		input.Routes = append(input.Routes, *routes[i].DeepCopy())
 	}
 	slices.SortFunc(input.Routes, func(a, b gatewayv1.HTTPRoute) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
 	})
-	if err := collectBackendServiceInputs(ctx, reader, &input, true); err != nil {
+	if err := collectBackendReferenceInputs(ctx, reader, &input, true); err != nil {
 		return model.Input{}, err
 	}
 	slices.SortFunc(input.EndpointSlices, func(a, b discoveryv1.EndpointSlice) int {
@@ -67,19 +70,19 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 	return input, nil
 }
 
-// CollectBackendServiceInputs observes Services and their ReferenceGrants for
-// reference resolution, which does not depend on EndpointSlice availability.
-func CollectBackendServiceInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
-	return collectBackendServiceInputs(ctx, reader, input, false)
+// CollectBackendReferenceInputs observes backend objects and their ReferenceGrants
+// for reference resolution independently of EndpointSlices.
+func CollectBackendReferenceInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
+	return collectBackendReferenceInputs(ctx, reader, input, false)
 }
 
-func collectBackendServiceInputs(ctx context.Context, reader client.Reader, input *model.Input, includeEndpointSlices bool) error {
-	references := backendServiceReferences(input.Routes)
+func collectBackendReferenceInputs(ctx context.Context, reader client.Reader, input *model.Input, includeEndpointSlices bool) error {
+	references := backendReferences(input.Routes, input.EnableServiceImport)
 	grantNamespaces := map[string]struct{}{}
 	for target, sources := range references {
 		for source := range sources {
-			if source.namespace != target.Namespace {
-				grantNamespaces[target.Namespace] = struct{}{}
+			if source.namespace != target.key.Namespace {
+				grantNamespaces[target.key.Namespace] = struct{}{}
 			}
 		}
 	}
@@ -94,18 +97,31 @@ func collectBackendServiceInputs(ctx context.Context, reader client.Reader, inpu
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 
-	keys := slices.SortedFunc(maps.Keys(references), func(a, b types.NamespacedName) int {
-		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	targets := slices.SortedFunc(maps.Keys(references), func(a, b backendReferenceTarget) int {
+		return cmp.Or(cmp.Compare(a.key.Namespace, b.key.Namespace), cmp.Compare(a.key.Name, b.key.Name), cmp.Compare(a.kind, b.kind))
 	})
-	for _, key := range keys {
+	for _, target := range targets {
+		key := target.key
+		authorize := model.BackendReferenceAllowedFor
+		if target.kind == model.ServiceImportKind {
+			authorize = model.ServiceImportReferenceAllowed
+		}
 		allowed := false
-		for source := range references[key] {
-			if model.BackendReferenceAllowedFor(source.kind, source.namespace, key, input.ReferenceGrants) {
+		for source := range references[target] {
+			if authorize(source.kind, source.namespace, key, input.ReferenceGrants) {
 				allowed = true
 				break
 			}
 		}
 		if !allowed {
+			continue
+		}
+		if target.kind == model.ServiceImportKind {
+			observation, err := ObserveServiceImport(ctx, reader, key)
+			if err != nil {
+				return err
+			}
+			input.ServiceImports = append(input.ServiceImports, observation)
 			continue
 		}
 		var service corev1.Service
@@ -256,7 +272,7 @@ func readXBackend(ctx context.Context, reader client.Reader, key types.Namespace
 	return &backend, nil
 }
 
-// ListBackendReferenceGrants reads a Service target namespace before backend access.
+// ListBackendReferenceGrants reads a target namespace before backend access.
 func ListBackendReferenceGrants(ctx context.Context, reader client.Reader, namespace string) ([]gatewayv1.ReferenceGrant, error) {
 	var grants gatewayv1.ReferenceGrantList
 	if err := reader.List(ctx, &grants, client.InNamespace(namespace)); err != nil {
@@ -273,23 +289,73 @@ type backendReferenceSource struct {
 	kind      gatewayv1.Kind
 }
 
-func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.NamespacedName]map[backendReferenceSource]struct{} {
-	references := map[types.NamespacedName]map[backendReferenceSource]struct{}{}
+type backendReferenceTarget struct {
+	key  types.NamespacedName
+	kind gatewayv1.Kind // Only core Service and multicluster.x-k8s.io ServiceImport enter this inventory.
+}
+
+func backendReferences(routes []gatewayv1.HTTPRoute, enableServiceImport bool) map[backendReferenceTarget]map[backendReferenceSource]struct{} {
+	references := map[backendReferenceTarget]map[backendReferenceSource]struct{}{}
+	add := func(target backendReferenceTarget, source backendReferenceSource) {
+		if references[target] == nil {
+			references[target] = map[backendReferenceSource]struct{}{}
+		}
+		references[target][source] = struct{}{}
+	}
 	for _, route := range routes {
+		source := backendReferenceSource{namespace: route.Namespace, kind: model.HTTPProfileRouteKind(&route)}
 		for _, rule := range route.Spec.Rules {
 			for _, reference := range model.HTTPServiceBackendReferences(rule, true) {
-				key, supported := model.BackendServiceReference(route.Namespace, reference)
-				if !supported {
-					continue
+				if key, supported := model.BackendServiceReference(route.Namespace, reference); supported {
+					add(backendReferenceTarget{key: key, kind: "Service"}, source)
 				}
-				if references[key] == nil {
-					references[key] = map[backendReferenceSource]struct{}{}
+			}
+			if enableServiceImport {
+				for _, reference := range rule.BackendRefs {
+					if key, supported := model.ServiceImportReference(route.Namespace, reference.BackendObjectReference); supported {
+						add(backendReferenceTarget{key: key, kind: model.ServiceImportKind}, source)
+					}
 				}
-				references[key][backendReferenceSource{namespace: route.Namespace, kind: model.HTTPProfileRouteKind(&route)}] = struct{}{}
 			}
 		}
 	}
 	return references
+}
+
+// ObserveServiceImport uses a live reader after the caller checks authorization.
+// An absent API or a failed read withdraws this destination independently of Services.
+func ObserveServiceImport(ctx context.Context, reader client.Reader, key types.NamespacedName) (model.ServiceImportObservation, error) {
+	observation := model.ServiceImportObservation{Key: key}
+	var backend mcs.ServiceImport
+	err := reader.Get(ctx, key, &backend)
+	switch {
+	case err == nil:
+		if backend.DeletionTimestamp.IsZero() {
+			observation.UID, observation.Generation, observation.Spec = backend.UID, backend.Generation, &backend.Spec
+			observation.ReadyIssue = model.ServiceImportReadiness(&backend)
+		}
+	case ctx.Err() != nil:
+		return observation, ctx.Err()
+	case meta.IsNoMatchError(err), apierrors.IsNotFound(err):
+		message := fmt.Sprintf("backend ServiceImport %s was not found", key)
+		if meta.IsNoMatchError(err) || serviceImportResourceNotFound(err) {
+			message = "The multicluster.x-k8s.io/v1beta1 ServiceImport API is unavailable"
+		}
+		observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: message}
+	default:
+		observation.RetryRead = true
+		observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("backend ServiceImport %s could not be read", key)}
+	}
+	return observation, nil
+}
+
+func serviceImportResourceNotFound(err error) bool {
+	var status apierrors.APIStatus
+	if !errors.As(err, &status) {
+		return false
+	}
+	details := status.Status().Details
+	return details == nil || details.Name == ""
 }
 
 func collectRouteNamespaces(ctx context.Context, reader client.Reader, input *model.Input) error {

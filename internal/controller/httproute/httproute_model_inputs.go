@@ -61,6 +61,7 @@ type routeModelInputs struct {
 
 	xBackendClientCertificates graph.XBackendClientCertificateResolver
 	xBackendH2CIssue           model.Diagnostic
+	serviceImportH2CIssue      model.Diagnostic
 }
 
 func (inputs *routeModelInputs) routeUsesXBackendClientTLS(route *gatewayv1.HTTPRoute) bool {
@@ -299,6 +300,20 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			break
 		}
 	}
+	if len(inputs.input.ServiceImports) != 0 {
+		// Reuse one capability check for all imported ports in this graph.
+		for _, route := range inputs.logical.Routes {
+			usesH2C := slices.ContainsFunc(route.Rules, func(rule model.Rule) bool {
+				return slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool {
+					return backend.ServiceImport.Name != "" && backend.UsesH2C()
+				})
+			})
+			if usesH2C {
+				inputs.serviceImportH2CIssue = r.backendH2CDiagnostic(ctx, "ServiceImports")
+				break
+			}
+		}
+	}
 	inputs.retryBudgetEnabled = r.Config.BackendRetryBudgetEnabled()
 	inputs.servicePersistenceEnabled = r.Config.XBackendSessionPersistenceEnabled() && inputs.input.XBackendProfile.MemberMode == cloud.MemberModeEndpoint
 	if r.retryBudgetPolicyServed && (inputs.retryBudgetEnabled || inputs.servicePersistenceEnabled) {
@@ -336,7 +351,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 			originalRulePositions[routes[i].UID] = positions
 		}
 	}
-	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces)
+	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces, r.Config.MulticlusterServiceImports)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +455,7 @@ func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackend
 }
 
 func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader client.Reader) error {
-	current, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, inputs.input.Gateway, inputs.input.Routes, inputs.input.Namespaces)
+	current, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, inputs.input.Gateway, inputs.input.Routes, inputs.input.Namespaces, inputs.input.EnableServiceImport)
 	if err != nil {
 		return err
 	}
@@ -451,11 +466,21 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		return err
 	}
 	for _, route := range inputs.input.Routes {
+		kind := model.HTTPProfileRouteKind(&route)
 		for _, rule := range route.Spec.Rules {
+			if inputs.input.EnableServiceImport {
+				for _, ref := range rule.BackendRefs {
+					key, imported := model.ServiceImportReference(route.Namespace, ref.BackendObjectReference)
+					if imported && model.ServiceImportReferenceAllowed(kind, route.Namespace, key, inputs.input.ReferenceGrants) !=
+						model.ServiceImportReferenceAllowed(kind, route.Namespace, key, current.ReferenceGrants) {
+						return errHTTPRouteChanged
+					}
+				}
+			}
 			for _, ref := range model.HTTPServiceBackendReferences(rule, true) {
 				key, supported := model.BackendServiceReference(route.Namespace, ref)
-				if supported && model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, inputs.input.ReferenceGrants) !=
-					model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, current.ReferenceGrants) {
+				if supported && model.BackendReferenceAllowedFor(kind, route.Namespace, key, inputs.input.ReferenceGrants) !=
+					model.BackendReferenceAllowedFor(kind, route.Namespace, key, current.ReferenceGrants) {
 					return errHTTPRouteChanged
 				}
 			}
@@ -480,6 +505,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	if inputs.input.BackendTrustWithdrawalOnly != current.BackendTrustWithdrawalOnly ||
 		!equality.Semantic.DeepEqual(inputs.input.BackendTLSPolicies, current.BackendTLSPolicies) ||
 		!equality.Semantic.DeepEqual(inputs.input.Services, current.Services) ||
+		!equality.Semantic.DeepEqual(inputs.input.ServiceImports, current.ServiceImports) ||
 		!equality.Semantic.DeepEqual(inputs.input.EndpointSlices, current.EndpointSlices) ||
 		!equality.Semantic.DeepEqual(inputs.input.XBackends, current.XBackends) {
 		return errHTTPRouteChanged
