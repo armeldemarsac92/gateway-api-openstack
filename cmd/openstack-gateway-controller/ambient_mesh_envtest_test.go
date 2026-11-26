@@ -328,11 +328,16 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	acceptClass()
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
 
-	// An existing installation can retain the published producer-only ServiceImport pilot.
+	// Every supported pilot reports the same features after its rollout.
+	combinedPilot := ambientComponentImage(t, "consumer-routes.yaml")
+	if ambientComponentImage(t, "grpc-consumer-routes.yaml") != combinedPilot {
+		t.Fatal("HTTP and gRPC consumer values must select the same pilot image")
+	}
 	for _, image := range []string{
-		ambientComponentImage(t, "consumer-routes.yaml"),
+		"ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fdb9d02e2b427f81d2763fce329361ac32432080cc14b7115315bed4508bbcc5",
 		"ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
 		ambientComponentImage(t, "service-import-parents.yaml"),
+		combinedPilot,
 	} {
 		pilot.Spec.Template.Spec.Containers[0].Image = image
 		update(pilot)
