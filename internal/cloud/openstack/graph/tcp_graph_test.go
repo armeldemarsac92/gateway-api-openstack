@@ -1026,6 +1026,35 @@ func TestTransportGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T)
 	}
 }
 
+func TestTransportGraphUsesRoutedServiceImportMembers(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
+		t.Run(protocol, func(t *testing.T) {
+			f := newTransportGraphFixture(t, protocol)
+			route := &f.spec.Routes[0].Spec
+			route.MemberMode = cloud.MemberModeEndpoint
+			route.Members = []cloud.Member{
+				{Address: "10.1.2.3", Port: 8080, Weight: 1},
+				{Address: "10.2.3.4", Port: 8080, Weight: 3, RoutedExternal: true},
+			}
+			check := func(want map[string]string) {
+				t.Helper()
+				f.settleTransportGraph(f.provider())
+				got := make(map[string]string)
+				for _, member := range f.children(tcpMembers) {
+					subnet, _ := member["subnet_id"].(string)
+					got[member["address"].(string)] = subnet
+				}
+				if !maps.Equal(got, want) || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+					t.Fatalf("member subnets %v, want %v on the selected pool", got, want)
+				}
+			}
+			check(map[string]string{"10.1.2.3": route.MemberSubnetID, "10.2.3.4": ""})
+			route.Members[1].RoutedExternal = false
+			check(map[string]string{"10.1.2.3": route.MemberSubnetID, "10.2.3.4": route.MemberSubnetID})
+		})
+	}
+}
+
 func TestTCPGraphSendsExactNodePortWeightsToOctavia(t *testing.T) {
 	f := newTCPGraphFixture(t)
 	route := &f.spec.Routes[0].Spec

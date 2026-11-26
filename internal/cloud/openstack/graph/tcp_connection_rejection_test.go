@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
 func (f *tcpGraphFixture) rejectionProvider(optIn bool) *Provider {
@@ -183,6 +184,37 @@ func TestTCPConnectionRejectionReplacesACompleteServingBatch(t *testing.T) {
 	f.tcpRejectionAdvertised = false
 	primaryMember.Weight = 3
 	apply(nil, []cloud.Member{primaryMember, backup}, f.rejectionProvider(false), "null")
+}
+
+func TestTransportBatchClearsSubnetForRoutedServiceImport(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
+		t.Run(protocol, func(t *testing.T) {
+			desired := desiredRoute{spec: cloud.RouteSpec{
+				MemberSubnetID:      "local-subnet",
+				GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: protocol},
+			}}
+			existing := pools.Member{ID: "member", SubnetID: "local-subnet"}
+			member := cloud.Member{Address: "10.2.3.4", Port: 8180, Weight: 3, RoutedExternal: true}
+			for _, routed := range []bool{true, false} {
+				member.RoutedExternal = routed
+				opts, err := transportBatchMember(desired, member, existing)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wire, err := opts.ToBatchMemberUpdateMap()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var want any
+				if !routed {
+					want = desired.spec.MemberSubnetID
+				}
+				if got, exists := wire["subnet_id"]; !exists || got != want {
+					t.Fatalf("member subnet = %v (present %t), want %v", got, exists, want)
+				}
+			}
+		})
+	}
 }
 
 func TestTCPConnectionRejectionWithdrawsAnUnprovableDefault(t *testing.T) {

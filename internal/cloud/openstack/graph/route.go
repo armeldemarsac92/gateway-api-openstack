@@ -350,6 +350,9 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		if err != nil {
 			return invalid(fmt.Errorf("member address %q is not a valid IP address: %w", member.Address, err))
 		}
+		if member.RoutedExternal && (spec.MemberMode != cloud.MemberModeEndpoint || !supportsMemberWeights && !routedExternal) {
+			return invalid(errors.New("routed members require an IPv4 Endpoint transport or external HTTP pool"))
+		}
 		if spec.MemberMode == cloud.MemberModeEndpoint {
 			if !address.Is4() || !address.IsGlobalUnicast() || address.IsLoopback() || address.IsLinkLocalUnicast() {
 				return invalid(errors.New("endpoint members require unicast IPv4 destinations"))

@@ -255,7 +255,7 @@ type Member struct {
 	// Weight is an explicit traffic weight for TCP or UDP members.
 	// Zero uses the default for ready members. Draining endpoints always use zero.
 	Weight int `json:",omitempty"`
-	// RoutedExternal reaches a TLSRoute ServiceImport using Amphora's existing
+	// RoutedExternal reaches a ServiceImport using Amphora's existing
 	// routes. It omits the Neutron member subnet even in a mixed backend pool.
 	RoutedExternal bool `json:",omitempty"`
 }
