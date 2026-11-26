@@ -19,6 +19,7 @@ package routebackend
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"slices"
 	"testing"
@@ -127,6 +128,94 @@ func TestWeightedMembersRejectsBackendWithoutReadyEndpoints(t *testing.T) {
 	}
 	if members, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); !errors.Is(err, ErrBackendWithoutReadyEndpoints) || len(members) != 0 {
 		t.Fatalf("backend without ready endpoints returned %+v, %v", members, err)
+	}
+}
+
+func TestExtendedUDPWeightedMembersRoundWithPositiveWeights(t *testing.T) {
+	groups := []WeightedServiceMembers{
+		{Weight: 1_000_000, Members: []cloud.Member{{Address: "10.0.0.1", Port: 53}}},
+		{Weight: 1, Members: []cloud.Member{
+			{Address: "10.0.0.2", Port: 53}, {Address: "10.0.0.3", Port: 53}, {Address: "10.0.0.4", Port: 53},
+			{Address: "10.0.0.5", Port: 53, Draining: true},
+		}},
+	}
+	if _, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); !errors.Is(err, ErrWeightedMembersUnrepresentable) {
+		t.Fatalf("native allocation = %v, want unrepresentable weights", err)
+	}
+	members, err := ExtendedUDPWeightedMembers(groups)
+	if err != nil || len(members) != 5 {
+		t.Fatalf("extended allocation = %+v, %v", members, err)
+	}
+	for i, want := range []int{1_000_000, 1, 1, 1, 0} {
+		if members[i].Weight != want || members[i].Draining != (want == 0) {
+			t.Fatalf("extended allocation = %+v, member %d should have weight %d", members, i, want)
+		}
+	}
+}
+
+func TestExtendedUDPWeightedMembersFindLowerScale(t *testing.T) {
+	const secondaryCount = 9000
+	primary := cloud.Member{Address: "10.0.0.1", Port: 53}
+	secondary := make([]cloud.Member, secondaryCount)
+	for i := range secondary {
+		address := netip.AddrFrom4([4]byte{10, 1, byte(i >> 8), byte(i % 256)})
+		secondary[i] = cloud.Member{Address: address.String(), Port: 53}
+	}
+	groups := []WeightedServiceMembers{
+		{Weight: 1_000_000, Members: []cloud.Member{primary}},
+		{Weight: 13_501, Members: secondary},
+	}
+	if _, err := WeightedMembers(cloud.ListenerProtocolUDP, groups); !errors.Is(err, ErrWeightedMembersUnrepresentable) {
+		t.Fatalf("native allocation = %v, want unrepresentable weights", err)
+	}
+	members, err := ExtendedUDPWeightedMembers(groups)
+	if err != nil || len(members) != secondaryCount+1 {
+		t.Fatalf("extended allocation returned %d members, error %v", len(members), err)
+	}
+	if members[0].Address != primary.Address || members[0].Weight != 666_617 || members[0].Draining {
+		t.Fatalf("primary = %+v, want weight 666617", members[0])
+	}
+	for _, member := range members[1:] {
+		if member.Weight != 1 || member.Draining {
+			t.Fatalf("secondary member = %+v, want active with weight 1", member)
+		}
+	}
+}
+
+func TestExtendedUDPWeightedMembersTryRoundingBoundary(t *testing.T) {
+	// The 5416 and 24853 backends round to weight 3 at full scale but
+	// their endpoints need different weights to satisfy the pool tolerance.
+	counts := []int{1, 2144, 8817, 8108}
+	weights := []int32{1_000_000, 5416, 5001, 24853}
+	groups := make([]WeightedServiceMembers, len(weights))
+	var wantedTotal int32
+	for i, weight := range weights {
+		groups[i].Weight = weight
+		wantedTotal += weight
+		for j := range counts[i] {
+			address := netip.AddrFrom4([4]byte{10, byte(i), byte(j >> 8), byte(j % 256)})
+			groups[i].Members = append(groups[i].Members, cloud.Member{Address: address.String(), Port: 53})
+		}
+	}
+	members, err := ExtendedUDPWeightedMembers(groups)
+	if err != nil || len(members) != 19070 {
+		t.Fatalf("extended allocation returned %d members, error %v", len(members), err)
+	}
+	var roundedTotal int64
+	for _, member := range members {
+		if member.Weight < 1 || member.Weight > cloud.MaxUDPExtendedMemberWeight || member.Draining {
+			t.Fatalf("invalid extended allocation member %+v", member)
+		}
+		roundedTotal += int64(member.Weight)
+	}
+	var totalVariation float64
+	for _, member := range members {
+		group := netip.MustParseAddr(member.Address).As4()[1]
+		idealShare := float64(weights[group]) / float64(wantedTotal) / float64(counts[group])
+		totalVariation += math.Abs(float64(member.Weight)/float64(roundedTotal)-idealShare) / 2
+	}
+	if totalVariation > 1.0/256 {
+		t.Fatalf("total variation = %f, want at most 1/256", totalVariation)
 	}
 }
 

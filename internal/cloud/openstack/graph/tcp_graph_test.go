@@ -63,6 +63,7 @@ type tcpGraphFixture struct {
 	tcpRejectionWrites          []map[string]json.RawMessage
 	udpDropAPI                  bool
 	udpDropAdvertised           bool
+	udpExtendedAdvertised       bool
 	udpDiscoveryUnavailable     bool
 	udpDropRenderBusy           bool
 	distinctUDPPoolIDs          bool
@@ -151,6 +152,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		if f.udpDropAdvertised {
 			capabilities = append(capabilities, "udp_packet_drop_v1")
+		}
+		if f.udpExtendedAdvertised {
+			capabilities = append(capabilities, "udp_extended_member_weights_v1")
 		}
 		safetyWriteJSON(f.t, w, map[string]any{"gateway_capabilities": capabilities})
 		return

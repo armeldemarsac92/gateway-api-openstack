@@ -475,9 +475,10 @@ func run(ctx context.Context) error {
 	}
 	routeReconciler.TCPRoutes = tcpReconciler
 	udpReconciler := &l4route.Reconciler{
-		Protocol:               gatewayv1.UDPProtocolType,
-		UDPPacketDropAvailable: openStackProvider.UDPPacketDropAvailable,
-		Client:                 manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
+		Protocol:                    gatewayv1.UDPProtocolType,
+		UDPPacketDropAvailable:      openStackProvider.UDPPacketDropAvailable,
+		UDPExtendedWeightsAvailable: openStackProvider.UDPExtendedMemberWeightsAvailable,
+		Client:                      manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
 	}
 	writerMetrics, err := graph.RegisterWriterMetrics(controllermetrics.Registry)
 	if err != nil {

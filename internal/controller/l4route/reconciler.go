@@ -56,6 +56,7 @@ type Reconciler struct {
 	TCPWeightedDefaultPoolsAvailable func(context.Context) (bool, error)
 	XBackendClientCertificates       graph.XBackendClientCertificateResolver
 	UDPPacketDropAvailable           func(context.Context) (bool, error)
+	UDPExtendedWeightsAvailable      func(context.Context) (bool, error)
 	externalHostnames                tcpExternalHostnameCache
 }
 
@@ -600,6 +601,14 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 	if weighted && !weightedPools {
 		var err error
 		members, err = routebackend.WeightedMembers(string(r.protocol()), groups)
+		if drop != nil && errors.Is(err, routebackend.ErrWeightedMembersUnrepresentable) && r.UDPExtendedWeightsAvailable != nil {
+			available, discoveryErr := r.UDPExtendedWeightsAvailable(ctx)
+			// Seal the authorized candidate on an uncertain discovery read. As
+			// with discard, only the provider can confirm it or withdraw stale members.
+			if available || discoveryErr != nil {
+				members, err = routebackend.ExtendedUDPWeightedMembers(groups)
+			}
+		}
 		if errors.Is(err, routebackend.ErrBackendWithoutReadyEndpoints) {
 			return cloud.RouteSpec{}, "", &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("Waiting for eligible endpoints in every positive-weight %s backend", r.protocol())}, nil
 		}

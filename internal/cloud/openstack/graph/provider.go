@@ -373,12 +373,21 @@ func (p *Provider) TCPConnectionRejectionAvailable(ctx context.Context) (bool, e
 
 // UDPPacketDropAvailable checks the opt-in and regional Amphora support.
 func (p *Provider) UDPPacketDropAvailable(ctx context.Context) (bool, error) {
+	return p.udpPacketDropAvailable(ctx, octavia.GatewayCapabilityUDPPacketDrop)
+}
+
+// UDPExtendedMemberWeightsAvailable requires both regional UDP batch capabilities.
+func (p *Provider) UDPExtendedMemberWeightsAvailable(ctx context.Context) (bool, error) {
+	return p.udpPacketDropAvailable(ctx, octavia.GatewayCapabilityUDPPacketDrop, octavia.GatewayCapabilityUDPExtendedMemberWeights)
+}
+
+func (p *Provider) udpPacketDropAvailable(ctx context.Context, capabilities ...string) (bool, error) {
 	if !p.udpPacketDrop {
 		return false, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	available, err := p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityUDPPacketDrop)
+	available, err := p.amphoraCapabilityAvailable(ctx, capabilities...)
 	if isNotFound(err) {
 		return false, nil
 	}

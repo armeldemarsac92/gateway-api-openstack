@@ -244,6 +244,13 @@ const (
 	PathMatchPrefix PathMatchType = "PathPrefix"
 )
 
+const (
+	// MaxOctaviaMemberWeight is the native Octavia member limit.
+	MaxOctaviaMemberWeight = 256
+	// MaxUDPExtendedMemberWeight applies only to a negotiated UDP discard batch.
+	MaxUDPExtendedMemberWeight = 1_000_000
+)
+
 // Member is one Octavia backend member.
 type Member struct {
 	Address string

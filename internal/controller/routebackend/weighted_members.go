@@ -27,7 +27,6 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-const maxOctaviaMemberWeight = 256
 const udpWeightErrorDenominator = 256
 
 // ErrWeightedMembersUnrepresentable reports a ratio, binding or endpoint count
@@ -53,6 +52,16 @@ type weightedDestination struct {
 // For UDP, a ratio outside the exact member weight range may be rounded within
 // the allowed total variation distance.
 func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.Member, error) {
+	return weightedMembers(protocol, groups, cloud.MaxOctaviaMemberWeight)
+}
+
+// ExtendedUDPWeightedMembers allocates weights for a complete UDP discard batch.
+// Callers try native weights first and negotiate regional support before writing.
+func ExtendedUDPWeightedMembers(groups []WeightedServiceMembers) ([]cloud.Member, error) {
+	return weightedMembers(cloud.ListenerProtocolUDP, groups, cloud.MaxUDPExtendedMemberWeight)
+}
+
+func weightedMembers(protocol string, groups []WeightedServiceMembers, maxWeight int64) ([]cloud.Member, error) {
 	type readyGroup struct {
 		weight    int64
 		endpoints map[netip.AddrPort]struct{}
@@ -117,7 +126,7 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 	}
 
 	// Dividing by the GCD yields the smallest integral ratio. Its largest
-	// member fits exactly when maxShare <= gcd * maxOctaviaMemberWeight.
+	// member fits exactly when maxShare <= gcd * maxWeight.
 	var gcd, maxShare, exactLimit big.Int
 	for _, destination := range destinations {
 		gcd.GCD(nil, nil, &gcd, &destination.share)
@@ -125,14 +134,14 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 			maxShare.Set(&destination.share)
 		}
 	}
-	exactLimit.Mul(&gcd, big.NewInt(maxOctaviaMemberWeight))
+	exactLimit.Mul(&gcd, big.NewInt(maxWeight))
 	exact := maxShare.Cmp(&exactLimit) <= 0
 	if !exact {
 		if protocol != cloud.ListenerProtocolUDP {
-			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d: %w", protocol, maxOctaviaMemberWeight, ErrWeightedMembersUnrepresentable)
+			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d: %w", protocol, maxWeight, ErrWeightedMembersUnrepresentable)
 		}
-		if !roundUDPWeights(destinations, &maxShare) {
-			return nil, fmt.Errorf("scaling and rounding the UDP backend ratio with maximum member weights from %d down to 1 did not meet the 0.390625 percentage point tolerance: %w", maxOctaviaMemberWeight, ErrWeightedMembersUnrepresentable)
+		if !roundUDPWeights(destinations, &maxShare, maxWeight) {
+			return nil, fmt.Errorf("scaling and rounding the UDP backend ratio within the member weight limit of %d did not meet the 0.390625 percentage point tolerance: %w", maxWeight, ErrWeightedMembersUnrepresentable)
 		}
 	}
 	members := make([]cloud.Member, 0, len(destinations))
@@ -158,17 +167,18 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 	return members, nil
 }
 
-func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxShare *big.Int) bool {
+type udpShareGroup struct {
+	share        *big.Int
+	count        int64
+	idealTotal   big.Int
+	roundedTotal big.Int
+	weight       int64
+}
+
+func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxShare *big.Int, maxWeight int64) bool {
 	// Equal shares round to the same weight at every scale. Group them so
 	// each candidate visits distinct shares instead of every destination.
-	type shareGroup struct {
-		share        *big.Int
-		count        int64
-		idealTotal   big.Int
-		roundedTotal big.Int
-		weight       int64
-	}
-	groups := make(map[string]*shareGroup)
+	groups := make(map[string]*udpShareGroup)
 	for _, destination := range destinations {
 		if destination.share.Sign() == 0 {
 			continue
@@ -176,7 +186,7 @@ func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxSh
 		key := string(destination.share.Bytes())
 		group := groups[key]
 		if group == nil {
-			group = &shareGroup{share: &destination.share}
+			group = &udpShareGroup{share: &destination.share}
 			groups[key] = group
 		}
 		group.count++
@@ -192,7 +202,7 @@ func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxSh
 	var difference, ideal, errorNumerator, errorDenominator big.Int
 	halfMaxShare := new(big.Int).Rsh(maxShare, 1)
 	toleranceDenominator := big.NewInt(udpWeightErrorDenominator)
-	for maximum := int64(maxOctaviaMemberWeight); maximum >= 1; maximum-- {
+	tryScale := func(maximum int64) bool {
 		scale.SetInt64(maximum)
 		roundedTotal.SetInt64(0)
 		for _, group := range groups {
@@ -221,7 +231,7 @@ func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxSh
 		errorDenominator.Mul(&idealTotal, &roundedTotal)
 		errorDenominator.Lsh(&errorDenominator, 1)
 		if errorNumerator.Cmp(&errorDenominator) > 0 {
-			continue
+			return false
 		}
 		for _, destination := range destinations {
 			destination.member.Weight = 0
@@ -231,5 +241,97 @@ func roundUDPWeights(destinations map[netip.AddrPort]*weightedDestination, maxSh
 		}
 		return true
 	}
+	if maxWeight <= cloud.MaxOctaviaMemberWeight {
+		for maximum := maxWeight; maximum > 0; maximum-- {
+			if tryScale(maximum) {
+				return true
+			}
+		}
+		return false
+	}
+	for maximum := maxWeight; maximum > cloud.MaxOctaviaMemberWeight; maximum /= 2 {
+		if tryScale(maximum) {
+			return true
+		}
+		for _, candidate := range udpExtendedRoundingScales(groups, maxShare, maximum) {
+			if tryScale(candidate) {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+func udpExtendedRoundingScales(groups map[string]*udpShareGroup, maxShare *big.Int, maximum int64) []int64 {
+	// Low integer weights are susceptible to large relative rounding errors.
+	// Bucket equal rounded weights at the top of this band. Try scales that
+	// match the bucket's mean ideal share to nearby integer weights. Also try
+	// either side of rounding boundaries for its smallest and largest shares.
+	// Several buckets can agree only in a narrow interval between their weight
+	// changes. Both loops are bounded by largestBucket, and every candidate
+	// must pass the full pool check.
+	const largestBucket = udpWeightErrorDenominator / 2
+	type weightBucket struct {
+		count    int64
+		share    big.Int
+		minShare *big.Int
+		maxShare *big.Int
+	}
+	var buckets [largestBucket + 1]weightBucket
+	for _, group := range groups {
+		if group.weight <= largestBucket {
+			bucket := &buckets[group.weight]
+			bucket.count += group.count
+			bucket.share.Add(&bucket.share, &group.idealTotal)
+			if bucket.minShare == nil || group.share.Cmp(bucket.minShare) < 0 {
+				bucket.minShare = group.share
+			}
+			if bucket.maxShare == nil || group.share.Cmp(bucket.maxShare) > 0 {
+				bucket.maxShare = group.share
+			}
+		}
+	}
+	var candidates []int64
+	minScale := max(cloud.MaxOctaviaMemberWeight, maximum/2)
+	var scaledCount, level, candidate, halfShare, divisor big.Int
+	one := big.NewInt(1)
+	addCandidate := func(scale *big.Int) {
+		if scale.IsInt64() && scale.Int64() > minScale && scale.Int64() < maximum {
+			candidates = append(candidates, scale.Int64())
+		}
+	}
+	for weight := int64(largestBucket); weight > 0; weight-- {
+		bucket := &buckets[weight]
+		if bucket.count == 0 {
+			continue
+		}
+		scaledCount.SetInt64(bucket.count)
+		scaledCount.Mul(maxShare, &scaledCount)
+		halfShare.Rsh(&bucket.share, 1)
+		for target := weight; target >= max(1, weight/2); target-- {
+			level.SetInt64(target)
+			candidate.Mul(&scaledCount, &level)
+			candidate.Add(&candidate, &halfShare)
+			candidate.Quo(&candidate, &bucket.share)
+			addCandidate(&candidate)
+		}
+		for _, share := range []*big.Int{bucket.minShare, bucket.maxShare} {
+			divisor.Lsh(share, 1)
+			for target := weight; target >= max(2, weight/2); target-- {
+				// The first scale that rounds this share up to target.
+				level.SetInt64(2*target - 1)
+				candidate.Mul(maxShare, &level)
+				candidate.Add(&candidate, &divisor)
+				candidate.Sub(&candidate, one)
+				candidate.Quo(&candidate, &divisor)
+				addCandidate(&candidate)
+				candidate.Sub(&candidate, one)
+				addCandidate(&candidate)
+			}
+			if bucket.minShare == bucket.maxShare {
+				break
+			}
+		}
+	}
+	return candidates
 }

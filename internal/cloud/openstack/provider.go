@@ -82,6 +82,11 @@ func (p *Provider) UDPPacketDropAvailable(ctx context.Context) (bool, error) {
 	return p.graph.UDPPacketDropAvailable(ctx)
 }
 
+// UDPExtendedMemberWeightsAvailable discovers regional support for extended UDP batches.
+func (p *Provider) UDPExtendedMemberWeightsAvailable(ctx context.Context) (bool, error) {
+	return p.graph.UDPExtendedMemberWeightsAvailable(ctx)
+}
+
 // XBackendCookieAvailable discovers regional Amphora support for the requested HTTP cookie.
 func (p *Provider) XBackendCookieAvailable(ctx context.Context, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
 	return p.graph.XBackendCookieAvailable(ctx, requirements)

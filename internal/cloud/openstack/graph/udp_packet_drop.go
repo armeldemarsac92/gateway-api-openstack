@@ -50,6 +50,18 @@ func (r desiredRoute) dropsAllUDP() bool {
 	return drop != nil && drop.DropsAll()
 }
 
+func (r desiredRoute) requiresUDPExtendedMemberWeights() bool {
+	return r.spec.UDPPacketDrop != nil && slices.ContainsFunc(r.members, func(member cloud.Member) bool {
+		return member.Weight > cloud.MaxOctaviaMemberWeight
+	})
+}
+
+func (step routeMutation) hasExtendedMemberWeights() bool {
+	return step.kind == routeMutationReplaceTransportMembers && slices.ContainsFunc(step.batchMembers, func(member pools.BatchUpdateMemberOpts) bool {
+		return member.Weight != nil && *member.Weight > cloud.MaxOctaviaMemberWeight
+	})
+}
+
 func hasUDPDropTarget(desired desiredGatewayGraph) bool {
 	return slices.ContainsFunc(desired.routes, func(route desiredRoute) bool { return route.spec.UDPPacketDrop != nil })
 }
@@ -66,16 +78,41 @@ func (p *Provider) observeUDPPacketDropCapability(ctx context.Context, desired *
 	}
 	var available bool
 	var err error
+	var extendedAvailable bool
+	var extendedErr error
 	if actual.loadBalancer == nil || actual.loadBalancer.Provider == "amphora" && udpIPFamily(actual.state.VIPAddress) == 4 {
 		available, err = p.UDPPacketDropAvailable(ctx)
+		if available && slices.ContainsFunc(desired.routes, desiredRoute.requiresUDPExtendedMemberWeights) {
+			extendedAvailable, extendedErr = p.UDPExtendedMemberWeightsAvailable(ctx)
+		}
 	}
 	for index := range desired.routes {
 		route := &desired.routes[index]
-		if route.spec.UDPPacketDrop != nil {
+		switch {
+		case available && route.requiresUDPExtendedMemberWeights():
+			route.udpDropUnverified = extendedErr != nil
+			route.udpDropUnavailable = extendedErr == nil && !extendedAvailable
+		case route.spec.UDPPacketDrop != nil:
 			route.udpDropUnverified = err != nil
 			route.udpDropUnavailable = err == nil && !available
 		}
 	}
+}
+
+func (p *Provider) verifyExtendedUDPBatch(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, route desiredRoute, batch routeMutation) error {
+	if batch.udpDrop == nil || !route.requiresUDPExtendedMemberWeights() || !hasAmphoraUDPGraph(actual) || udpIPFamily(actual.state.VIPAddress) != 4 {
+		return cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("extended UDP weights require a complete IPv4 Amphora discard batch"))
+	}
+	available, err := p.UDPExtendedMemberWeightsAvailable(ctx)
+	if err != nil || !available {
+		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.Join(errors.New("waiting for regional Octavia extended UDP member weights"), err))
+	}
+	// Discovery is a remote read. Recheck the sealed authorization after it,
+	// immediately before sending the complete batch.
+	if validate := desired.spec.ValidateMutation; validate != nil {
+		return validate(ctx)
+	}
+	return nil
 }
 
 func hasAmphoraUDPGraph(actual observedGatewayGraph) bool {

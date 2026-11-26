@@ -33,7 +33,6 @@ import (
 )
 
 // Octavia's public member create and update APIs accept weights from 0 to 256.
-const maxOctaviaMemberWeight = 256
 
 const (
 	httpHeaderExactRuleType     l7policies.RuleType = "HTTP_HEADER_EXACT"
@@ -348,6 +347,10 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	}
 
 	supportsMemberWeights := usesDefaultPool(protocol)
+	maxMemberWeight := cloud.MaxOctaviaMemberWeight
+	if drop != nil {
+		maxMemberWeight = cloud.MaxUDPExtendedMemberWeight
+	}
 	membersByKey := make(map[string]cloud.Member, len(spec.Members))
 	for _, member := range spec.Members {
 		if member.Port < 1 || member.Port > 65535 {
@@ -356,8 +359,8 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		if member.Weight != 0 && !supportsMemberWeights {
 			return invalid(errors.New("explicit member weights require TCP or UDP"))
 		}
-		if member.Weight < 0 || member.Weight > maxOctaviaMemberWeight {
-			return invalid(fmt.Errorf("explicit member weight %d is outside 1-%d", member.Weight, maxOctaviaMemberWeight))
+		if member.Weight < 0 || member.Weight > maxMemberWeight {
+			return invalid(fmt.Errorf("explicit member weight %d is outside 0-%d", member.Weight, maxMemberWeight))
 		}
 		address, err := netip.ParseAddr(member.Address)
 		if err != nil {

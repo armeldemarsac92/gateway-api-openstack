@@ -1399,6 +1399,11 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if actual.scoped && step.route.policy.httpsListenerHostname != "" && step.listenerID == "" {
 			return fmt.Errorf("%w: scoped HTTP policy has no verified listener", cloud.ErrOwnershipConflict)
 		}
+		if step.route.hasExtendedMemberWeights() {
+			if err := p.verifyExtendedUDPBatch(ctx, desired, actual, route, step.route); err != nil {
+				return err
+			}
+		}
 		route.spec.Gateway = actual.state
 		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)

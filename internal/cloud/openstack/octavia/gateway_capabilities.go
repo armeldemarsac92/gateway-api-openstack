@@ -52,6 +52,7 @@ const (
 	GatewayCapabilityTCPWeightedDefaultPools   = "tcp_weighted_default_pools_v1"
 	GatewayCapabilityTCPConnectionRejection    = "tcp_connection_rejection_v1"
 	GatewayCapabilityUDPPacketDrop             = "udp_packet_drop_v1"
+	GatewayCapabilityUDPExtendedMemberWeights  = "udp_extended_member_weights_v1"
 	GatewayCapabilityHTTPHeaderPersistence     = "http_header_persistence_v1"
 	GatewayCapabilityHTTPCookieName            = "http_cookie_name_v1"
 	GatewayCapabilityHTTPCookiePath            = "http_cookie_path_v1"
