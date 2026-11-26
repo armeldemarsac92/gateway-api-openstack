@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-A Gateway reports the conflicting protocol on each affected listener when a TCP and HTTP listener share a port. [Build record](image.json) · [Listener conditions and TCP traffic](provider/shared-tcp-port-conflict/README.md)
+The Experimental XMesh reporter recognizes the producer and consumer ServiceImport pilots. [Build record](image.json) · [Namespace-scoped imported Service routing](provider/mesh-consumer-service-imports/README.md)
+
+A Gateway reports the conflicting protocol on each affected listener when a TCP and HTTP listener share a port. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0cc92b4ab3ea59ec2f9211a4853ca6901b5872f2/image.json) · [Listener conditions and TCP traffic](provider/shared-tcp-port-conflict/README.md)
 
 An Experimental TCPRoute can preserve the configured weights of clear and authenticated backends when a client identity grant changes. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-3713c168078895b2dcb1eae8ad3a1a83b19c785a/image.json) · [Connection counts and grant transitions](provider/tcproute-weighted-backend-pools/README.md)
 
