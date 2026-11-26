@@ -1,0 +1,369 @@
+{
+  "previousControllerExperimental": {
+    "channel": "experimental",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "kubernetesVersion": "v1.36.2",
+    "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+    "xBackendCRD": true,
+    "conditions": {
+      "service": {
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        }
+      },
+      "wss": {
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "False/UnsupportedProtocol",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "backend": {
+          "Accepted": "False/UnsupportedProtocol"
+        }
+      },
+      "mcp": {
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "False/UnsupportedProtocol",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "backend": {
+          "Accepted": "False/UnsupportedProtocol"
+        }
+      },
+      "grpc-clear": {
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "False/UnsupportedProtocol",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "backend": {
+          "Accepted": "False/UnsupportedProtocol"
+        }
+      },
+      "grpc-tls": {
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "False/UnsupportedProtocol",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "backend": {
+          "Accepted": "False/UnsupportedProtocol"
+        }
+      }
+    },
+    "pools": {},
+    "traffic": {
+      "service": {
+        "httpStatus": 200,
+        "body": "service"
+      }
+    },
+    "configSHA256": "891d7be7856c531f8f09cc30c90ba1ea1d39ad7d9a2d67e96da7ba51acb39fdb",
+    "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+    "rawReceiptSHA256": "76d6b79264b1f3df865de1ae67efe62b3a1c2a60d773706920d3476b92628dca",
+    "controller": {
+      "sourceRevision": "1052c31a4db1137bb2e09d4cdbb2595c00c77ef1",
+      "manifestDigest": "sha256:fdeabef3b75a7d1972815633fb2625cd1ca1ec0c8f96b3a9b7eb4402f48d2308",
+      "managerSHA256": "3e80d9299f47db4f1d6e7cae14413198125c80425b4633f86ffc7954e8b2b61f"
+    },
+    "provider": {
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      }
+    }
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "xBackendCRD": false,
+      "conditions": {
+        "service": {
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "routeGeneration": 1,
+          "parent": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          }
+        }
+      },
+      "pools": {},
+      "traffic": {
+        "service": {
+          "httpStatus": 200,
+          "body": "service"
+        }
+      },
+      "configSHA256": "821c8ea658c59466fd029b97fec0ea55dab1076e4f78a5b696c515271e637601",
+      "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+      "rawReceiptSHA256": "a7a725ee77e7804d73182285721c2442ac03a292420b1650378e7dc5d9bfaeae",
+      "controller": {
+        "sourceRevision": "7633c14927b8e3331edad31c2ac43bc6448d499d",
+        "manifestDigest": "sha256:642ec360e9dd5b90c8477848abc41c0db407946618cb95385fbfd6c6abc9b226",
+        "managerSHA256": "28b4e3deba8c07fce2cddfa0c337e29b5fed04578de044012b6fd4d811ce67ff"
+      },
+      "provider": {
+        "octavia": {
+          "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+        },
+        "octaviaLib": {
+          "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+        }
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "xBackendCRD": true,
+      "conditions": {
+        "service": {
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "routeGeneration": 1,
+          "parent": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          }
+        },
+        "wss": {
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+          },
+          "routeGeneration": 1,
+          "parent": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          },
+          "backend": {
+            "Accepted": "True/Accepted"
+          },
+          "backendGeneration": 1,
+          "ancestor": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "namespace": "protocols"
+          }
+        },
+        "mcp": {
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+          },
+          "routeGeneration": 1,
+          "parent": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          },
+          "backend": {
+            "Accepted": "True/Accepted"
+          },
+          "backendGeneration": 1,
+          "ancestor": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "namespace": "protocols"
+          }
+        },
+        "grpc-clear": {
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+          },
+          "routeGeneration": 1,
+          "parent": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          },
+          "backend": {
+            "Accepted": "True/Accepted"
+          },
+          "backendGeneration": 1,
+          "ancestor": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "namespace": "protocols"
+          }
+        },
+        "grpc-tls": {
+          "route": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+          },
+          "routeGeneration": 1,
+          "parent": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "sectionName": "http"
+          },
+          "backend": {
+            "Accepted": "True/Accepted"
+          },
+          "backendGeneration": 1,
+          "ancestor": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "namespace": "protocols"
+          }
+        }
+      },
+      "pools": {
+        "grpc-clear": {
+          "protocol": "HTTP",
+          "tls": false,
+          "h2c": true,
+          "strictH2": false,
+          "alpn": [],
+          "authenticatedName": null,
+          "trustedCAConfigured": false,
+          "monitor": "TCP",
+          "monitorProvisioningStatus": "ACTIVE"
+        },
+        "grpc-tls": {
+          "protocol": "HTTP",
+          "tls": true,
+          "h2c": false,
+          "strictH2": true,
+          "alpn": [
+            "h2"
+          ],
+          "authenticatedName": "xbackend-origin.example.test",
+          "trustedCAConfigured": true,
+          "monitor": "TCP",
+          "monitorProvisioningStatus": "ACTIVE"
+        },
+        "mcp": {
+          "protocol": "HTTP",
+          "tls": false,
+          "h2c": false,
+          "strictH2": false,
+          "alpn": [],
+          "authenticatedName": null,
+          "trustedCAConfigured": false,
+          "monitor": "TCP",
+          "monitorProvisioningStatus": "ACTIVE"
+        },
+        "wss": {
+          "protocol": "HTTP",
+          "tls": true,
+          "h2c": false,
+          "strictH2": false,
+          "alpn": [
+            "http/1.1"
+          ],
+          "authenticatedName": "xbackend-origin.example.test",
+          "trustedCAConfigured": true,
+          "monitor": "TCP",
+          "monitorProvisioningStatus": "ACTIVE"
+        }
+      },
+      "traffic": {
+        "service": {
+          "httpStatus": 200,
+          "body": "service"
+        },
+        "wss": {
+          "httpStatuses": [
+            101
+          ],
+          "origin": {
+            "echo": "xbackend-websocket",
+            "tls": true,
+            "alpn": "http/1.1",
+            "httpVersion": "1.1"
+          }
+        },
+        "mcp": {
+          "httpStatuses": [
+            200,
+            202,
+            200
+          ],
+          "protocolVersion": "2025-11-25",
+          "contentType": "text/event-stream",
+          "tool": "echo",
+          "sessionRecognized": true,
+          "origin": {
+            "tls": false,
+            "alpn": null,
+            "httpVersion": "1.1"
+          }
+        },
+        "grpc-clear": {
+          "grpcStatus": "OK",
+          "echo": "xbackend-wire",
+          "origin": "grpc-clear",
+          "originTransportSecurity": "insecure"
+        },
+        "grpc-tls": {
+          "grpcStatus": "OK",
+          "echo": "xbackend-wire",
+          "origin": "grpc-tls",
+          "originTransportSecurity": "ssl"
+        }
+      },
+      "configSHA256": "4b655cd2da0f028299d6d3380e13a52ba18c0a66f08d9fdf5bb72383591dff76",
+      "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+      "rawReceiptSHA256": "49c43bc30b780a6a8204edb2bd8e1111a4c28855566d4bb056807cefa5e2f4c0",
+      "controller": {
+        "sourceRevision": "7633c14927b8e3331edad31c2ac43bc6448d499d",
+        "manifestDigest": "sha256:642ec360e9dd5b90c8477848abc41c0db407946618cb95385fbfd6c6abc9b226",
+        "managerSHA256": "28b4e3deba8c07fce2cddfa0c337e29b5fed04578de044012b6fd4d811ce67ff"
+      },
+      "provider": {
+        "octavia": {
+          "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+        },
+        "octaviaLib": {
+          "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+        }
+      }
+    }
+  }
+}
