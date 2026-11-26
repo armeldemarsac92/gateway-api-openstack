@@ -47,6 +47,9 @@ func (p *Provider) reconcileServingTCPRejection(ctx context.Context, desired des
 			continue
 		}
 		route := desired.routes[index]
+		if route.spec.BackendTLS != nil || observed.managedTCPDefaultPoolTLS() {
+			continue
+		}
 		owned := servingPoolListeners(actual, observed.pool.ID)
 		failed := observed.tcpRejection.Present && observed.pool.ProvisioningStatus == "ERROR" &&
 			(tcpRejectionBatchRequired(route, observed) || slices.ContainsFunc(owned, func(listener listeners.Listener) bool { return listener.ProvisioningStatus == "ERROR" }))
@@ -146,7 +149,9 @@ func (p *Provider) pendingTransportBatchResult(ctx context.Context, desired desi
 			owned := servingPoolListeners(actual, observed.pool.ID)
 			if len(owned) == 0 || len(owned) != len(route.spec.ScopedListenerPorts) ||
 				slices.ContainsFunc(owned, func(listener listeners.Listener) bool {
-					return !listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" || !slices.Contains(route.spec.ScopedListenerPorts, listener.ProtocolPort)
+					return !listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" ||
+						!slices.Contains(route.spec.ScopedListenerPorts, listener.ProtocolPort) ||
+						!actual.tcpDefaultPoolTLSMatches(listener.ID, route)
 				}) {
 				continue
 			}
@@ -199,6 +204,9 @@ func (p *Provider) replayPendingTCPRejection(ctx context.Context, desired desire
 			continue
 		}
 		route := desired.routes[index]
+		if route.spec.BackendTLS != nil || observed.managedTCPDefaultPoolTLS() {
+			continue
+		}
 		// A pending clear lacks a positive fraction. The native full batch
 		// stages every retained row, including unchanged members.
 		if !observed.tcpRejection.Present || observed.tcpRejection.Value == nil && route.spec.TCPConnectionRejection == nil &&

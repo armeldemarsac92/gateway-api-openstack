@@ -143,6 +143,7 @@ type desiredRoute struct {
 	backendTLS                  backendTLSPlan
 	backendRetryBudgetAvailable bool
 	tcpRejectionUnavailable     bool
+	tcpDefaultPoolTLS           tcpDefaultPoolTLSPlan
 	udpDropUnverified           bool
 	udpDropUnavailable          bool
 
@@ -296,8 +297,14 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	if spec.BackendRetryBudget != nil && (protocol != cloud.ListenerProtocolHTTP || !spec.BackendRetryBudget.Valid()) {
 		return invalid(errors.New("backend retry budgets require a valid Service budget on an HTTP pool"))
 	}
-	if spec.BackendTLS != nil && protocol != cloud.ListenerProtocolHTTP {
-		return invalid(errors.New("BackendTLSPolicy requires an HTTP pool"))
+	if protocol == cloud.ListenerProtocolTCP && spec.BackendTLS != nil {
+		tls := spec.BackendTLS
+		if spec.MemberMode != cloud.MemberModeEndpoint || spec.BackendH2C || spec.GRPC || fraction != nil ||
+			tls.Denied || tls.RequireH2 || tls.Trust != cloud.BackendTLSTrustReference || len(tls.SubjectAltNames) != 0 || !validBackendTLS(tls) {
+			return invalid(errors.New("TCP default pool TLS requires an exact hostname and ConfigMap CA on an Endpoint pool"))
+		}
+	} else if spec.TCPXBackendClientCertificateReference != "" || spec.BackendTLS != nil && protocol != cloud.ListenerProtocolHTTP {
+		return invalid(errors.New("invalid authentication settings for this backend pool"))
 	}
 	if spec.BackendH2C && spec.BackendTLS == nil && (protocol != cloud.ListenerProtocolHTTP || !p.backendH2C) {
 		return invalid(errors.New("h2c requires an HTTP pool and --octavia-backend-h2c"))
@@ -456,10 +463,10 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			!unavailable && !backend.RoutedExternal) {
 			return invalid(errors.New("ServiceImport requires a routed pool without Service transport policies"))
 		}
-		routedXBackend := xBackend && !spec.GRPC && backend.BackendRetryBudget == nil && !backend.InvalidReference
+		routedXBackend := xBackend && backend.BackendRetryBudget == nil && !backend.InvalidReference
 		if backend.RoutedExternal && (spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 ||
 			!serviceImport && !routedXBackend) {
-			return invalid(errors.New("routed external members require an unmanaged Endpoint pool for ServiceImport or HTTP XBackend"))
+			return invalid(errors.New("routed external members require an unmanaged Endpoint pool for ServiceImport or XBackend"))
 		}
 		if xBackend && backend.BackendTLS != nil && !deniedTLS &&
 			(spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {

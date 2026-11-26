@@ -62,6 +62,11 @@ func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error
 	return p.graph.BackendRetryBudgetAvailable(ctx)
 }
 
+// TCPDefaultPoolTLSAvailable discovers regional authenticated TCP default pools.
+func (p *Provider) TCPDefaultPoolTLSAvailable(ctx context.Context) (bool, error) {
+	return p.graph.TCPDefaultPoolTLSAvailable(ctx)
+}
+
 // TCPConnectionRejectionAvailable discovers regional Amphora support.
 func (p *Provider) TCPConnectionRejectionAvailable(ctx context.Context) (bool, error) {
 	return p.graph.TCPConnectionRejectionAvailable(ctx)

@@ -45,12 +45,14 @@ type backendReference struct {
 }
 
 type transportBackend struct {
-	ref           backendReference
-	service       *corev1.Service
-	port          *corev1.ServicePort
-	xBackend      *gatewayx.XBackend
-	importUID     types.UID
-	importMembers []cloud.Member
+	ref               backendReference
+	service           *corev1.Service
+	port              *corev1.ServicePort
+	xBackend          *gatewayx.XBackend
+	backendTLS        *cloud.BackendTLSValidation
+	clientCertificate string
+	importUID         types.UID
+	importMembers     []cloud.Member
 }
 
 type backendRejections struct {
@@ -65,6 +67,7 @@ type backendRejections struct {
 	imports         []serviceImportRevision
 	importGrants    map[string]serviceImportGrantRevision
 	retryImports    bool
+	retryTLS        bool
 }
 
 func (r *backendRejections) reject(weight int32, diagnostic *model.Diagnostic, collect bool) (blocksForwarding bool) {
@@ -222,7 +225,7 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 }
 
 // resolveBackends validates authorized references and returns the backends that carry traffic.
-func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode, topologyMode cloud.MemberMode, collect bool) ([]transportBackend, backendRejections, error) {
+func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReference, inactiveMode, activeMode cloud.MemberMode, profile model.XBackendProfile, class gatewayv1.ObjectName, singleton, collect bool) ([]transportBackend, backendRejections, error) {
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	readErrors := make(map[client.ObjectKey]error)
 	imports := make(map[client.ObjectKey]serviceImportRevision)
@@ -236,7 +239,14 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 	var rejections backendRejections
 	for _, ref := range refs {
 		if ref.xBackend {
-			backend, diagnostic, err := r.readTCPXBackend(ctx, ref.key, topologyMode)
+			backend, diagnostic, err := r.readTCPXBackend(ctx, ref.key, profile)
+			if err != nil && r.Config.TCPDefaultPoolTLS && ref.weight > 0 && ctx.Err() == nil {
+				// Without a live XBackend, its previous transport and identity
+				// cannot authorize any traffic.
+				diagnostic = backendRejection(gatewayv1.RouteReasonPending, "Waiting to read the backend XBackend")
+				rejections.retryTLS = true
+				err = nil
+			}
 			if err != nil {
 				if rejections.recordReadError(ref.weight, err, collect) {
 					return nil, rejections, err
@@ -246,6 +256,15 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 			if backend != nil && ref.weight != 0 {
 				rejections.xBackends = append(rejections.xBackends, xBackendRevision{uid: backend.UID, generation: backend.Generation})
 			}
+			var tls *cloud.BackendTLSValidation
+			var certificate string
+			if diagnostic == nil && model.XBackendRequiresTLS(backend.Spec) {
+				rejections.retryTLS = rejections.retryTLS || singleton && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer
+				tls, certificate, diagnostic, err = r.observeTCPXBackendTLS(ctx, backend, class, singleton || ref.weight == 0)
+				if err != nil {
+					return nil, rejections, err
+				}
+			}
 			if diagnostic != nil {
 				if rejections.reject(ref.weight, diagnostic, collect) {
 					return nil, rejections, nil
@@ -253,7 +272,7 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 				continue
 			}
 			if ref.weight != 0 {
-				backends = append(backends, transportBackend{ref: ref, xBackend: backend})
+				backends = append(backends, transportBackend{ref: ref, xBackend: backend, backendTLS: tls, clientCertificate: certificate})
 			}
 			continue
 		}
@@ -271,7 +290,7 @@ func (r *Reconciler) resolveBackends(ctx context.Context, refs []backendReferenc
 			}
 			port, destinations, diagnostic := observation.Destinations(ref.port, r.kind(), false)
 			if diagnostic == nil {
-				diagnostic = serviceImportModeIssue(topologyMode)
+				diagnostic = serviceImportModeIssue(profile.MemberMode)
 			}
 			if diagnostic != nil {
 				if rejections.reject(ref.weight, diagnostic, collect) {

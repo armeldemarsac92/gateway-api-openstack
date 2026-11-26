@@ -380,7 +380,7 @@ spec:
           name: database-pods
 ```
 
-Omitting `protocol` inherits TCP from the route. Omit `tls` or set `tls.mode: None`. This profile supports Pod selectors for raw TCP. DNS `ExternalHostname` and controller-initiated TLS require separate transport support. Cookie and Header persistence apply to HTTP application traffic.
+Omitting `protocol` inherits TCP from the route. Omit `tls` or set `tls.mode: None` for clear TCP forwarding. A configured operator may also allow [routed ExternalHostname backends](reference/class-configuration.md#route-tcp-to-an-experimental-xbackend-hostname) and [authenticated upstream TLS](operator-octavia-backend-tls-policy.md#authenticate-a-tcproute-xbackend). Cookie and Header persistence apply to HTTP application traffic.
 
 A TCPRoute can combine XBackends and Endpoint Services using the same backend weights. Where an operator has enabled [proportional TCP connection rejection](operator-octavia-tcp-connection-rejection.md), an invalid XBackend or one without eligible Pods contributes its positive weight to rejection. Check `status.ancestors` for the XBackend's current-generation `Accepted` condition for the TCP Gateway. Check the TCPRoute's `ResolvedRefs` and `<controller-domain>/Programmed` conditions, then send an application request with a TCP client through the Gateway address. The local controller test observes programming intent and Kubernetes status with an API server. Amphora traffic and regional behavior require separate qualification.
 

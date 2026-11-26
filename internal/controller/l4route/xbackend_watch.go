@@ -21,6 +21,8 @@ import (
 	"errors"
 	"slices"
 
+	"k8s.io/utils/ptr"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -48,6 +50,50 @@ func (r *Reconciler) enqueueTCPRoutesForXBackendPod(ctx context.Context, object 
 		}
 	}
 	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) enqueueTCPRoutesForXBackendCA(ctx context.Context, object client.Object) []reconcile.Request {
+	keys := routeRequests{}
+	key := client.ObjectKeyFromObject(object)
+	var backends gatewayx.XBackendList
+	if err := r.List(ctx, &backends, client.InNamespace(key.Namespace), client.MatchingFields{
+		controller.IndexXBackendByCA: controller.ObjectKeyString(key),
+	}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list TCP XBackends for CA", "ca", key)
+		return nil
+	}
+	for _, backend := range backends.Items {
+		for consumer := range r.xBackendConsumers(ctx, client.ObjectKeyFromObject(&backend)) {
+			keys[consumer] = struct{}{}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) enqueueTCPRoutesForXBackendGrant(ctx context.Context, keys routeRequests, namespace string, grant *gatewayv1.ReferenceGrant) {
+	if !slices.ContainsFunc(grant.Spec.To, func(to gatewayv1.ReferenceGrantTo) bool { return to.Group == "" && to.Kind == "Secret" }) {
+		return
+	}
+	var backends gatewayx.XBackendList
+	if err := r.List(ctx, &backends, client.InNamespace(namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list TCP XBackends for ReferenceGrant", "grant", client.ObjectKeyFromObject(grant))
+		return
+	}
+	for _, backend := range backends.Items {
+		tls := backend.Spec.TLS
+		if tls == nil || tls.Mode != gatewayx.BackendTLSModeClientAndServer || tls.ClientCertificateRef == nil ||
+			ptr.Deref(tls.ClientCertificateRef.Namespace, "") != gatewayv1.Namespace(grant.Namespace) {
+			continue
+		}
+		if !slices.ContainsFunc(grant.Spec.To, func(to gatewayv1.ReferenceGrantTo) bool {
+			return to.Group == "" && to.Kind == "Secret" && (to.Name == nil || string(*to.Name) == string(tls.ClientCertificateRef.Name))
+		}) {
+			continue
+		}
+		for consumer := range r.xBackendConsumers(ctx, client.ObjectKeyFromObject(&backend)) {
+			keys[consumer] = struct{}{}
+		}
+	}
 }
 
 func (r *Reconciler) xBackendConsumers(ctx context.Context, key client.ObjectKey) routeRequests {
@@ -119,7 +165,7 @@ func (r *Reconciler) ObserveXBackendAncestors(ctx context.Context, backend *gate
 			return nil, err
 		}
 		for _, gateway := range gateways {
-			if _, found := ancestors[gateway]; found {
+			if prior, found := ancestors[gateway]; found && prior.Status == metav1.ConditionTrue {
 				continue
 			}
 			parents, _, err := r.managedParents(ctx, route, gateway)
@@ -145,12 +191,35 @@ func (r *Reconciler) ObserveXBackendAncestors(ctx context.Context, backend *gate
 				mode = topology.Topology.MemberMode
 			}
 			status, reason, message := metav1.ConditionTrue, string(gatewayx.BackendReasonAccepted), "XBackend is accepted by the Gateway"
-			if diagnostic := model.ValidateTCPXBackend(backend.Spec, mode); diagnostic != nil {
-				status, reason, message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
-			} else if mode == "" {
-				status, reason, message = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"
+			parent := parents[0].gateway
+			diagnostic := model.ValidateTCPXBackend(backend.Spec, r.tcpXBackendProfile(parent, mode))
+			if diagnostic == nil && model.XBackendRequiresTLS(backend.Spec) {
+				positive := slices.ContainsFunc(route.backendRefs, func(ref gatewayv1.BackendRef) bool {
+					target, ok := model.XBackendReference(route.GetNamespace(), ref.BackendObjectReference)
+					return ok && target == key && ptr.Deref(ref.Weight, 1) > 0
+				})
+				_, _, diagnostic, err = r.observeTCPXBackendTLS(ctx, backend, parent.Spec.GatewayClassName, !positive || singletonTCPReference(route))
+				if err != nil {
+					return nil, err
+				}
+				if diagnostic == nil && positive {
+					if r.TCPDefaultPoolTLSAvailable == nil {
+						diagnostic = backendRejection(gatewayv1.RouteReasonPending, "Waiting for regional Octavia TCP default pool TLS support")
+					} else if available, err := r.TCPDefaultPoolTLSAvailable(ctx); err != nil || !available {
+						diagnostic = backendRejection(gatewayv1.RouteReasonPending, "Waiting for regional Octavia TCP default pool TLS support")
+					}
+				}
 			}
-			ancestors[gateway] = controller.Condition(string(gatewayx.BackendConditionAccepted), status, reason, message, backend.Generation)
+			if diagnostic != nil {
+				status, reason, message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
+				if reason == string(gatewayv1.RouteReasonPending) {
+					status = metav1.ConditionUnknown
+				}
+			}
+			if prior, found := ancestors[gateway]; !found || status == metav1.ConditionTrue ||
+				prior.Status == metav1.ConditionFalse && status == metav1.ConditionUnknown {
+				ancestors[gateway] = controller.Condition(string(gatewayx.BackendConditionAccepted), status, reason, message, backend.Generation)
+			}
 		}
 	}
 	return ancestors, nil

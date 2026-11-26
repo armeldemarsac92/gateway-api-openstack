@@ -311,7 +311,7 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 	if len(readyPorts) == 0 || actual.loadBalancer.Pools == nil || len(desired.routes) == 0 {
 		return nil
 	}
-	readyPools := make(map[int]string, len(readyPorts))
+	readyListeners := make(map[int]listeners.Listener, len(readyPorts))
 	pending := false
 	for _, listener := range actual.scopedListeners {
 		switch {
@@ -320,10 +320,10 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 		case listener.ProvisioningStatus != "ACTIVE":
 			return nil
 		case slices.Contains(readyPorts, listener.ProtocolPort):
-			readyPools[listener.ProtocolPort] = listener.DefaultPoolID
+			readyListeners[listener.ProtocolPort] = listener
 		}
 	}
-	if !pending || len(readyPools) == 0 {
+	if !pending || len(readyListeners) == 0 {
 		return nil
 	}
 	inventory, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
@@ -336,8 +336,11 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure || len(ports) == 0 {
 			continue
 		}
-		poolID := readyPools[ports[0]]
-		if poolID == "" || slices.ContainsFunc(ports, func(port int) bool { return readyPools[port] != poolID }) {
+		poolID := readyListeners[ports[0]].DefaultPoolID
+		if poolID == "" || slices.ContainsFunc(ports, func(port int) bool {
+			listener := readyListeners[port]
+			return listener.DefaultPoolID != poolID || !actual.tcpDefaultPoolTLSMatches(listener.ID, route)
+		}) {
 			continue
 		}
 		poolIndex := slices.IndexFunc(inventory.Items, func(pool pools.Pool) bool { return pool.ID == poolID })
@@ -350,9 +353,15 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 			p.validateScopedDefaultPool(pool, actual.loadBalancer.ID, actual.scopedListeners, actual.protocol) != nil {
 			continue
 		}
-		observed := observedRouteGraph{pool: &pool, tcpRejection: inventory.TCPConnectionRejection[pool.ID], udpDrop: inventory.UDPPacketDrop[pool.ID]}
+		observed := observedRouteGraph{
+			pool: &pool, tcpRejection: inventory.TCPConnectionRejection[pool.ID], udpDrop: inventory.UDPPacketDrop[pool.ID],
+			backendTLS: inventory.BackendTLS[pool.ID], backendH2C: inventory.BackendH2C[pool.ID],
+		}
 		if p.observeRoutePoolChildren(ctx, route.identity, &observed) != nil || observed.validateDefaultPoolChildren() != nil {
 			continue
+		}
+		if actual.protocol == cloud.ListenerProtocolTCP && route.spec.BackendTLS != nil {
+			route.tcpDefaultPoolTLS = p.observeTCPDefaultPoolTLS(ctx, route, observed, desired.tcpDefaultPoolTLSAvailable, desired.spec.Gateway.BackendCAOwned)
 		}
 		changes, _, err := buildRouteEnsurePlan(route, observed)
 		deferred[index] = err == nil && scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true))
@@ -415,7 +424,7 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 			if ready && actual.loadBalancer.AdminStateUp {
 				for _, port := range node.RetainListenerPorts {
 					listener := found[port]
-					keepEdge[port] = listener.DefaultPoolID == observed.pool.ID && listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
+					keepEdge[port] = listener.DefaultPoolID == observed.pool.ID && listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE" && actual.tcpDefaultPoolTLSMatches(listener.ID, route)
 				}
 			}
 		case cloud.GraphDelete:
@@ -475,12 +484,14 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 					switch {
 					case !exists:
 						routeResult.Outcome = p.progressingOutcome("Waiting for the selected listener")
-					case listener.DefaultPoolID == observed.pool.ID:
+					case listener.DefaultPoolID == observed.pool.ID && actual.tcpDefaultPoolTLSMatches(listener.ID, route):
 						keepEdge[port] = true
+					case listener.DefaultPoolID == "" && !actual.canAttachTCPDefaultPoolTLS(listener.ID, route):
+						routeResult.Outcome = p.progressingOutcome("Waiting for Octavia TCP default pool TLS listener readback")
 					case listener.DefaultPoolID == "":
 						message := "Attaching the selected Octavia pool"
 						routeResult.Outcome = p.progressingOutcome(message)
-						attach = append(attach, graphMutation{kind: graphSetListenerDefaultPool, listenerID: listener.ID, poolID: observed.pool.ID, message: message})
+						attach = append(attach, graphMutation{kind: graphSetListenerDefaultPool, listenerID: listener.ID, poolID: observed.pool.ID, tcpDefaultPoolTLS: route.spec.BackendTLS != nil, message: message})
 					default:
 						routeResult.Outcome = p.progressingOutcome("Waiting for the previous route to detach")
 					}

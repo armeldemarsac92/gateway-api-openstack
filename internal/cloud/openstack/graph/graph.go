@@ -36,19 +36,20 @@ import (
 )
 
 type desiredGatewayGraph struct {
-	fixedHTTPResponses      bool
-	httpRequestPolicies     httpRequestPolicyAvailability
-	httpRuleCapabilityPorts map[int]httpRuleCapabilities
-	plainHTTPRuleLimits     map[int]string
-	spec                    cloud.GatewayGraphSpec
-	identity                Identity
-	routes                  []desiredRoute
-	protocol                string
-	sni                     []desiredSNIFragment
-	sniHeldClosed           map[sniFragmentKey]bool
-	sniPaused               map[sniFragmentKey]bool
-	sniBlockedRoutes        map[string]bool
-	sniBackendPoolsCapable  bool
+	fixedHTTPResponses         bool
+	tcpDefaultPoolTLSAvailable bool
+	httpRequestPolicies        httpRequestPolicyAvailability
+	httpRuleCapabilityPorts    map[int]httpRuleCapabilities
+	plainHTTPRuleLimits        map[int]string
+	spec                       cloud.GatewayGraphSpec
+	identity                   Identity
+	routes                     []desiredRoute
+	protocol                   string
+	sni                        []desiredSNIFragment
+	sniHeldClosed              map[sniFragmentKey]bool
+	sniPaused                  map[sniFragmentKey]bool
+	sniBlockedRoutes           map[string]bool
+	sniBackendPoolsCapable     bool
 
 	sniPassthroughBackendPoolsCapable bool
 	sniBackendPoolDiscoveryPending    bool
@@ -89,6 +90,7 @@ type observedGatewayGraph struct {
 	withdrawTLS              *graphMutation
 	adminObserved            map[string]bool
 	defaultPoolsObserved     bool
+	tcpDefaultPoolTLS        map[string]bool
 	state                    cloud.GatewayState
 	addressAbsent            bool
 	deletionFrontendActive   bool
@@ -140,6 +142,7 @@ type graphMutation struct {
 	route              routeMutation
 	deletion           gatewayDeletionStep
 	poolID             string
+	tcpDefaultPoolTLS  bool
 	listenerID         string
 	withdrawHTTPPolicy bool
 	redactTLSError     bool
@@ -335,6 +338,15 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, nil
 	}
 	if err != nil {
+		step, withdrawalErr := p.observeFailedTCPDefaultPoolTLSWithdrawal(ctx, desired, &actual)
+		if withdrawalErr != nil {
+			return result, errors.Join(err, withdrawalErr)
+		}
+		if step != nil {
+			result, err := p.applyBackendWithdrawal(ctx, desired, actual, *step)
+			result.Gateway.Outcome = result.Outcome
+			return result, err
+		}
 		pending := p.progressingOutcome("Waiting for the Gateway infrastructure")
 		if cloud.IsTCPTLSListenerProtocol(desired.protocol) && actual.outcome.State == cloud.OutcomeProgressing {
 			pending = actual.outcome
@@ -354,6 +366,22 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 		p.recordGraphMutationOutcome(&result, *step)
+		return result, nil
+	}
+	if step := p.prepareTCPDefaultPoolTLS(ctx, &desired, actual); step != nil {
+		if validate := spec.ValidateMutation; validate != nil {
+			if err := validate(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
+		actual.outcome = p.progressingOutcome(step.message)
+		result := p.pendingTransportBatchResult(ctx, desired, actual, step.routeIndex)
+		if err := p.executeGraphMutation(ctx, desired, actual, *step); err != nil {
+			return result, err
+		}
+		p.recordGraphMutationOutcome(&result, *step)
+		result.Outcome.MutationSubmitted = true
+		result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
 		return result, nil
 	}
 	p.observeTCPConnectionRejectionCapability(ctx, &desired, actual)
@@ -424,14 +452,16 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
-		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired) || hasUDPDropTarget(desired) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
+		result := p.pendingGraphResult(ctx, desired, actual)
+		if (len(actual.httpsServingPorts) != 0 || hasTCPDefaultPoolTLSTarget(desired) ||
+			hasTCPRejectionTarget(desired) || hasUDPDropTarget(desired) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
 			// Busy Octavia can prove a serving subset without a write. Apply
 			// the same Kubernetes snapshot fence before publishing that proof.
 			if err := spec.ValidateMutation(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err
 			}
 		}
-		return p.pendingGraphResult(ctx, desired, actual), nil
+		return result, nil
 	}
 	if actual.protocol == cloud.ListenerProtocolUDP && actual.loadBalancer != nil {
 		for index, route := range desired.routes {
@@ -515,7 +545,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
-		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
+		if (hasTCPDefaultPoolTLSTarget(desired) || hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
 			if err := spec.ValidateMutation(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err
 			}
@@ -1884,6 +1914,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
 	actual.adminObserved = inventory.AdminStatesObserved
 	actual.defaultPoolsObserved = inventory.DefaultPoolsObserved
+	actual.tcpDefaultPoolTLS = inventory.TCPDefaultPoolTLS
 	actual.frontendsObservedClosed = !slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
 		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
 	})

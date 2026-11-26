@@ -222,3 +222,33 @@ During rotation or revocation, the controller disables the affected pool and rem
 If the controller cannot list BackendTLSPolicy resources, it can still close owned pools that carry a stale client certificate, then remove their owned members and clear the reference. A new Gateway requesting a client certificate is rejected if the controller is configured without BackendTLSPolicy observation. A previously bound Gateway can still withdraw enrolled identities.
 
 This profile accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP and gRPC backends. Terminating TLSRoutes can also authenticate a TCP backend when the region advertises `tcp_tls_backend_auth_v1`. An enrolled region can also use its system store. [System CA configuration](#use-the-amphora-system-trust-store) [TCP backend configuration and traffic](qualification/v1.7.0/provider/tlsroute-termination.md#authenticate-the-tcp-backend) Deployed Hibiscus qualification remains open.
+
+
+## Authenticate a TCPRoute XBackend
+
+The released provider supports the TCP listener association for a single authenticated pool. [Octavia](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-tcp-default-pool-tls-30dc29021685) · [octavia-lib](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-tcp-default-pool-tls-89991fd0d6de) · [Observed server name and client identity changes](qualification/v1.7.0/provider/xbackend-grpc-tcp-transports/README.md#authenticate-the-origin-of-a-tcp-connection)
+
+Enable the Gateway API v1.7.0 Experimental bundle and run the controller with `--octavia-backend-tls-policy` and `--octavia-tcp-default-pool-tls`. The Amphora region must advertise `tcp_default_pool_tls_v1` and `backend_tls_hostname_v1`. The API and the serving Amphorae must support this association. A client connects to an ordinary Gateway `TCP` listener. Amphora opens a TLS connection to the XBackend and forwards the client's byte stream.
+
+Use an Endpoint GatewayClass with Unmanaged backend security. The XBackend may select Pods or use an ExternalHostname allowed by the class's routed IPv4 settings. The TCPRoute and XBackend share a namespace. Put exactly one positive-weight XBackend reference in the rule and omit `backendRef.port`. Other references may have weight zero and contribute to diagnostics.
+
+Set `protocol: TCP` on the XBackend or inherit TCP from the route. Set `spec.tls` as follows for server authentication:
+
+```yaml
+tls:
+  mode: ServerOnly
+  validation:
+    hostname: origin.example.test
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: origin-ca
+```
+
+Put one PEM CA certificate under `ca.crt` in the XBackend namespace. Amphora sends the configured hostname as SNI and requires that exact DNS identity from the server certificate. ExternalHostname resolution supplies the destination IPv4 addresses. The destination name and the TLS identity may differ. This TCP profile uses ConfigMap trust and validates the hostname directly. Octavia can store its regional ALPN defaults on the pool. Amphora sends the opaque TCP byte stream over TLS without those ALPN options on backend connections or health checks.
+
+For mutual TLS, set `mode: ClientAndServer` and add the XBackend's `clientCertificateRef`. Use the `xbackend-client` enrollment and the current Secret UID and resourceVersion. For a remote Secret, allow the XBackend to reference it with a ReferenceGrant in the Secret namespace. See [Present an XBackend client certificate](#present-an-xbackend-client-certificate).
+
+Check the TCPRoute's `ResolvedRefs` and `<controller-domain>/Programmed` conditions and the XBackend's Gateway ancestor `Accepted` condition. Octavia must report the authenticated pool and `tcp_default_pool_tls: true` on its listener before programming is confirmed. During a trust or identity change the controller detaches the old default and stages the new authenticated pool before attaching it. Keep the retired CA and client identity readable until Octavia has removed their references. Changes apply to new connections after the data plane reload. Test the expected hostname and a different hostname under the same CA. For mutual TLS, also test withdrawal of the enrolled client identity.
+
+A rule with several positive-weight backendRefs reserves the authenticated reference's weight for rejection when [proportional TCP connection rejection](operator-octavia-tcp-connection-rejection.md) is enabled and available. Plain backends keep their share. If the region cannot reject the affected share, the controller withdraws the affected default. Before rolling back Octavia, disable `--octavia-tcp-default-pool-tls` and verify that each affected listener reports `tcp_default_pool_tls: false` and has stopped using its TLS pool.

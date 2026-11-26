@@ -74,6 +74,7 @@ type ProviderConfig struct {
 	BackendTLSPolicy       bool
 	BackendRetryBudget     bool
 	TCPConnectionRejection bool
+	TCPDefaultPoolTLS      bool
 	UDPPacketDrop          bool
 	FixedHTTPResponses     bool
 	LongHTTPHostnames      bool
@@ -118,6 +119,7 @@ type Provider struct {
 	poolALPN               bool
 	backendRetryBudget     bool
 	tcpConnectionRejection bool
+	tcpDefaultPoolTLS      bool
 	udpPacketDrop          bool
 	transportReplayMu      sync.Mutex
 	transportReplayAfter   map[string]time.Time
@@ -177,6 +179,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		poolALPN:               serviceClients.LoadBalancer != nil && clients.SupportsPoolALPN(serviceClients.LoadBalancer.Microversion),
 		backendRetryBudget:     cfg.BackendRetryBudget,
 		tcpConnectionRejection: cfg.TCPConnectionRejection,
+		tcpDefaultPoolTLS:      cfg.TCPDefaultPoolTLS,
 		udpPacketDrop:          cfg.UDPPacketDrop,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		longHTTPHostnames:      cfg.LongHTTPHostnames,

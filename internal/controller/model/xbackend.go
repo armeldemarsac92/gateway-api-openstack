@@ -255,8 +255,6 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	spec = XBackendSpecForRoute(spec, profile.RouteKind)
 	if profile.RouteKind == GRPCRouteKind {
 		switch {
-		case spec.Type != gatewayx.BackendTypeEndpointSelector:
-			return backendDiagnostic(unsupported, "GRPCRoute XBackend requires type EndpointSelector")
 		case spec.SessionPersistence != nil:
 			return backendDiagnostic(unsupported, "XBackend sessionPersistence is unsupported on GRPCRoute")
 		case *spec.Protocol != gatewayx.BackendProtocolGRPC && *spec.Protocol != gatewayx.BackendProtocolHTTP2 && *spec.Protocol != gatewayx.BackendProtocolH2C:
@@ -275,14 +273,8 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 			return diagnostic
 		}
 	case gatewayx.BackendTypeExternalHostname:
-		if !profile.ExternalHostname {
-			return backendDiagnostic(unsupported, "XBackend ExternalHostname requires operator opt-in for this GatewayClass")
-		}
-		if spec.EndpointSelector != nil || spec.ExternalHostname == nil {
-			return backendDiagnostic(unsupported, "XBackend ExternalHostname requires externalHostname")
-		}
-		if !validExternalHostname(string(spec.ExternalHostname.Hostname), profile.ServiceDNSDomains) {
-			return backendDiagnostic(unsupported, "XBackend ExternalHostname must be a DNS hostname outside the Kubernetes Service domains")
+		if diagnostic := validateXBackendExternalHostname(spec, profile); diagnostic != nil {
+			return diagnostic
 		}
 	default:
 		return backendDiagnostic(unsupported, "XBackend type is unsupported")
@@ -343,23 +335,72 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 }
 
 // ValidateTCPXBackend checks the backend in a raw Gateway TCPRoute context.
-func ValidateTCPXBackend(spec gatewayx.BackendSpec, mode cloud.MemberMode) *Diagnostic {
+func ValidateTCPXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
 	const unsupported = gatewayv1.RouteReasonUnsupportedValue
 	switch {
-	case mode != "" && mode != cloud.MemberModeEndpoint:
+	case profile.MemberMode != "" && profile.MemberMode != cloud.MemberModeEndpoint:
 		return backendDiagnostic(unsupported, "TCP XBackend requires Endpoint member mode with Unmanaged backend security")
-	case spec.Type != gatewayx.BackendTypeEndpointSelector:
-		return backendDiagnostic(unsupported, "TCP XBackend requires type EndpointSelector")
 	case spec.Port.Number < 1 || spec.Port.Number > 65535:
 		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
 	case ptr.Deref(spec.Protocol, gatewayx.BackendProtocolTCP) != gatewayx.BackendProtocolTCP:
 		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "TCPRoute XBackend requires protocol TCP or an omitted protocol")
-	case spec.TLS != nil && (spec.TLS.Mode != gatewayx.BackendTLSModeNone || spec.TLS.Validation != nil || spec.TLS.ClientCertificateRef != nil):
-		return backendDiagnostic(unsupported, "TCP XBackend requires TLS mode None without validation or a client certificate")
 	case spec.SessionPersistence != nil:
 		return backendDiagnostic(unsupported, "HTTP Cookie and Header session persistence is unsupported on TCP XBackend")
 	}
-	return validateXBackendEndpointSelector(spec)
+	var diagnostic *Diagnostic
+	switch spec.Type {
+	case gatewayx.BackendTypeEndpointSelector:
+		diagnostic = validateXBackendEndpointSelector(spec)
+	case gatewayx.BackendTypeExternalHostname:
+		diagnostic = validateXBackendExternalHostname(spec, profile)
+	default:
+		return backendDiagnostic(unsupported, "TCP XBackend requires type EndpointSelector or ExternalHostname")
+	}
+	if diagnostic != nil {
+		return diagnostic
+	}
+	if tls := spec.TLS; tls != nil {
+		switch tls.Mode {
+		case gatewayx.BackendTLSModeNone:
+			if tls.Validation != nil || tls.ClientCertificateRef != nil {
+				return backendDiagnostic(unsupported, "TCP XBackend TLS mode None does not accept validation or a client certificate")
+			}
+		case gatewayx.BackendTLSModeServerOnly, gatewayx.BackendTLSModeClientAndServer:
+			switch {
+			case !profile.ServerTLS:
+				return backendDiagnostic(unsupported, "Authenticated TCP XBackends require the controller's TCP default pool TLS opt-in")
+			case tls.Mode == gatewayx.BackendTLSModeClientAndServer && !profile.ClientTLS:
+				return backendDiagnostic(unsupported, "TCP XBackend TLS mode ClientAndServer requires the operator's XBackend client certificate map")
+			case (tls.Mode == gatewayx.BackendTLSModeClientAndServer) != (tls.ClientCertificateRef != nil):
+				return backendDiagnostic(unsupported, "TCP XBackend TLS requires a client certificate reference only in ClientAndServer mode")
+			case tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)):
+				return backendDiagnostic(unsupported, "Authenticated TCP XBackends require validation.hostname to be a precise DNS hostname")
+			case tls.Validation.WellKnownCACertificates != nil || len(tls.Validation.CACertificateRefs) != 1 ||
+				tls.Validation.CACertificateRefs[0].Group != "" || tls.Validation.CACertificateRefs[0].Kind != "ConfigMap" ||
+				len(tls.Validation.SubjectAltNames) != 0:
+				return backendDiagnostic(unsupported, "Authenticated TCP XBackends require one core ConfigMap CA reference and support hostname matching")
+			}
+		default:
+			return backendDiagnostic(unsupported, fmt.Sprintf("TCP XBackend TLS mode %q is unsupported", tls.Mode))
+		}
+	}
+	if profile.MemberMode == "" {
+		return backendDiagnostic(gatewayv1.RouteReasonPending, "Gateway member mode is pending")
+	}
+	return diagnostic
+}
+
+func validateXBackendExternalHostname(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
+	const unsupported = gatewayv1.RouteReasonUnsupportedValue
+	switch {
+	case !profile.ExternalHostname:
+		return backendDiagnostic(unsupported, "XBackend ExternalHostname requires operator opt-in for this GatewayClass")
+	case spec.EndpointSelector != nil || spec.ExternalHostname == nil:
+		return backendDiagnostic(unsupported, "XBackend ExternalHostname requires externalHostname")
+	case !validExternalHostname(string(spec.ExternalHostname.Hostname), profile.ServiceDNSDomains):
+		return backendDiagnostic(unsupported, "XBackend ExternalHostname must be a DNS hostname outside the Kubernetes Service domains")
+	}
+	return nil
 }
 
 func validateXBackendEndpointSelector(spec gatewayx.BackendSpec) *Diagnostic {

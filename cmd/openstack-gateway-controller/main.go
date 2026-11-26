@@ -50,6 +50,7 @@ import (
 	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
@@ -126,7 +127,7 @@ func run(ctx context.Context) error {
 	var httpRequestRedirect, longHTTPHostnames, literalHTTPPaths, httpHeaderName256 bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
-	var tcpConnectionRejection, udpPacketDrop bool
+	var tcpConnectionRejection, tcpDefaultPoolTLS, udpPacketDrop bool
 	var xBackendSessionPersistence bool
 	var routeSessionPersistence bool
 	var httpRequestMirror bool
@@ -169,12 +170,13 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTPRoute and GRPCRoute backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
+	flag.BoolVar(&tcpDefaultPoolTLS, "octavia-tcp-default-pool-tls", false, "authenticate a singleton Experimental TCPRoute XBackend behind a clear TCP listener")
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject unavailable TCPRoute and TLSRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
 	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend and Service policy session cookies or HTTP headers with optional absolute timeout")
 	flag.BoolVar(&routeSessionPersistence, "experimental-route-session-persistence", false, "use regional Octavia capabilities for Experimental HTTPRoute and GRPCRoute rule session persistence")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
-	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
+	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed XBackend ExternalHostname backends (repeatable)", func(class string) error {
 		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
 		return nil
 	})
@@ -282,6 +284,7 @@ func run(ctx context.Context) error {
 		MulticlusterServiceImports:    multiclusterServiceImports,
 		BackendRetryBudget:            backendRetryBudget,
 		TCPConnectionRejection:        tcpConnectionRejection,
+		TCPDefaultPoolTLS:             tcpDefaultPoolTLS,
 		UDPPacketDrop:                 udpPacketDrop,
 		XBackendSessionPersistence:    xBackendSessionPersistence,
 		RouteSessionPersistence:       routeSessionPersistence,
@@ -367,6 +370,7 @@ func run(ctx context.Context) error {
 		BackendH2C:             backendH2C,
 		BackendRetryBudget:     controllerConfig.BackendRetryBudgetEnabled(),
 		TCPConnectionRejection: tcpConnectionRejection,
+		TCPDefaultPoolTLS:      tcpDefaultPoolTLS,
 		UDPPacketDrop:          udpPacketDrop,
 		GRPCContentType:        grpcContentType,
 		TLSSNIPassthrough:      tlsSNIPassthrough,
@@ -456,6 +460,10 @@ func run(ctx context.Context) error {
 		Protocol: gatewayv1.TCPProtocolType,
 		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
 		TCPConnectionRejectionAvailable: openStackProvider.TCPConnectionRejectionAvailable,
+		TCPDefaultPoolTLSAvailable:      openStackProvider.TCPDefaultPoolTLSAvailable,
+	}
+	if controllerConfig.XBackendClientCertificate {
+		tcpReconciler.XBackendClientCertificates = resolver
 	}
 	routeReconciler.TCPRoutes = tcpReconciler
 	udpReconciler := &l4route.Reconciler{
@@ -475,7 +483,10 @@ func run(ctx context.Context) error {
 		routeReconciler.ExternalHostnames = &httproute.ExternalHostnameCache{}
 		gatewayReconciler.GraphRefresh = &graph.GatewayRefreshQueue{}
 		writer.GatewayRefresh = gatewayReconciler.GraphRefresh
-		writer.InvalidateExternalHostnames = routeReconciler.ExternalHostnames.Invalidate
+		writer.InvalidateExternalHostnames = func(identity cloud.Identity) {
+			routeReconciler.ExternalHostnames.Invalidate(identity)
+			tcpReconciler.InvalidateExternalHostnames(identity)
+		}
 	}
 	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	importWatch, err := controller.SetupServiceImportWatch(manager, controllerConfig.MulticlusterServiceImports)
