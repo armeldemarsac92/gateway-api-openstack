@@ -76,8 +76,9 @@ type Request struct {
 	HTTPRouteAllRulesRejected *string
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
-	// HTTPRouteUsesXBackendClientTLS binds deferred status to the observed TLS mode.
-	HTTPRouteUsesXBackendClientTLS *bool
+	// HTTPRouteNeedsXBackendTLSReadback prevents carrying over Programmed when
+	// the provider defers observing a protected backend.
+	HTTPRouteNeedsXBackendTLSReadback *bool
 	// HTTPRouteServicePersistenceRevision ties Service affinity to the writer's projection.
 	HTTPRouteServicePersistenceRevision *string
 	// HTTPRouteXBackendPersistenceRevision ties a status checkpoint to the writer's observation.

@@ -153,26 +153,38 @@ func collectBackendReferenceInputs(ctx context.Context, reader client.Reader, in
 // CollectXBackendInputs reads local XBackend references and the matching Pods
 // needed to lower them. A foreign reference never reaches the API reader.
 func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *model.Input, tlsObserver *BackendTLSObserver, certificates XBackendClientCertificateResolver) error {
+	return collectXBackendReferences(ctx, reader, input, tlsObserver, certificates, true)
+}
+
+// CollectXBackendReferenceInputs observes primary references without waiting for Pod endpoints.
+func CollectXBackendReferenceInputs(ctx context.Context, reader client.Reader, input *model.Input, tlsObserver *BackendTLSObserver, certificates XBackendClientCertificateResolver) error {
+	return collectXBackendReferences(ctx, reader, input, tlsObserver, certificates, false)
+}
+
+func collectXBackendReferences(ctx context.Context, reader client.Reader, input *model.Input, tlsObserver *BackendTLSObserver, certificates XBackendClientCertificateResolver, includeEndpoints bool) error {
 	if !input.EnableXBackend {
 		return nil
 	}
-	keys := map[types.NamespacedName]struct{}{}
-	for _, route := range input.Routes {
-		if model.HTTPProfileRouteKind(&route) != model.HTTPRouteKind {
-			continue
-		}
-		for _, key := range model.LocalXBackendReferences(&route) {
-			keys[key] = struct{}{}
+	profiles := map[types.NamespacedName][]model.XBackendProfile{}
+	for i := range input.Routes {
+		route := &input.Routes[i]
+		kind := model.HTTPProfileRouteKind(route)
+		for _, key := range model.LocalXBackendReferences(route) {
+			if !slices.ContainsFunc(profiles[key], func(profile model.XBackendProfile) bool { return profile.RouteKind == kind }) {
+				profile := input.XBackendProfile
+				profile.RouteKind = kind
+				profiles[key] = append(profiles[key], profile)
+			}
 		}
 	}
-	if len(keys) == 0 {
+	if len(profiles) == 0 {
 		return nil
 	}
-	input.XBackends = make([]model.XBackendObservation, 0, len(keys))
-	for _, key := range slices.SortedFunc(maps.Keys(keys), func(a, b types.NamespacedName) int {
+	input.XBackends = make([]model.XBackendObservation, 0, len(profiles))
+	for _, key := range slices.SortedFunc(maps.Keys(profiles), func(a, b types.NamespacedName) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	}) {
-		observation, err := tlsObserver.ObserveXBackendReference(ctx, key, input.XBackendProfile, input.Gateway.Spec.GatewayClassName, certificates)
+		observation, err := tlsObserver.ObserveXBackendReference(ctx, key, input.Gateway.Spec.GatewayClassName, certificates, profiles[key]...)
 		if err != nil {
 			return err
 		}
@@ -180,14 +192,16 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 			continue
 		}
 		spec := observation.Spec
-		if spec.Type == gatewayx.BackendTypeEndpointSelector && model.CheckXBackendObservation(key, observation, input.XBackendProfile) == nil {
+		if includeEndpoints && spec.Type == gatewayx.BackendTypeEndpointSelector && slices.ContainsFunc(profiles[key], func(profile model.XBackendProfile) bool {
+			return model.CheckXBackendObservation(key, observation, profile) == nil
+		}) {
 			backend := &gatewayx.XBackend{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}, Spec: spec}
 			observation.Endpoints, err = ObserveXBackendEndpoints(ctx, reader, backend)
 			if err != nil {
 				if !model.XBackendRequiresTLS(spec) || ctx.Err() != nil {
 					return err
 				}
-				observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("XBackend %s Pod endpoints could not be read completely", key)}
+				observation.EndpointReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("XBackend %s Pod endpoints could not be read completely", key)}
 			}
 		}
 		input.XBackends = append(input.XBackends, *observation)
@@ -219,7 +233,7 @@ type XBackendClientCertificateResolver interface {
 
 // ObserveXBackendReference reads an authorized XBackend and its TLS inputs without
 // depending on backend members or a provisioned listener.
-func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key types.NamespacedName, profile model.XBackendProfile, class gatewayv1.ObjectName, certificates XBackendClientCertificateResolver) (*model.XBackendObservation, error) {
+func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key types.NamespacedName, class gatewayv1.ObjectName, certificates XBackendClientCertificateResolver, profiles ...model.XBackendProfile) (*model.XBackendObservation, error) {
 	backend, err := readXBackend(ctx, o.reader, key)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -235,7 +249,9 @@ func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key t
 		return nil, nil
 	}
 	observation := &model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
-	if model.ValidateXBackend(backend.Spec, profile) == nil && model.XBackendRequiresTLS(backend.Spec) {
+	if model.XBackendRequiresTLS(backend.Spec) && slices.ContainsFunc(profiles, func(profile model.XBackendProfile) bool {
+		return model.ValidateXBackend(backend.Spec, profile) == nil
+	}) {
 		err = o.ObserveXBackendTLS(ctx, observation, backend, class, certificates)
 	}
 	return observation, err

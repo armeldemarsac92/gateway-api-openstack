@@ -46,7 +46,7 @@ type routeGraphResult struct {
 	selection                  routeSelection
 	rejectedSections           []model.ListenerSection
 	backendObserved            bool
-	usesXBackendClientTLS      bool
+	needsXBackendTLSReadback   bool
 	persistenceRevision        *string
 	servicePersistenceRevision *string
 	xBackendTransportRevision  *string
@@ -105,7 +105,7 @@ func (r *Reconciler) ensureRouteGraph(
 		HTTPRouteAllRulesRejected:            &prepared.allRulesRejected,
 		HTTPRouteRejectedSections:            &prepared.rejectedSections,
 		HTTPRouteRetryBudgetAncestorFull:     &prepared.retryBudgetAncestorFull,
-		HTTPRouteUsesXBackendClientTLS:       &prepared.usesXBackendClientTLS,
+		HTTPRouteNeedsXBackendTLSReadback:    &prepared.needsXBackendTLSReadback,
 		HTTPRouteXBackendPersistenceRevision: prepared.persistenceRevision,
 		HTTPRouteServicePersistenceRevision:  prepared.servicePersistenceRevision,
 		HTTPRouteXBackendTransportRevision:   prepared.xBackendTransportRevision,
@@ -188,16 +188,17 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 	}
 	if snapshot.backends != nil {
 		prepared.serviceImports = r.snapshotServiceImports(snapshot.route, snapshot.backends.input)
-		prepared.usesXBackendClientTLS = snapshot.backends.routeUsesXBackendClientTLS(route)
+		admitted := r.routeWithAdmittedRules(route)
+		prepared.needsXBackendTLSReadback = snapshot.backends.routeNeedsXBackendTLSReadback(admitted)
 		if r.Config.RouteSessionPersistenceEnabled() || r.retryBudgetPolicyServed && r.Config.XBackendSessionPersistenceEnabled() {
 			revision := servicePersistenceRevision(snapshot.desired)
 			prepared.servicePersistenceRevision = &revision
 		}
-		if r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind && len(model.LocalXBackendReferences(route)) != 0 {
-			revision := xBackendTransportRevision(route, snapshot.backends.input.XBackends)
+		if r.Config.XBackendEnabled() && len(model.LocalXBackendReferences(admitted)) != 0 {
+			revision := xBackendTransportRevision(admitted, snapshot.backends.input.XBackends)
 			prepared.xBackendTransportRevision = &revision
-			if r.Config.XBackendSessionPersistence {
-				revision := xBackendPersistenceRevision(route, snapshot.backends.input.XBackends)
+			if r.Config.XBackendSessionPersistence && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+				revision := xBackendPersistenceRevision(admitted, snapshot.backends.input.XBackends)
 				prepared.persistenceRevision = &revision
 			}
 		}

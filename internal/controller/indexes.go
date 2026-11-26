@@ -57,7 +57,7 @@ const (
 	IndexHTTPRouteByServiceImport          = "spec.backendServiceImport"
 	IndexHTTPRouteByServiceImportNamespace = "spec.backendServiceImportNamespace"
 	ServiceImportIndexAll                  = "*"
-	// IndexHTTPRouteByXBackend indexes same-namespace XBackend reference targets.
+	// IndexHTTPRouteByXBackend indexes same-namespace XBackend reference targets on HTTPRoute and GRPCRoute.
 	IndexHTTPRouteByXBackend = "spec.xBackend"
 	// IndexTCPRouteByXBackend indexes same-namespace TCPRoute XBackend reference targets.
 	IndexTCPRouteByXBackend = "spec.tcpXBackend"
@@ -308,6 +308,14 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				if !ok {
 					return nil
 				}
+				keys := make(map[string]struct{})
+				for _, key := range model.LocalXBackendReferences(route) {
+					keys[ObjectKeyString(key)] = struct{}{}
+				}
+				return sortedIndexKeys(keys)
+			}},
+			controllerFieldIndex{object: &gatewayv1.GRPCRoute{}, field: IndexHTTPRouteByXBackend, extract: func(object client.Object) []string {
+				route := model.ProjectGRPCRoute(object.(*gatewayv1.GRPCRoute))
 				keys := make(map[string]struct{})
 				for _, key := range model.LocalXBackendReferences(route) {
 					keys[ObjectKeyString(key)] = struct{}{}

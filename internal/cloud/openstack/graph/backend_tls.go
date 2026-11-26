@@ -390,6 +390,12 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 			part.desired.spec.BackendTLS != nil && (len(part.desired.spec.BackendTLS.SubjectAltNames) != 0 ||
 				part.desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem))
 		tlsPlan := plan(part)
+		if tlsPlan.phase == backendTLSClaim && part.desired != nil && part.desired.xBackend &&
+			part.desired.spec.BackendTLS != nil && part.desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem {
+			// The ordinary preflight already handles stale transport or client
+			// identity. Claiming the withdrawal checkpoint adds no TLS settings.
+			continue
+		}
 		if part.desired == nil && markedEmptyInlineRefusal(part.observed) {
 			// A representation change can leave just the owned stock pool.
 			// Keep its match until the current inventory permits replacement.
@@ -548,6 +554,11 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 			return blocked("Waiting for Octavia to advertise authenticated backend TLS with required HTTP/2 ALPN")
 		}
 		return blocked("Waiting for Octavia to advertise authenticated backend TLS")
+	}
+	if systemCA && desired.xBackend && clientCertificate.Reference != "" && !ownsCA {
+		// System trust has no Barbican CA to publish, but an enrolled client
+		// identity still needs the Gateway's withdrawal checkpoint.
+		return backendTLSPlan{phase: backendTLSClaim}
 	}
 	if pool != nil && (!backendTLSReadbackComplete(desired, observed) ||
 		!systemCAModeReadbackComplete(*pool, observed.backendTLS)) {

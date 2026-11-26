@@ -255,6 +255,36 @@ spec:
 
 The backend supplies the port, so omit `backendRefs[].port`. The controller selects ready, nonterminating Pods with routable IPv4 addresses. Pods using the host network are ineligible for this endpoint profile. Changes to the selector, Pod labels, readiness and Pod addresses update pool membership. The Route and XBackend must share a namespace. Use the HTTPRoute parent conditions and the XBackend's `status.ancestors` to check the current generation for your Gateway. [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go) · [Namespace contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-4894/index.md#route-attachment-and-consumer-overrides)
 
+#### Forward a GRPCRoute to an XBackend
+
+Use the Experimental bundle and controller overlay on an Endpoint-mode Gateway with unmanaged backend security and a network path to Pod IPv4 addresses. Enable the [native GRPCRoute frontend](../qualification/v1.7.0/provider/grpc-h2c-controller.md), including `--octavia-backend-h2c` and either `--octavia-fixed-http-responses` or `--octavia-weighted-http-targets`. For multiple primary references use `--octavia-weighted-http-targets`.
+
+An `EndpointSelector` XBackend in the GRPCRoute's namespace supplies the port. Omit the reference's `port`. An XBackend in a different namespace remains forbidden even with a ReferenceGrant. For example, the `reports` XBackend above can serve the following native route if its selected Pods implement gRPC. Use a listener and hostname combination available to GRPCRoute.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: reports-rpc
+  namespace: apps
+spec:
+  parentRefs:
+    - name: edge
+  rules:
+    - matches:
+        - method:
+            service: reports.v1.Reports
+            method: GetReport
+      backendRefs:
+        - group: gateway.networking.x-k8s.io
+          kind: XBackend
+          name: reports
+```
+
+Omit `spec.protocol` to inherit gRPC, or set it to `GRPC`. With omitted TLS or `tls.mode: None`, the backend uses h2c and requires regional `backend_h2c_v1`. Explicit `H2C` also works in this mode. With `ServerOnly` or `ClientAndServer`, the backend uses authenticated TLS with mandatory `h2` ALPN. Explicit `HTTP2` also works in these modes. Enable backend TLS support and the matching regional Octavia capabilities, and enroll the client certificate for mutual TLS. [Backend TLS configuration](../operator-octavia-backend-tls-policy.md#protect-an-experimental-xbackend)
+
+The GRPCRoute profile supports primary EndpointSelector references. ExternalHostname, XBackend session persistence and XBackend references in RequestMirror are unsupported in this profile. The GRPCRoute parent reports unresolved or incompatible references, and a weighted invalid reference returns gRPC `UNAVAILABLE` for its assigned share. The XBackend publishes its decision per Gateway in `status.ancestors`. For a Gateway with both GRPCRoute and HTTPRoute consumers, one compatible profile is sufficient for the ancestor to accept the backend. Check each route's `ResolvedRefs` for its own result. Kubernetes envtest checks route and backend status and the desired graph. Regional dataplane qualification remains open.
+
 #### Select an application protocol for an HTTPRoute
 
 Set `spec.protocol` on an Experimental `EndpointSelector` or operator-authorized `ExternalHostname` XBackend. The HTTPRoute matches the request and forwards it to the selected backend.

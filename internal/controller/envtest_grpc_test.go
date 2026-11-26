@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	"sigs.k8s.io/gateway-api/conformance"
 	"sigs.k8s.io/gateway-api/conformance/tests"
 	"sigs.k8s.io/yaml"
@@ -151,6 +153,49 @@ func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Conf
 			backend.Matches[0].PathValue != wantBackend[backend.Name] || !backend.BackendH2C || len(backend.Members) != 1 {
 			t.Errorf("exact method backend %s has incorrect desired graph: %#v", backend.Name, backend)
 		}
+	}
+
+	if !cfg.XBackendEnabled() {
+		supported := string(route.Spec.Rules[0].BackendRefs[0].Name)
+		unsupported := string(route.Spec.Rules[1].BackendRefs[0].Name)
+		route.Spec.Rules[1].BackendRefs[0].BackendObjectReference = gatewayv1.BackendObjectReference{
+			Group: ptr.To(gatewayv1.Group(gatewayx.GroupName)), Kind: ptr.To(gatewayv1.Kind("XBackend")), Name: "experimental-kind",
+		}
+		if err := c.Update(ctx, route); err != nil {
+			t.Fatal(err)
+		}
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, key, route); err != nil {
+				return false, err
+			}
+			if len(route.Status.Parents) != 1 {
+				return false, nil
+			}
+			conditions := route.Status.Parents[0].Conditions
+			programmed := meta.FindStatusCondition(conditions, cfg.Domain()+"/Programmed")
+			resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+			if programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != route.Generation ||
+				resolved == nil || resolved.Status != metav1.ConditionFalse || resolved.ObservedGeneration != route.Generation ||
+				resolved.Reason != string(gatewayv1.RouteReasonInvalidKind) {
+				return false, nil
+			}
+			provider.mu.Lock()
+			defer provider.mu.Unlock()
+			for _, observation := range slices.Backward(provider.graphSpecs) {
+				for _, node := range observation.Routes {
+					spec := node.Spec
+					if spec.Identity.RouteUID != string(route.UID) || node.Disposition != cloud.GraphEnsure {
+						continue
+					}
+					return spec.GRPC && len(spec.HTTPBackends) == 1 && spec.HTTPBackends[0].Kind == "" &&
+						spec.HTTPBackends[0].Name == supported && spec.HTTPBackends[0].BackendH2C && len(spec.HTTPBackends[0].Members) == 1 &&
+						len(spec.HTTPBackends[0].Matches) == 1 && spec.HTTPBackends[0].Matches[0].PathValue == wantBackend[supported] &&
+						len(spec.FixedHTTPRules) == 1 && len(spec.FixedHTTPRules[0].Matches) == 1 &&
+						spec.FixedHTTPRules[0].Matches[0].PathValue == wantBackend[unsupported], nil
+				}
+			}
+			return false, nil
+		})
 	}
 
 	// This younger catch-all must wait for the GRPCRoute to detach. Otherwise

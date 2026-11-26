@@ -52,7 +52,7 @@ func (r *Reconciler) backendTLSPolicies(ctx context.Context, field string, key t
 func (r *Reconciler) enqueueRoutesForBackendTLSCA(ctx context.Context, object client.Object) []reconcile.Request {
 	policies := r.backendTLSPolicies(ctx, controller.IndexBackendTLSPolicyByCA, client.ObjectKeyFromObject(object))
 	requests := r.enqueueRoutesForBackendTLSPolicies(ctx, policies)
-	if r.Config.XBackendEnabled() && r.kind() == model.HTTPRouteKind {
+	if r.Config.XBackendEnabled() {
 		requests = append(requests, r.enqueueXBackendRoutesForCA(ctx, object)...)
 	}
 	return requests

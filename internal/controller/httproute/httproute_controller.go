@@ -435,7 +435,8 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	if retryServiceImport {
 		resyncAfter = min(resyncAfter, 5*time.Second)
 	}
-	pollXBackendClientIdentity := r.Config.XBackendClientCertificate && len(model.LocalXBackendReferences(httpRoute)) != 0
+	admitted := r.routeWithAdmittedRules(httpRoute)
+	pollXBackendClientIdentity := r.Config.XBackendClientCertificate && len(model.LocalXBackendReferences(admitted)) != 0
 	if pollXBackendClientIdentity {
 		resyncAfter = min(resyncAfter, xBackendClientCertificateResyncInterval)
 	}
@@ -457,12 +458,12 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		}
 		xBackendRevisionCurrent := true
 		if graphResult.ObservationDeferred && graphResult.xBackendTransportRevision != nil {
-			observations, err := r.liveXBackendRevisions(ctx, httpRoute)
-			transport := xBackendTransportRevision(httpRoute, observations)
+			observations, err := r.liveXBackendRevisions(ctx, admitted)
+			transport := xBackendTransportRevision(admitted, observations)
 			xBackendRevisionCurrent = err == nil && transport == *graphResult.xBackendTransportRevision &&
 				r.currentXBackendRevision(httpRoute, parent.ref, xBackendTransportRevisionCondition, transport)
 			if graphResult.persistenceRevision != nil {
-				persistence := xBackendPersistenceRevision(httpRoute, observations)
+				persistence := xBackendPersistenceRevision(admitted, observations)
 				if err != nil || persistence != *graphResult.persistenceRevision ||
 					!r.currentXBackendRevision(httpRoute, parent.ref, xBackendPersistenceRevisionCondition, persistence) {
 					xBackendRevisionCurrent = false
@@ -483,7 +484,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistenceRevisionUnverified)
 			}
 		}
-		if graphResult.usesXBackendClientTLS || graphResult.serviceImports != nil || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
+		if graphResult.needsXBackendTLSReadback || graphResult.serviceImports != nil || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
 			graphResult.droppedInlineRules != "" || graphResult.allRulesRejected != "" ||
 			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||

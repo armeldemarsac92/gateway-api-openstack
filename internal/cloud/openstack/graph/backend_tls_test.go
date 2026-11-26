@@ -1762,3 +1762,36 @@ func TestBackendTLSFreshWithdrawalPrecedesDisabledPoolRetry(t *testing.T) {
 		t.Fatal("an already-disabled pool prevented a new withdrawal")
 	}
 }
+
+func TestGRPCXBackendSystemTrustClaimsOwnershipBeforeApplyingClientIdentity(t *testing.T) {
+	provider := &Provider{poolALPN: true, backendTLSPolicy: true}
+	desired := desiredRoute{xBackend: true, spec: cloud.RouteSpec{GRPC: true, BackendTLS: &cloud.BackendTLSValidation{
+		Trust: cloud.BackendTLSTrustSystem, Hostname: "origin.example.test", RequireH2: true,
+	}}}
+	certificate := cloud.BackendClientCertificate{Reference: "test-enrollment"}
+	capable := func(bool, bool) bool { return true }
+	for name, observed := range map[string]observedRouteGraph{
+		"new pool": {},
+		"existing pool": {pool: &pools.Pool{
+			ID: "pool", ProvisioningStatus: "ACTIVE", TLSEnabled: true, AdminStateUp: true, TLSContainerRef: certificate.Reference,
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			plan := provider.observeBackendTLS(t.Context(), desired, observed, capable, false, certificate)
+			require.Equal(t, backendTLSClaim, plan.phase)
+			require.Empty(t, plan.settings.ClientCertificateReference)
+			require.Nil(t, firstBackendTLSWithdrawal([]backendTLSPart{{desired: &desired, observed: observed}},
+				func(backendTLSPart) backendTLSPlan { return plan }))
+			step := plan.poolMutation(desired, observed)
+			require.NotNil(t, step)
+			require.Equal(t, routeMutationClaimBackendCA, step.kind)
+		})
+	}
+
+	plan := provider.observeBackendTLS(t.Context(), desired, observedRouteGraph{}, capable, true, certificate)
+	require.Equal(t, backendTLSConfigure, plan.phase)
+	require.Equal(t, certificate.Reference, plan.settings.ClientCertificateReference)
+
+	serverOnly := provider.observeBackendTLS(t.Context(), desired, observedRouteGraph{}, capable, false, cloud.BackendClientCertificate{})
+	require.Equal(t, backendTLSConfigure, serverOnly.phase)
+}

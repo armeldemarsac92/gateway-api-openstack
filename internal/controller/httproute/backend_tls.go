@@ -111,9 +111,17 @@ func (r *Reconciler) discoverBackendTLSProfiles(ctx context.Context, routes []ga
 			check(requirements)
 		}
 	}
-	for _, backend := range input.XBackends {
-		if validation := backend.TLS.Validation; validation != nil && backend.ReadIssue == nil {
-			check(xBackendTLSRequirements(validation, model.XBackendRequiresH2(backend.Spec)))
+	for i := range routes {
+		route := &routes[i]
+		if len(model.LocalXBackendReferences(route)) == 0 {
+			continue
+		}
+		for _, rule := range route.Spec.Rules {
+			for _, backend := range model.ResolveBackends(route, rule, input) {
+				if validation := backend.XBackendTLS; validation != nil {
+					check(xBackendTLSRequirements(validation, backend.XBackendRequiresH2))
+				}
+			}
 		}
 	}
 	return availability
@@ -125,7 +133,7 @@ func supportsBackendTLS(backend model.BackendGroup) bool {
 
 func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup, requireH2 bool) *cloud.BackendTLSValidation {
 	if backend.XBackendTLSRequired {
-		if validation := backend.XBackendTLS; validation != nil && supportsBackendTLS(backend) && !requireH2 &&
+		if validation := backend.XBackendTLS; validation != nil && supportsBackendTLS(backend) && (!requireH2 || backend.XBackendRequiresH2) &&
 			inputs.backendTLSAvailability[xBackendTLSRequirements(validation, backend.XBackendRequiresH2)] == backendTLSAvailable {
 			tls := validation.CloudValidation()
 			tls.RequireH2 = backend.XBackendRequiresH2

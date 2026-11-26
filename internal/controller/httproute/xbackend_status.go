@@ -44,8 +44,8 @@ import (
 const maxXBackendAncestors = 32
 const xBackendClientCertificateResyncInterval = 5 * time.Second
 
-// xBackendStatusReconciler publishes status for attached HTTPRoute and TCPRoute
-// consumers. The route reconcilers own their cloud resources.
+// xBackendStatusReconciler publishes status for attached HTTPRoute, GRPCRoute
+// and TCPRoute consumers. The route reconcilers own their cloud resources.
 type xBackendStatusReconciler struct {
 	routes *Reconciler
 }
@@ -58,9 +58,10 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 	// A finalizer may keep a terminating XBackend visible after its routes
 	// have withdrawn it. Clear our status while the object still exists.
 	var ancestors map[types.NamespacedName]metav1.Condition
+	var retryH2C bool
 	if backend.DeletionTimestamp.IsZero() {
 		var err error
-		ancestors, err = r.observeAncestors(ctx, request.NamespacedName, backend)
+		ancestors, retryH2C, err = r.observeAncestors(ctx, request.NamespacedName, backend)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -68,7 +69,7 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 	base := backend.DeepCopy()
 	result := ctrl.Result{}
 	if len(ancestors) > 0 && (r.routes.Config.BackendTLSPolicy && model.XBackendRequiresTLS(backend.Spec) ||
-		r.routes.Config.BackendH2C && model.XBackendUsesH2C(backend.Spec) ||
+		r.routes.Config.BackendH2C && (retryH2C || model.XBackendUsesH2C(backend.Spec)) ||
 		r.routes.Config.XBackendSessionPersistenceEnabled() && backend.Spec.SessionPersistence != nil) {
 		result.RequeueAfter = controller.OpenStackResyncAfter(r.routes.Config.OpenStackResyncInterval, backend.UID)
 		if r.routes.Config.XBackendClientCertificate && backend.Spec.TLS != nil && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer {
@@ -82,32 +83,34 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 	return result, client.IgnoreNotFound(r.routes.Status().Patch(ctx, backend, controller.OptimisticMergeFrom(base)))
 }
 
-func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key types.NamespacedName, backend *gatewayx.XBackend) (map[types.NamespacedName]metav1.Condition, error) {
-	candidates, err := r.routes.listXBackendConsumers(ctx, key)
-	if err != nil {
-		return nil, err
-	}
+func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key types.NamespacedName, backend *gatewayx.XBackend) (map[types.NamespacedName]metav1.Condition, bool, error) {
 	byGateway := map[types.NamespacedName]*gatewayv1.Gateway{}
-	for i := range candidates {
-		var route gatewayv1.HTTPRoute
-		err := r.routes.APIReader.Get(ctx, client.ObjectKeyFromObject(&candidates[i]), &route)
+	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
+		routes := r.routes.forRouteKind(kind)
+		candidates, err := routes.listXBackendConsumers(ctx, key)
 		if err != nil {
-			if err := client.IgnoreNotFound(err); err != nil {
-				return nil, err
+			return nil, false, err
+		}
+		for i := range candidates {
+			var route gatewayv1.HTTPRoute
+			if err := routes.readRoute(ctx, routes.APIReader, client.ObjectKeyFromObject(&candidates[i]), &route); err != nil {
+				if err := client.IgnoreNotFound(err); err != nil {
+					return nil, false, err
+				}
+				continue
 			}
-			continue
-		}
-		if !route.DeletionTimestamp.IsZero() || !slices.Contains(model.LocalXBackendReferences(&route), key) {
-			continue
-		}
-		parents, err := r.routes.managedParentsWithReader(ctx, r.routes.APIReader, &route)
-		if err != nil {
-			return nil, err
-		}
-		// A class held by its referencing Gateways still owns them.
-		for _, group := range groupManagedRouteParents(parents) {
-			if managedParentsSupportInstalledVersion(group.parents) {
-				byGateway[client.ObjectKeyFromObject(group.gateway)] = group.gateway
+			if !route.DeletionTimestamp.IsZero() || !slices.Contains(model.LocalXBackendReferences(routes.routeWithAdmittedRules(&route)), key) {
+				continue
+			}
+			parents, err := routes.managedParentsWithReader(ctx, routes.APIReader, &route)
+			if err != nil {
+				return nil, false, err
+			}
+			// A class held by its referencing Gateways still owns them.
+			for _, group := range groupManagedRouteParents(parents) {
+				if managedParentsSupportInstalledVersion(group.parents) {
+					byGateway[client.ObjectKeyFromObject(group.gateway)] = group.gateway
+				}
 			}
 		}
 	}
@@ -115,19 +118,20 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 	if r.routes.TCPRoutes != nil {
 		tcpAncestors, err := r.routes.TCPRoutes.ObserveXBackendAncestors(ctx, backend)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		maps.Copy(ancestors, tcpAncestors)
 	}
+	var retryH2C bool
 	persistenceCapability := r.routes.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.routes.xBackendH2CDiagnostic(ctx) })
 	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
 	for gatewayKey, gateway := range byGateway {
-		attached, err := r.hasAttachedConsumer(ctx, gateway, key)
+		kinds, err := r.attachedConsumerKinds(ctx, gateway, key)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		if !attached {
+		if len(kinds) == 0 {
 			continue
 		}
 		profile, err := r.routes.xBackendProfile(gateway)
@@ -139,69 +143,91 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		condition := xBackendAcceptedCondition(backend, profile)
-		if condition.Status != metav1.ConditionFalse && model.XBackendRequiresTLS(backend.Spec) {
-			var observation model.XBackendObservation
-			if err := tlsObserver.ObserveXBackendTLS(ctx, &observation, backend, gateway.Spec.GatewayClassName, r.routes.XBackendClientCertificates); err != nil {
-				return nil, err
-			}
-			validation := observation.TLS
-			switch {
-			case validation.Pending:
-				condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, string(validation.Reason), validation.Message
-			case validation.Validation == nil:
-				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(validation.Reason), validation.Message
-			case observation.ClientCertificateIssue != nil:
-				issue := observation.ClientCertificateIssue
-				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, issue.Reason, issue.Message
-				if issue.Reason == string(gatewayv1.RouteReasonPending) {
-					condition.Status = metav1.ConditionUnknown
+		var selected metav1.Condition
+		if !slices.Contains(kinds, model.HTTPRouteKind) {
+			selected = ancestors[gatewayKey]
+		}
+		for _, kind := range kinds {
+			profile.RouteKind = kind
+			spec := model.XBackendSpecForRoute(backend.Spec, kind)
+			retryH2C = retryH2C || model.XBackendUsesH2C(spec)
+			condition := xBackendAcceptedCondition(backend, profile)
+			if condition.Status != metav1.ConditionFalse && model.XBackendRequiresTLS(spec) {
+				var observation model.XBackendObservation
+				if err := tlsObserver.ObserveXBackendTLS(ctx, &observation, backend, gateway.Spec.GatewayClassName, r.routes.XBackendClientCertificates); err != nil {
+					return nil, false, err
 				}
-			default:
-				requirements := xBackendTLSRequirements(validation.Validation, model.XBackendRequiresH2(backend.Spec))
-				availability := r.routes.backendTLSAvailability(ctx, requirements)
-				if availability != backendTLSAvailable || condition.Status == metav1.ConditionTrue {
-					condition.Status = metav1.ConditionTrue
-					condition = availability.applyXBackend(condition, requirements)
+				condition = r.routes.xBackendTLSCondition(ctx, condition, observation, model.XBackendRequiresH2(spec))
+			}
+			if condition.Status == metav1.ConditionTrue && model.XBackendUsesH2C(spec) {
+				if diagnostic := h2cDiagnostic(); diagnostic.Reason != "" {
+					condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
+					if diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
+						condition.Status = metav1.ConditionUnknown
+					}
 				}
 			}
-		}
-		if condition.Status == metav1.ConditionTrue && model.XBackendUsesH2C(backend.Spec) {
-			if diagnostic := h2cDiagnostic(); diagnostic.Reason != "" {
-				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
-				if diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
-					condition.Status = metav1.ConditionUnknown
-				}
+			if condition.Status == metav1.ConditionTrue && spec.SessionPersistence != nil {
+				condition.Status, condition.Reason, condition.Message = xBackendPersistenceCondition(condition.Status, condition.Reason, condition.Message,
+					persistenceCapability(*spec.SessionPersistence))
+			}
+			// An ancestor accepts this XBackend if any attached route profile
+			// can use it. Each route retains its own reference condition.
+			if selected.Type == "" || condition.Status == metav1.ConditionTrue ||
+				selected.Status == metav1.ConditionFalse && condition.Status == metav1.ConditionUnknown {
+				selected = condition
 			}
 		}
-		if condition.Status == metav1.ConditionTrue && backend.Spec.SessionPersistence != nil {
-			condition.Status, condition.Reason, condition.Message = xBackendPersistenceCondition(condition.Status, condition.Reason, condition.Message,
-				persistenceCapability(*backend.Spec.SessionPersistence))
-		}
-		ancestors[gatewayKey] = condition
+		ancestors[gatewayKey] = selected
 	}
-	return ancestors, nil
+	return ancestors, retryH2C, nil
 }
 
-func (r *xBackendStatusReconciler) hasAttachedConsumer(ctx context.Context, gateway *gatewayv1.Gateway, backend types.NamespacedName) (bool, error) {
+func (r *Reconciler) xBackendTLSCondition(ctx context.Context, condition metav1.Condition, observation model.XBackendObservation, requireH2 bool) metav1.Condition {
+	validation := observation.TLS
+	switch {
+	case validation.Pending:
+		condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, string(validation.Reason), validation.Message
+	case validation.Validation == nil:
+		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(validation.Reason), validation.Message
+	case observation.ClientCertificateIssue != nil:
+		issue := observation.ClientCertificateIssue
+		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, issue.Reason, issue.Message
+		if issue.Reason == string(gatewayv1.RouteReasonPending) {
+			condition.Status = metav1.ConditionUnknown
+		}
+	default:
+		requirements := xBackendTLSRequirements(validation.Validation, requireH2)
+		availability := r.backendTLSAvailability(ctx, requirements)
+		if availability != backendTLSAvailable || condition.Status == metav1.ConditionTrue {
+			condition.Status = metav1.ConditionTrue
+			condition = availability.applyXBackend(condition, requirements)
+		}
+	}
+	return condition
+}
+
+func (r *xBackendStatusReconciler) attachedConsumerKinds(ctx context.Context, gateway *gatewayv1.Gateway, backend types.NamespacedName) ([]gatewayv1.Kind, error) {
 	candidates, err := r.routes.liveGatewayRoutePeers(ctx, gateway)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	admission, err := r.routes.observeRouteGraphAdmission(ctx, gateway, candidates, nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var kinds []gatewayv1.Kind
 	for i := range candidates {
 		route := &candidates[i]
-		if _, eligible := admission.eligible[routeKey(route)]; eligible && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind &&
-			slices.Contains(model.LocalXBackendReferences(route), backend) {
-			return true, nil
+		kind := model.HTTPProfileRouteKind(route)
+		if _, eligible := admission.eligible[routeKey(route)]; eligible && !slices.Contains(kinds, kind) &&
+			slices.Contains(model.LocalXBackendReferences(r.routes.routeWithAdmittedRules(route)), backend) {
+			kinds = append(kinds, kind)
 		}
 	}
-	return false, nil
+	return kinds, nil
 }
 
 func (r *Reconciler) xBackendH2CDiagnostic(ctx context.Context) model.Diagnostic {
