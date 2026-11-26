@@ -24,3 +24,5 @@ backendRefs:
 A cross-namespace import requires a ReferenceGrant in the import’s namespace. Set `from.group` to `gateway.networking.k8s.io`, specify the source namespace and its exact route kind, and set `to.group` and `to.kind` to `multicluster.x-k8s.io` and `ServiceImport`. Set `to.name` to limit authorization to one import. Experimental inline rule session persistence requires all backendRefs on that rule to be core Services.
 
 An HTTP rule can mix Service and ServiceImport references with separate weights. An invalid target retains its share and returns HTTP 500, or `UNAVAILABLE` for gRPC. Check the Route’s `ResolvedRefs` condition for a missing port, missing import, unsupported transport or missing grant. When the MCS API is absent or the feature is disabled, core Service routing can still run.
+
+On both local release channels, removing and restoring the HTTP import grant preserved the weights and the independently authorized gRPC route. [Route conditions and traffic by phase](qualification/v1.7.0/provider/multicluster-service-imports/README.md)
