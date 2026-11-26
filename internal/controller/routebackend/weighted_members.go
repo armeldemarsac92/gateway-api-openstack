@@ -75,6 +75,8 @@ func WeightedMembers(protocol string, groups []WeightedServiceMembers) ([]cloud.
 			if destination == nil {
 				member.Address = address.String()
 				destinations[endpoint] = &weightedDestination{member: member}
+			} else if destination.member.RoutedExternal != member.RoutedExternal {
+				return nil, fmt.Errorf("%s backends require different subnet bindings for the same destination: %w", protocol, ErrWeightedMembersUnrepresentable)
 			} else if destination.member.ProviderID != member.ProviderID {
 				return nil, fmt.Errorf("%s backends have conflicting provider IDs for the same destination", protocol)
 			}

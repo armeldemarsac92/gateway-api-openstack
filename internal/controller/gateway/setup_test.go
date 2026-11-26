@@ -25,7 +25,7 @@ import (
 func TestSetupRequiresGraphWriter(t *testing.T) {
 	kubeClient := indexedFakeClientBuilder(testScheme(t), testConfig()).Build()
 	reconciler := &Reconciler{APIReader: kubeClient, Coordinator: &graph.Coordinator{}}
-	if err := reconciler.SetupWithManager(nil); err == nil || err.Error() != "gateway graph writer is required" {
+	if err := reconciler.SetupWithManager(nil, nil); err == nil || err.Error() != "gateway graph writer is required" {
 		t.Fatalf("SetupWithManager() error = %v", err)
 	}
 }

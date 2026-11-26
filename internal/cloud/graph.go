@@ -144,21 +144,22 @@ type TLSSNIRoute struct {
 	Passthrough bool `json:",omitempty"`
 	Identity    Identity
 	Hostname    string
-	ServiceUID  string
-	// ServicePort identifies the Service section independently of the selected
+	// ServiceUID is the UID of the backend Service or ServiceImport.
+	ServiceUID string
+	// ServicePort identifies the backend section independently of the selected
 	// SNI hostname, endpoints and their target port.
 	ServicePort             int `json:",omitempty"`
 	BackendSubnetID         string
 	BackendSecurityGroupIDs []string
 	Members                 []Member
 	BackendTLS              *BackendTLSValidation `json:",omitempty"`
-	// BackendServices identifies the contributing Services and ports of a
+	// BackendServices identifies the contributing backends and ports of a
 	// weighted rule. Single-backend targets keep their original identity.
 	BackendServices []TLSBackendService `json:",omitempty"`
 	// BackendServiceMembers retains the per-reference weights, endpoints and
 	// empty shares before flattening. It does not change the flat pool identity.
 	BackendServiceMembers []TLSSNIBackendPool `json:"-"`
-	// BackendPools keeps each Service's transport and exact connection share
+	// BackendPools keeps each backend's transport and exact connection share
 	// when a single pool cannot preserve the route's forwarding requirements.
 	BackendPools []TLSSNIBackendPool `json:",omitempty"`
 	// TCPConnectionRejection reserves the unavailable share of new connections.
@@ -172,7 +173,7 @@ func (route *TLSSNIRoute) UseBackendPools(pools []TLSSNIBackendPool) {
 	route.BackendPools = pools
 }
 
-// TLSBackendService identifies a Service port that contributes to an SNI pool.
+// TLSBackendService identifies a Service or ServiceImport port that contributes to an SNI pool.
 type TLSBackendService struct {
 	UID  string
 	Port int

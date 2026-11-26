@@ -87,18 +87,7 @@ func resolveServiceImport(route *gatewayv1.HTTPRoute, group BackendGroup, key ty
 		if observation.Key != key {
 			continue
 		}
-		if observation.ReadIssue != nil {
-			group.Diagnostic = observation.ReadIssue
-			return group
-		}
-		if observation.ReadyIssue != nil {
-			group.Diagnostic = observation.ReadyIssue
-			return group
-		}
-		if observation.Spec == nil {
-			break
-		}
-		group.Port, group.ServiceImportVIP, group.Diagnostic = serviceImportDestination(observation.Spec, group.Reference.Port, kind, input.BackendH2C)
+		group.Port, group.ServiceImportVIP, group.Diagnostic = observation.Destination(group.Reference.Port, kind, input.BackendH2C)
 		if group.Diagnostic == nil {
 			group.State = BackendResolved
 		}
@@ -108,7 +97,18 @@ func resolveServiceImport(route *gatewayv1.HTTPRoute, group BackendGroup, key ty
 	return group
 }
 
-func serviceImportDestination(spec *mcs.ServiceImportSpec, selected *gatewayv1.PortNumber, kind gatewayv1.Kind, backendH2C bool) (*corev1.ServicePort, string, *Diagnostic) {
+// Destination selects the advertised IPv4 address and TCP port for a route's transport.
+func (observation ServiceImportObservation) Destination(selected *gatewayv1.PortNumber, kind gatewayv1.Kind, backendH2C bool) (*corev1.ServicePort, string, *Diagnostic) {
+	if observation.ReadIssue != nil {
+		return nil, "", observation.ReadIssue
+	}
+	if observation.ReadyIssue != nil {
+		return nil, "", observation.ReadyIssue
+	}
+	spec := observation.Spec
+	if spec == nil {
+		return nil, "", backendDiagnostic(gatewayv1.RouteReasonBackendNotFound, fmt.Sprintf("backend ServiceImport %s was not found", observation.Key))
+	}
 	if spec.Type != mcs.ClusterSetIP {
 		return nil, "", backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backend ServiceImport must use ClusterSetIP")
 	}
@@ -119,7 +119,7 @@ func serviceImportDestination(spec *mcs.ServiceImportSpec, selected *gatewayv1.P
 	if kind == GRPCRouteKind && (!backendH2C || !ServicePortUsesH2C(port)) {
 		return nil, "", backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute requires kubernetes.io/h2c and enabled h2c transport for a ServiceImport")
 	}
-	if !supportsHTTPAppProtocol(port, backendH2C, false) {
+	if (kind == HTTPRouteKind || kind == GRPCRouteKind) && !supportsHTTPAppProtocol(port, backendH2C, false) {
 		return nil, "", backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend ServiceImport appProtocol is not supported for HTTP forwarding")
 	}
 	var ipv4 netip.Addr

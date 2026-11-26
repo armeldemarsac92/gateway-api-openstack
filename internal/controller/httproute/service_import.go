@@ -23,6 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -115,4 +117,17 @@ func (s *routeServiceImportSnapshot) validate(ctx context.Context, reader client
 		return errHTTPRouteChanged
 	}
 	return nil
+}
+
+func (r *Reconciler) enqueueRoutesForServiceImport(ctx context.Context, object client.Object) []reconcile.Request {
+	value := controller.ServiceImportIndexAll
+	if object.GetName() != "" {
+		value = controller.ObjectKeyString(client.ObjectKeyFromObject(object))
+	}
+	routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByServiceImport: value})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Could not list routes for ServiceImport", "serviceImport", client.ObjectKeyFromObject(object))
+		return nil
+	}
+	return r.enqueueHTTPRouteConsumers(ctx, routes)
 }

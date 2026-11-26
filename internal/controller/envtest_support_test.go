@@ -249,5 +249,17 @@ func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 			}
 		}
 	}
+	seenTLSRoutes := make(map[string]bool)
+	for _, route := range spec.Gateway.TLSSNIRoutes {
+		if route.Deny || seenTLSRoutes[route.Identity.RouteUID] {
+			continue
+		}
+		seenTLSRoutes[route.Identity.RouteUID] = true
+		outcome := p.routeResults[route.Identity.RouteUID]
+		if outcome.Outcome.State == "" {
+			outcome = cloud.RouteResult{Outcome: cloud.ReadyOutcome()}
+		}
+		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.Identity, Result: outcome})
+	}
 	return result, nil
 }

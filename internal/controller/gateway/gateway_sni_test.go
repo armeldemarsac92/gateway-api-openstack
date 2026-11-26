@@ -48,6 +48,7 @@ import (
 
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
@@ -1310,6 +1311,69 @@ func TestMixedTLSRouteParentUsesMatchingListenerModeAndServicePort(t *testing.T)
 		}
 	}
 
+}
+
+func TestMixedTLSServiceImportPortsUseTheirOwnTransport(t *testing.T) {
+	config := testConfig()
+	config.MulticlusterServiceImports, config.BackendTLSPolicy = true, true
+	config.TLSSNIPassthrough, config.TCPTLSTermination, config.TCPTLSMixedMode = true, true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "mixed", UID: "gateway-uid"}}
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "passthrough", Port: 8883, Protocol: gatewayv1.TLSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("tls.example.com")),
+			TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)}},
+		{Name: "terminate", Port: 8883, Protocol: gatewayv1.TLSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("clear.example.com")),
+			TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModeTerminate)}},
+	}
+	portByRoute := map[string]gatewayv1.PortNumber{"passthrough": 8443, "terminate": 3000}
+	passthrough := testSNIRoute(gateway, "passthrough", gateway.Namespace, "tls.example.com")
+	terminate := testSNIRoute(gateway, "terminate", gateway.Namespace, "clear.example.com")
+	for _, route := range []*gatewayv1.TLSRoute{passthrough, terminate} {
+		route.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName(route.Name))
+		ref := &route.Spec.Rules[0].BackendRefs[0]
+		ref.Group, ref.Kind = ptr.To(gatewayv1.Group(mcs.GroupName)), ptr.To(gatewayv1.Kind("ServiceImport"))
+		ref.Port = ptr.To(portByRoute[route.Name])
+	}
+	service, endpoints := testSNIBackend(gateway.Namespace, "core-service", "192.0.2.101")
+	policy := &gatewayv1.BackendTLSPolicy{ObjectMeta: metav1.ObjectMeta{Name: "service-tls", Namespace: gateway.Namespace},
+		Spec: gatewayv1.BackendTLSPolicySpec{TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{
+			{LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: "backend"}},
+		}},
+	}
+	imported := &mcs.ServiceImport{ObjectMeta: metav1.ObjectMeta{Name: service.Name, Namespace: service.Namespace, UID: "import-uid"},
+		Spec: mcs.ServiceImportSpec{Type: mcs.ClusterSetIP, IPs: []string{"10.128.0.11"}, Ports: []mcs.ServicePort{
+			{Port: 8443, Protocol: corev1.ProtocolTCP}, {Port: 3000, Protocol: corev1.ProtocolTCP},
+		}},
+	}
+	scheme := testScheme(t)
+	require.NoError(t, mcs.Install(scheme))
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(passthrough, terminate, service, endpoints, policy, imported).Build()
+	r := &Reconciler{APIReader: kube, Config: config}
+	listeners, err := SupportedListenersForConfig(config, gateway)
+	require.NoError(t, err)
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: listeners[0], listeners: listeners, topology: testBoundTopology()}
+	observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Len(t, observation.targets(), 2)
+	for _, target := range observation.targets() {
+		name := target.Identity.RouteName
+		port, found := portByRoute[name]
+		require.True(t, found)
+		require.Equal(t, name == "passthrough", target.Passthrough)
+		require.Equal(t, string(imported.UID), target.ServiceUID)
+		require.Equal(t, int(port), target.ServicePort)
+		require.Empty(t, target.BackendSubnetID)
+		require.Nil(t, target.BackendTLS)
+		require.Equal(t, []cloud.Member{{Address: imported.Spec.IPs[0], Port: int(port), RoutedExternal: true}}, target.Members)
+	}
+	r.Config.MulticlusterServiceImports = false
+	observation, err = r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	for _, entry := range observation {
+		if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+			require.Equal(t, gatewayv1.RouteReasonInvalidKind, entry.resolvedReason)
+		}
+		require.Empty(t, entry.targets)
+	}
 }
 
 func TestMixedTLSReplacementUsesCurrentPassthroughAuthorization(t *testing.T) {
