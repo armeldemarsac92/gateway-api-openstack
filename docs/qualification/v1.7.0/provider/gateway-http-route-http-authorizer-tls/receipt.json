@@ -1,0 +1,544 @@
+{
+  "controller": "a93b18166c27837a5c3cfdb7aac34ec9522b86be",
+  "image": "sha256:960d4ce617a5d61f9a55b28d9dbca7447479fdc1a4286194cb6d59e840d82e84",
+  "octavia": "be4a61a490b0c351bb093f860b3b26d20781158b",
+  "octaviaMaster": "0ccef0b9fd17715b31e939f1f78fa2632e63166e",
+  "providerRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-route-http-authorizer-tls-be4a61a490b0",
+  "regionalDeploymentVerified": false,
+  "results": {
+    "standard": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "schema": {
+        "servesExternalAuth": false,
+        "sha256": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c",
+        "rejectedHTTPExternalAuthOnServerDryRun": true,
+        "acceptedOrdinaryHTTPRoute": true
+      },
+      "controller": {
+        "sourceRevision": "a93b18166c27837a5c3cfdb7aac34ec9522b86be",
+        "managerSHA256": "ea9ee1d9fbbf8dbb035a5b3530814802d6ccaded24dfbdc79d632a7911d51050",
+        "manifestDigest": "sha256:960d4ce617a5d61f9a55b28d9dbca7447479fdc1a4286194cb6d59e840d82e84",
+        "ociArchiveSHA256": "a0bd64e1ec21a99fb6d69e8c5d1359ea84992e4911cd94a97cd16192e0683503"
+      },
+      "octavia": {
+        "revision": "be4a61a490b0c351bb093f860b3b26d20781158b",
+        "version": "19.0.1.dev105",
+        "sha256": "979ed14e01bac40bb43160df1411f6ac1918288f519cd2909ac42a9e84ded33e",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "nativeExternalAuth": true
+      },
+      "fixtureReceiptSHA256": "04a50582a76d6f0f9aa821a14887abf9ad66e2300c1989241580b08bb16cafb9",
+      "boundary": "Local Kubernetes API and etcd, a running controller, Octavia, Barbican, Amphora configuration rendering and native HAProxy. Keystone, Neutron, RPC completion and Amphora agent transport used fixture adapters."
+    },
+    "experimental": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schema": {
+        "servesExternalAuth": true,
+        "sha256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d"
+      },
+      "controller": {
+        "sourceRevision": "a93b18166c27837a5c3cfdb7aac34ec9522b86be",
+        "managerSHA256": "ea9ee1d9fbbf8dbb035a5b3530814802d6ccaded24dfbdc79d632a7911d51050",
+        "manifestDigest": "sha256:960d4ce617a5d61f9a55b28d9dbca7447479fdc1a4286194cb6d59e840d82e84",
+        "ociArchiveSHA256": "a0bd64e1ec21a99fb6d69e8c5d1359ea84992e4911cd94a97cd16192e0683503"
+      },
+      "octavia": {
+        "revision": "be4a61a490b0c351bb093f860b3b26d20781158b",
+        "version": "19.0.1.dev105",
+        "sha256": "979ed14e01bac40bb43160df1411f6ac1918288f519cd2909ac42a9e84ded33e",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "nativeExternalAuth": true
+      },
+      "fixtureReceiptSHA256": "495c2e2d490b37cca50ce73071ca399fd5d634edec9241115b3c2dcd3c118b58",
+      "boundary": "Local Kubernetes API and etcd, a running controller, Octavia, Barbican, Amphora configuration rendering and native HAProxy. Keystone, Neutron, RPC completion and Amphora agent transport used fixture adapters.",
+      "octaviaAPIVersion": "v2.30",
+      "providerCapabilities": {
+        "l7policy_http_external_auth_v1": true,
+        "l7policy_http_external_auth_tls_v1": true,
+        "backend_tls_hostname_v1": true
+      },
+      "testCAFingerprintSHA256": "954a3d1f2219828505a203fd97c838c370c01f4f4679549773779d0385695e62",
+      "cleartextDetectionControl": true,
+      "runningControllerSHA256": "ea9ee1d9fbbf8dbb035a5b3530814802d6ccaded24dfbdc79d632a7911d51050",
+      "phases": {
+        "grant_present": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "backendTLSPolicy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "render": {
+            "sha256": "5d914aeecbdee150f8a7bcc8ee671576708df2a511a67551550621fef85e1c03",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "routeHTTPAuthAction": true,
+            "tlsServer": true,
+            "verificationRequired": true,
+            "exactDNS": true,
+            "sendsSNI": true,
+            "uploadedCAMatches": true,
+            "forcesHTTP11": true
+          },
+          "traffic": {
+            "private": {
+              "status": 200,
+              "originResponse": true,
+              "events": [
+                {
+                  "peer": "authorizer",
+                  "kind": "clientHello",
+                  "sni": "authorizer.example.test"
+                },
+                {
+                  "peer": "authorizer",
+                  "kind": "request",
+                  "path": "/authorize/private",
+                  "protocol": "HTTP/1.1",
+                  "tls": "TLSv1.3",
+                  "alpn": "http/1.1"
+                },
+                {
+                  "peer": "origin",
+                  "kind": "request",
+                  "path": "/private",
+                  "protocol": "HTTP/1.1",
+                  "tls": null,
+                  "alpn": null
+                }
+              ],
+              "authorizerRequests": 1,
+              "originRequests": 1,
+              "cleartextAuthorizerConnections": 0
+            },
+            "public": {
+              "status": 200,
+              "originResponse": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "kind": "request",
+                  "path": "/public",
+                  "protocol": "HTTP/1.1",
+                  "tls": null,
+                  "alpn": null
+                }
+              ],
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "cleartextAuthorizerConnections": 0
+            }
+          },
+          "octavia": {
+            "listenerProtocol": "HTTP",
+            "activePolicyCount": 2,
+            "originPoolMembersMatched": true,
+            "protectedRule": {
+              "action": "REDIRECT_TO_POOL",
+              "fixedResponse": null,
+              "listAndDetailAgree": true
+            },
+            "tlsAuthorizerPool": {
+              "collectionAndDetailAgree": true,
+              "tlsEnabled": true,
+              "hostname": "authorizer.example.test",
+              "requiresH2": false,
+              "hasBarbicanCAReference": true,
+              "systemCA": false,
+              "poolALPNReadback": [
+                "h2",
+                "http/1.1",
+                "http/1.0"
+              ]
+            }
+          }
+        },
+        "grant_withdrawn": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "backendTLSPolicy": {},
+          "render": {
+            "sha256": "e189e7d55ec2983bb0975e714bbd093eaa1837edbcc5e4ec0ba178c692f5174c",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "routeHTTPAuthAction": false
+          },
+          "traffic": {
+            "private": {
+              "status": 500,
+              "originResponse": false,
+              "events": [],
+              "authorizerRequests": 0,
+              "originRequests": 0,
+              "cleartextAuthorizerConnections": 0
+            },
+            "public": {
+              "status": 200,
+              "originResponse": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "kind": "request",
+                  "path": "/public",
+                  "protocol": "HTTP/1.1",
+                  "tls": null,
+                  "alpn": null
+                }
+              ],
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "cleartextAuthorizerConnections": 0
+            }
+          },
+          "octavia": {
+            "listenerProtocol": "HTTP",
+            "activePolicyCount": 2,
+            "originPoolMembersMatched": true,
+            "protectedRule": {
+              "action": "FIXED_RESPONSE",
+              "fixedResponse": {
+                "status_code": 500
+              },
+              "listAndDetailAgree": true
+            }
+          }
+        },
+        "grant_restored": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "backendTLSPolicy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "render": {
+            "sha256": "cd156c451b62f65a1475649d04917d4c790719c47341f71a71183c6441600321",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "routeHTTPAuthAction": true,
+            "tlsServer": true,
+            "verificationRequired": true,
+            "exactDNS": true,
+            "sendsSNI": true,
+            "uploadedCAMatches": true,
+            "forcesHTTP11": true
+          },
+          "traffic": {
+            "private": {
+              "status": 200,
+              "originResponse": true,
+              "events": [
+                {
+                  "peer": "authorizer",
+                  "kind": "clientHello",
+                  "sni": "authorizer.example.test"
+                },
+                {
+                  "peer": "authorizer",
+                  "kind": "request",
+                  "path": "/authorize/private",
+                  "protocol": "HTTP/1.1",
+                  "tls": "TLSv1.3",
+                  "alpn": "http/1.1"
+                },
+                {
+                  "peer": "origin",
+                  "kind": "request",
+                  "path": "/private",
+                  "protocol": "HTTP/1.1",
+                  "tls": null,
+                  "alpn": null
+                }
+              ],
+              "authorizerRequests": 1,
+              "originRequests": 1,
+              "cleartextAuthorizerConnections": 0
+            },
+            "public": {
+              "status": 200,
+              "originResponse": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "kind": "request",
+                  "path": "/public",
+                  "protocol": "HTTP/1.1",
+                  "tls": null,
+                  "alpn": null
+                }
+              ],
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "cleartextAuthorizerConnections": 0
+            }
+          },
+          "octavia": {
+            "listenerProtocol": "HTTP",
+            "activePolicyCount": 2,
+            "originPoolMembersMatched": true,
+            "protectedRule": {
+              "action": "REDIRECT_TO_POOL",
+              "fixedResponse": null,
+              "listAndDetailAgree": true
+            },
+            "tlsAuthorizerPool": {
+              "collectionAndDetailAgree": true,
+              "tlsEnabled": true,
+              "hostname": "authorizer.example.test",
+              "requiresH2": false,
+              "hasBarbicanCAReference": true,
+              "systemCA": false,
+              "poolALPNReadback": [
+                "h2",
+                "http/1.1",
+                "http/1.0"
+              ]
+            }
+          }
+        },
+        "trust_withdrawn": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "Unknown/Pending",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "backendTLSPolicy": {
+            "Accepted": "False/NoValidCACertificate",
+            "ResolvedRefs": "False/InvalidCACertificateRef"
+          },
+          "render": {
+            "sha256": "f99016761ac8bd4c0022984580bdae96143d1bef56aab4ac825240003f140d12",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "routeHTTPAuthAction": false
+          },
+          "traffic": {
+            "private": {
+              "status": 500,
+              "originResponse": false,
+              "events": [],
+              "authorizerRequests": 0,
+              "originRequests": 0,
+              "cleartextAuthorizerConnections": 0
+            },
+            "public": {
+              "status": 200,
+              "originResponse": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "kind": "request",
+                  "path": "/public",
+                  "protocol": "HTTP/1.1",
+                  "tls": null,
+                  "alpn": null
+                }
+              ],
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "cleartextAuthorizerConnections": 0
+            }
+          },
+          "octavia": {
+            "listenerProtocol": "HTTP",
+            "activePolicyCount": 2,
+            "originPoolMembersMatched": true,
+            "protectedRule": {
+              "action": "FIXED_RESPONSE",
+              "fixedResponse": {
+                "status_code": 500
+              },
+              "listAndDetailAgree": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "providerQualification": {
+    "stable": {
+      "sources": {
+        "octavia": {
+          "project": "octavia",
+          "source": "be4a61a490b0c351bb093f860b3b26d20781158b",
+          "parent": "1c25ce825547a93496bfd3524ed9583130f900fd",
+          "tree": "2e250b28a6dbe2ff34d4b3b70855824203ae91f7",
+          "version": "19.0.1.dev105"
+        },
+        "octavia-lib": {
+          "project": "octavia-lib",
+          "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "parent": "eb4c646b59758334629feb99d517f938c8af3712",
+          "tree": "503a73ff7e5e70fd4cd60dbb97c3c71e28f42060",
+          "version": "3.12.1.dev22"
+        }
+      },
+      "identical_builds": 2,
+      "sha256": {
+        "octavia-19.0.1.dev105-py3-none-any.whl": "979ed14e01bac40bb43160df1411f6ac1918288f519cd2909ac42a9e84ded33e",
+        "octavia-19.0.1.dev105.tar.gz": "3ea22cadbc6f9ceb1e5f1a1d7c598d797545150edfd776c5583b94c98d8a98c6",
+        "octavia-grpc-authz-linux-amd64": "4dd3095799f67fc6bdfb2e5b0bd11c2880d979b065ab2fa267536bb46eac51c7"
+      },
+      "tests": [
+        "octavia.tests.functional.api.v2.test_l7policy.TestInitialL7Rules.test_http_external_auth_tls_capability_and_pool_isolation",
+        "octavia.tests.functional.api.v2.test_l7policy.TestInitialL7Rules.test_http_external_auth_withdrawal_blocks_indirect_exposure",
+        "octavia.tests.functional.api.v2.test_l7policy.TestInitialL7Rules.test_grpc_auth_transition_preserves_the_order_and_fixed_barrier",
+        "octavia.tests.unit.amphorae.drivers.haproxy.test_rest_api_driver_1_0.TestHaproxyAmphoraLoadBalancerDriverTest.test_detached_http_rule_authorizer_attests_system_ca",
+        "octavia.tests.unit.amphorae.drivers.haproxy.test_rest_api_driver_1_0.TestHaproxyAmphoraLoadBalancerDriverTest.test_detached_grpc_authorizer_attests_system_ca"
+      ],
+      "testLogSHA256": "90ecde026be35a1d90995ee978791303376b8d8befcaacaa8a64509ddb5dd42c",
+      "nativeHTTPAuthTLS": [
+        "valid CA, exact DNS, SNI, mTLS and body (200)",
+        "wrong CA (503)",
+        "wrong hostname (503)",
+        "trust withdrawn (503)",
+        "strict TLS image capability missing (503)",
+        "body capability missing (503)",
+        "system CA digest acknowledged (200)",
+        "system CA digest absent (503)",
+        "regional HTTP TLS capability withdrawn (503)"
+      ],
+      "nativeHTTPAuthTLSLogSHA256": "d7d57e167a18e180d4d41ef64b36e67b4468b654b1295790eba8dca8c88fee56",
+      "haproxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+    },
+    "master": {
+      "sources": {
+        "octavia": {
+          "project": "octavia",
+          "source": "b40017221f5111083e6dff81b0381a2c6c38756e",
+          "parent": "b076e15fab23ac06e3cbf96c5ee777074f41f86c",
+          "tree": "8f2e965586e6b625fa0e6777bdda6268b227085a",
+          "version": "19.1.0.dev225"
+        },
+        "octavia-lib": {
+          "project": "octavia-lib",
+          "source": "a38ac46bac39f07e2b19bd4a12687bbca1b6f6cd",
+          "parent": "748de1853d6840fdc8b0afe32d56a5fffd68fe2d",
+          "tree": "580190e57bc4b4876e68ba619e79e5c83d27fa1a",
+          "version": "3.13.0.dev46"
+        }
+      },
+      "identical_builds": 2,
+      "sha256": {
+        "octavia-19.1.0.dev225-py3-none-any.whl": "d2a5cf2345956c43432e0f4950ca7097964b9c3c8a20b4180badeca50e5740dd",
+        "octavia-19.1.0.dev225.tar.gz": "cf6172f507b068def303af5f77e9e9b70b704eb8d1ab3ac1459d070a2d5b6b55",
+        "octavia-grpc-authz-linux-amd64": "4dd3095799f67fc6bdfb2e5b0bd11c2880d979b065ab2fa267536bb46eac51c7"
+      },
+      "tests": [
+        "octavia.tests.functional.api.v2.test_l7policy.TestInitialL7Rules.test_http_external_auth_tls_capability_and_pool_isolation",
+        "octavia.tests.functional.api.v2.test_l7policy.TestInitialL7Rules.test_http_external_auth_withdrawal_blocks_indirect_exposure",
+        "octavia.tests.functional.api.v2.test_l7policy.TestInitialL7Rules.test_grpc_auth_transition_preserves_the_order_and_fixed_barrier",
+        "octavia.tests.unit.amphorae.drivers.haproxy.test_rest_api_driver_1_0.TestHaproxyAmphoraLoadBalancerDriverTest.test_detached_http_rule_authorizer_attests_system_ca",
+        "octavia.tests.unit.amphorae.drivers.haproxy.test_rest_api_driver_1_0.TestHaproxyAmphoraLoadBalancerDriverTest.test_detached_grpc_authorizer_attests_system_ca"
+      ],
+      "testLogSHA256": "8c45f6325f9fa4c299091d00f3b68e1e1e27b0f03754a0444f180ae5f949244a",
+      "nativeHTTPAuthTLS": [
+        "valid CA, exact DNS, SNI, mTLS and body (200)",
+        "wrong CA (503)",
+        "wrong hostname (503)",
+        "trust withdrawn (503)",
+        "strict TLS image capability missing (503)",
+        "body capability missing (503)",
+        "system CA digest acknowledged (200)",
+        "system CA digest absent (503)",
+        "regional HTTP TLS capability withdrawn (503)"
+      ],
+      "nativeHTTPAuthTLSLogSHA256": "d7d57e167a18e180d4d41ef64b36e67b4468b654b1295790eba8dca8c88fee56",
+      "haproxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+    }
+  }
+}

@@ -1,0 +1,274 @@
+{
+  "controller": {
+    "sourceRevision": "04bb56309d8a199a43e132d76e3ac4c26580692f",
+    "manifestDigest": "sha256:e100df372dfc83b4ea83b8fcfd272402e6aaded1b845875df3de8d766fbcebdf",
+    "managerSHA256": "e06e5e5e1db8d9951d085bb6a362c7425d2d198372c1cca11f26ed8f5f51b403",
+    "ociArchiveSHA256": "053269139a41122ae1d95b4aa6e440728d89a85d84cec9de25782b1619ebafbf"
+  },
+  "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:e100df372dfc83b4ea83b8fcfd272402e6aaded1b845875df3de8d766fbcebdf",
+  "channels": {
+    "standard": {
+      "rawReceiptSHA256": "545a7efcde26208adedbf6766b07c404f3bda5e47563c8f359d24d8a23a9d9d8",
+      "kubernetes": "v1.36.4",
+      "gatewayAPI": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "channel": "standard",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "octavia": {
+        "version": "19.0.1.dev92",
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0"
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev21",
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d"
+      },
+      "haProxy": {
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+        "version": "HAProxy version 3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1 2026/03/19 - https://haproxy.org/"
+      },
+      "kubeProxy": "iptables",
+      "healthyLocalEndpoints": {
+        "primary": 2,
+        "secondary": 1
+      },
+      "sample": {
+        "connections": 400,
+        "echoCounts": {
+          "primary-a": 152,
+          "primary-b": 151,
+          "secondary-a": 97
+        },
+        "payloadBytesPerConnection": 256,
+        "traceSHA256": "d1d4ba0351063b42ebb22d526f82653786d4b8691c9b6fabb50ca5e6937fcccd"
+      },
+      "memberWeights": {
+        "primary-a": 3,
+        "primary-b": 3,
+        "secondary-a": 2
+      },
+      "poolAlgorithm": "ROUND_ROBIN",
+      "frontendConfigSHA256": "411d149c684dde7092920d81edf5cc7613d6965c7ff4617264ca0ad0649c8fe1",
+      "HAProxyCountersDelta": {
+        "primary-a": {
+          "stot": 152,
+          "lbtot": 152,
+          "econ": 0,
+          "wretr": 0,
+          "wredis": 0
+        },
+        "primary-b": {
+          "stot": 151,
+          "lbtot": 151,
+          "econ": 0,
+          "wretr": 0,
+          "wredis": 0
+        },
+        "secondary-a": {
+          "stot": 97,
+          "lbtot": 97,
+          "econ": 0,
+          "wretr": 0,
+          "wredis": 0
+        }
+      },
+      "routeConditions": {
+        "statusBefore": {
+          "Accepted": {
+            "status": "True",
+            "reason": "Accepted",
+            "observedGeneration": 1
+          },
+          "ResolvedRefs": {
+            "status": "True",
+            "reason": "ResolvedRefs",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/ForwardingTarget": {
+            "status": "True",
+            "reason": "Observed",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/Programmed": {
+            "status": "True",
+            "reason": "Programmed",
+            "observedGeneration": 1
+          }
+        },
+        "statusAfter": {
+          "Accepted": {
+            "status": "True",
+            "reason": "Accepted",
+            "observedGeneration": 1
+          },
+          "ResolvedRefs": {
+            "status": "True",
+            "reason": "ResolvedRefs",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/ForwardingTarget": {
+            "status": "True",
+            "reason": "Observed",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/Programmed": {
+            "status": "True",
+            "reason": "Programmed",
+            "observedGeneration": 1
+          }
+        }
+      },
+      "cleanup": {
+        "absentOctaviaResources": [
+          "healthmonitors",
+          "listeners",
+          "loadbalancers",
+          "pools"
+        ],
+        "vipRefusedConnections": true,
+        "unchangedServicesAndReadyEndpointSlices": true,
+        "reachableNodePorts": [
+          "primary-a",
+          "primary-b",
+          "secondary-a"
+        ],
+        "secondaryOnWorkerBReachable": false
+      }
+    },
+    "experimental": {
+      "rawReceiptSHA256": "436b8dbe44751c09d1b7e3814c8b4881f212f3c7c0d56c5d8c493f1b410b2a0d",
+      "kubernetes": "v1.36.4",
+      "gatewayAPI": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "channel": "experimental",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "octavia": {
+        "version": "19.0.1.dev92",
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0"
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev21",
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d"
+      },
+      "haProxy": {
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+        "version": "HAProxy version 3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1 2026/03/19 - https://haproxy.org/"
+      },
+      "kubeProxy": "iptables",
+      "healthyLocalEndpoints": {
+        "primary": 2,
+        "secondary": 1
+      },
+      "sample": {
+        "connections": 400,
+        "echoCounts": {
+          "primary-a": 151,
+          "primary-b": 152,
+          "secondary-a": 97
+        },
+        "payloadBytesPerConnection": 256,
+        "traceSHA256": "fee1a7bd113105d58cf5224f98feaf49db613c651a426bf0cdbaa4d860ab81fc"
+      },
+      "memberWeights": {
+        "primary-a": 3,
+        "primary-b": 3,
+        "secondary-a": 2
+      },
+      "poolAlgorithm": "ROUND_ROBIN",
+      "frontendConfigSHA256": "3caa41bb218be2238c382b46877cb543f239c678c04211efe3b6e1fc34576699",
+      "HAProxyCountersDelta": {
+        "primary-a": {
+          "stot": 151,
+          "lbtot": 151,
+          "econ": 0,
+          "wretr": 0,
+          "wredis": 0
+        },
+        "primary-b": {
+          "stot": 152,
+          "lbtot": 152,
+          "econ": 0,
+          "wretr": 0,
+          "wredis": 0
+        },
+        "secondary-a": {
+          "stot": 97,
+          "lbtot": 97,
+          "econ": 0,
+          "wretr": 0,
+          "wredis": 0
+        }
+      },
+      "routeConditions": {
+        "statusBefore": {
+          "Accepted": {
+            "status": "True",
+            "reason": "Accepted",
+            "observedGeneration": 1
+          },
+          "ResolvedRefs": {
+            "status": "True",
+            "reason": "ResolvedRefs",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/ForwardingTarget": {
+            "status": "True",
+            "reason": "Observed",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/Programmed": {
+            "status": "True",
+            "reason": "Programmed",
+            "observedGeneration": 1
+          }
+        },
+        "statusAfter": {
+          "Accepted": {
+            "status": "True",
+            "reason": "Accepted",
+            "observedGeneration": 1
+          },
+          "ResolvedRefs": {
+            "status": "True",
+            "reason": "ResolvedRefs",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/ForwardingTarget": {
+            "status": "True",
+            "reason": "Observed",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/Programmed": {
+            "status": "True",
+            "reason": "Programmed",
+            "observedGeneration": 1
+          }
+        }
+      },
+      "cleanup": {
+        "absentOctaviaResources": [
+          "healthmonitors",
+          "listeners",
+          "loadbalancers",
+          "pools"
+        ],
+        "vipRefusedConnections": true,
+        "unchangedServicesAndReadyEndpointSlices": true,
+        "reachableNodePorts": [
+          "primary-a",
+          "primary-b",
+          "secondary-a"
+        ],
+        "secondaryOnWorkerBReachable": false
+      }
+    }
+  },
+  "scope": "Two disposable kind clusters, Linux kube-proxy iptables, two workers, TCP echo pods, local Octavia WSGI and SQLite, installed Amphora renderer and native HAProxy. A tunnel and source NAT connect HAProxy to the kind NodePorts. Local fixtures supply Keystone, Neutron, provisioning completion and Amphora transport."
+}

@@ -1,0 +1,140 @@
+{
+  "allCases": [
+    "GRPCExactMethodMatching",
+    "GRPCRouteHeaderMatching",
+    "GRPCRouteListenerHostnameMatching",
+    "GRPCRouteMultipleGateways",
+    "GRPCRouteWeight",
+    "GatewayClassObservedGenerationBump",
+    "GatewayInvalidRouteKind",
+    "GatewayInvalidTLSConfiguration",
+    "GatewayListenerUnsupportedProtocol",
+    "GatewayModifyListeners",
+    "GatewayNameMaximumLength",
+    "GatewayObservedGenerationBump",
+    "GatewayPreserveForeignConditions",
+    "GatewaySecretInvalidReferenceGrant",
+    "GatewaySecretMissingReferenceGrant",
+    "GatewaySecretReferenceGrantAllInNamespace",
+    "GatewaySecretReferenceGrantSpecific"
+  ],
+  "caseSources": {
+    "GRPCExactMethodMatching": {
+      "features": [
+        "GRPCRoute",
+        "Gateway"
+      ],
+      "source": "grpcroute-exact-method-matching.go"
+    },
+    "GRPCRouteHeaderMatching": {
+      "features": [
+        "GRPCRoute",
+        "Gateway"
+      ],
+      "source": "grpcroute-header-matching.go"
+    },
+    "GRPCRouteListenerHostnameMatching": {
+      "features": [
+        "GRPCRoute",
+        "Gateway"
+      ],
+      "source": "grpcroute-listener-hostname-matching.go"
+    },
+    "GRPCRouteMultipleGateways": {
+      "features": [
+        "GRPCRoute",
+        "Gateway"
+      ],
+      "source": "grpcroute-multiple-gateways.go"
+    },
+    "GRPCRouteWeight": {
+      "features": [
+        "GRPCRoute",
+        "Gateway"
+      ],
+      "source": "grpcroute-weight.go"
+    },
+    "GatewayClassObservedGenerationBump": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gatewayclass-observed-generation-bump.go"
+    },
+    "GatewayInvalidRouteKind": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-route-kind.go"
+    },
+    "GatewayInvalidTLSConfiguration": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-tls-configuration.go"
+    },
+    "GatewayListenerUnsupportedProtocol": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-listeners-unsupported-protocol.go"
+    },
+    "GatewayModifyListeners": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-modify-listeners.go"
+    },
+    "GatewayNameMaximumLength": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-name-maximum-length.go"
+    },
+    "GatewayObservedGenerationBump": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-observed-generation-bump.go"
+    },
+    "GatewayPreserveForeignConditions": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-preserve-foreign-conditions.go"
+    },
+    "GatewaySecretInvalidReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-invalid-reference-grant.go"
+    },
+    "GatewaySecretMissingReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-missing-reference-grant.go"
+    },
+    "GatewaySecretReferenceGrantAllInNamespace": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-reference-grant-all-in-namespace.go"
+    },
+    "GatewaySecretReferenceGrantSpecific": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-reference-grant-specific.go"
+    }
+  },
+  "coreFeatures": [
+    "GRPCRoute",
+    "Gateway",
+    "ReferenceGrant"
+  ],
+  "profile": "GATEWAY-GRPC"
+}
