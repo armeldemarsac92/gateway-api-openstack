@@ -1,0 +1,566 @@
+{
+  "pilotRelease": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-istio-2ec0ff5eab83",
+  "measuredTraffic": {
+    "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "controller": {
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "83c1506b09b1eafc259180e5e9c2d94acd34900c",
+      "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+      "manifestDigest": "sha256:3e3a699c82f7e8b9ab6d597289885767bc3ccce9a3df4f0d5f79d651e33782c8",
+      "configDigest": "sha256:381f55bb792a77471389e0c3bce51919c2f4eb9f64a34c3030c4e727121e537a",
+      "platform": "linux/amd64",
+      "entrypoint": "/openstack-gateway-controller",
+      "user": "65532:65532",
+      "ociArchiveSHA256": "345a84b5e696c3112d0084ec5ab02fa762e82b024e40be38eb7f2afa7fe78473",
+      "managerSHA256": "fb1289e5125bec2bb54558611d34131525da3a42a4fe89f3acf7aa22ed33199a",
+      "normalAndNoCacheBuildsMatch": true
+    },
+    "pilot": {
+      "sourcePackage": "2ec0ff5eab83af436cb16791c78ae5cf4862b70e",
+      "istioTree": "81ca35d594dbb87eaf2e1c56bfeb65275e75dd1a",
+      "manifestDigest": "sha256:3a4c0e37f5140f00a242d914b3199cc2fc5d4c97bf071f2fe85d592dce8e6f20",
+      "ociArchiveSHA256": "7b1881598670c5e53952a6393f4349f3c10133566847161d03a6dde752adf8ad",
+      "binarySHA256": "c98a3f597531541152928d95e6ef082e67cc475cb869eeeb04c493bd809ffc16",
+      "build": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45757185580"
+    },
+    "predecessor": {
+      "sourcePackage": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+      "istioTree": "0a438180e12df1f42a81cab18364956addbc5e6e",
+      "manifestDigest": "sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+      "standard": {
+        "passed": true,
+        "channel": "standard",
+        "routeStatus": {
+          "producer": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "07380a65-5eb0-474a-a4c1-5e19e90f7c36"
+          },
+          "first": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "False/NotAllowedByListeners",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "ResolvedWaypoints": "False/NotAllowedByListeners"
+            },
+            "generation": 1,
+            "uid": "8fd88df9-8b4f-4583-9758-38ae42be89a0"
+          },
+          "other": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "False/NotAllowedByListeners",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "ResolvedWaypoints": "False/NotAllowedByListeners"
+            },
+            "generation": 1,
+            "uid": "b39d66e0-1731-408f-af4a-3cb379b3658b"
+          }
+        },
+        "distinctVIPs": true,
+        "calls": {
+          "producerOnly": {
+            "client": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "bothConsumerRoutes": {
+            "client": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          }
+        },
+        "runtimeImageID": "sha256:623dd3ef54556775a470f5b0605daf586688d7dfc20fe8d33a48623118f0ccaa",
+        "gatewayBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "rawResultSHA256": "cc343331957e49ec448dfb1f1594b417a454687a4a2e61e56fbbfbb33f0b10ff",
+        "inputsSHA256": "f4d20daf0f52e7a563b0add1cce4e484d92a2bf25be80290071ce2c2cfcb4460"
+      }
+    },
+    "channels": {
+      "standard": {
+        "passed": true,
+        "channel": "standard",
+        "routeStatus": {
+          "producer": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "d9ed72b9-8e18-4e18-86da-29f807409044"
+          },
+          "first": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "849c80b7-463d-464f-ac52-43a4dfd08a3f"
+          },
+          "other": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "02e1f973-8724-4faf-887a-46e45d8ba808"
+          },
+          "restored": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "8f2e6eee-fa00-43ae-a352-bdde7a8dd69f"
+          }
+        },
+        "distinctVIPs": true,
+        "calls": {
+          "producerOnly": {
+            "client": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "bothConsumerRoutes": {
+            "client": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "cart"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "storefront"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "producer": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "firstRouteRemoved": {
+            "client": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "storefront"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "firstRouteRestored": {
+            "client": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "cart"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "storefront"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "producer": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          }
+        },
+        "runtimeImageID": "sha256:2252fa9702997c57a995c7bbac2b094b69f9ed892609d36fa650d856604f5634",
+        "gatewayBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "rawResultSHA256": "6365aee367625cc41686dfc76c75eeee54b3cbb8daebe7ded3990972d2a0d676",
+        "inputsSHA256": "8cfdde681dfa5c4b90e402b850ebd0547b609e2ca1e80ad9755594dc0fcbf309"
+      },
+      "experimental": {
+        "passed": true,
+        "channel": "experimental",
+        "routeStatus": {
+          "producer": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "3fa54ee2-ce6d-48ba-991d-f932dac65d7e"
+          },
+          "first": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "167d1525-a51a-4a4f-b56c-5daa50755d82"
+          },
+          "other": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "9526bed5-1e72-47bf-bb2d-e4f5be4c4579"
+          },
+          "restored": {
+            "parent": {
+              "group": "multicluster.x-k8s.io",
+              "kind": "ServiceImport",
+              "name": "catalog",
+              "namespace": "mcs-producer",
+              "port": 80
+            },
+            "controller": "istio.io/gateway-controller",
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "ResolvedWaypoints": "True/ResolvedWaypoints"
+            },
+            "generation": 1,
+            "uid": "6031b087-e8bd-4048-8a8d-06870448512f"
+          }
+        },
+        "distinctVIPs": true,
+        "calls": {
+          "producerOnly": {
+            "client": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "bothConsumerRoutes": {
+            "client": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "cart"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "storefront"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "producer": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "firstRouteRemoved": {
+            "client": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "storefront"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          },
+          "firstRouteRestored": {
+            "client": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "cart"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "otherClient": {
+              "origin": "import-origin",
+              "responseHeader": [
+                "storefront"
+              ],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "producer": {
+              "origin": "override-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            },
+            "homonymousService": {
+              "origin": "core-origin",
+              "responseHeader": [],
+              "httpStatus": 200,
+              "samples": 2
+            }
+          }
+        },
+        "runtimeImageID": "sha256:2252fa9702997c57a995c7bbac2b094b69f9ed892609d36fa650d856604f5634",
+        "gatewayBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "rawResultSHA256": "f2ceab2a8a2127fb8abf1d72a83a82abe0be2bbd65b9d3210252c9c1ff45e2cc",
+        "inputsSHA256": "04664fd45721e46229708e3452ebb889c0616159a1a778c709eb4950bc3b20d3"
+      }
+    },
+    "boundary": "Local single-network ambient kind clusters. The remote import was represented by a reachable application endpoint in the same test network."
+  },
+  "operatorReporting": {
+    "controller": {
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "c624b69a60e82da95597ad856b63ef3efd5b1044",
+      "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+      "manifestDigest": "sha256:96a393ea003e461d09ab85dce1b8b440fdefd42aad8ae4112b9e026a94b056b6",
+      "configDigest": "sha256:48236294ece8badac6fed1264b517eaeaf6e0a47742eba6b6020bde1d0e02ccf",
+      "platform": "linux/amd64",
+      "entrypoint": "/openstack-gateway-controller",
+      "user": "65532:65532",
+      "ociArchiveSHA256": "fda9c7adda5bb5d3d794a9cdbd0225f2dc599b4574af73d8d7c51dfbb5e92e74",
+      "managerSHA256": "71dd260e2cc6ad2fcc75538a2b1ce740d1e9938e79e8eb9ff4cd17706fab5640",
+      "normalAndNoCacheBuildsMatch": true
+    },
+    "reviewedTree": "01c8a9cdc30c8940743a91451aaa22e58d6a01e3",
+    "localGoTest": {
+      "name": "TestAmbientMeshEnvtest",
+      "channel": "experimental",
+      "kubernetes": "v1.36.2",
+      "result": "PASS",
+      "seconds": 138.08,
+      "logSHA256": "9a9a6ea7afb69d13785c171a5739f44ad7931141d7d848b811a0822d2a8b9b29",
+      "images": [
+        "stock",
+        "Service consumer",
+        "original producer ServiceImport",
+        "consumer and producer ServiceImport"
+      ]
+    },
+    "predecessorWithServiceImportPilot": {
+      "sourceBase": "9e5448e200c5e2ad56845732b5faa06143c811ca",
+      "channel": "experimental",
+      "status": "Accepted=True, Programmed=Unknown/Pending",
+      "featureCount": 0,
+      "logSHA256": "f78a46a10172ba9f0ca298094fa27e7d8b6c0af8015a1d0adfb45ae3b563ce1b"
+    },
+    "renderedExample": {
+      "helmManifestSHA256": "78681a8254b0a119811408c70adad9af7fd27eb093c6cb8a44a8fcf764c4b15b",
+      "pilot": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a4c0e37f5140f00a242d914b3199cc2fc5d4c97bf071f2fe85d592dce8e6f20",
+      "twoRuleHTTPRouteSHA256": "1fd1ea962c768d2883eb1555260e3ce2ddf431909e7e600205e17229d5c02002",
+      "exactPath": "/catalog",
+      "defaultBackend": {
+        "group": "multicluster.x-k8s.io",
+        "kind": "ServiceImport",
+        "namespace": "store",
+        "name": "catalog",
+        "port": 80
+      },
+      "otherPaths": "forward directly to the import"
+    },
+    "exampleSchemas": {
+      "upstream": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "twoRuleHTTPRouteSHA256": "1fd1ea962c768d2883eb1555260e3ce2ddf431909e7e600205e17229d5c02002",
+      "channels": {
+        "standard": {
+          "crdSHA256": "ac4c1e0ad475793728a3c599cdac602cc658a633787a2fa568339e98aae93674",
+          "version": "v1",
+          "openAPIStructuralValidation": "pass"
+        },
+        "experimental": {
+          "crdSHA256": "6a7f6ea5b7f05ff659a5fc861bd4fc84877dc29d2c48c0a626f1759ef39a46d1",
+          "version": "v1",
+          "openAPIStructuralValidation": "pass"
+        }
+      }
+    },
+    "signedReportingSHA256": "43b4d8be92a5d512bad7953a17b3b4f4c719a14be82a15d12211f5d7f1ec6bf3",
+    "supportedFeaturesAfterCompletedRollout": 16,
+    "boundary": "The signed-source OCI manager wrote XMesh status on a local Experimental Kubernetes API server. The fixture supplied Istio workload and GatewayClass status. Independent waypoint trials measured traffic."
+  }
+}

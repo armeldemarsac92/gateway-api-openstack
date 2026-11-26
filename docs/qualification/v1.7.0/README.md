@@ -30,7 +30,7 @@ The [Magnum operator guide](magnum-operator.md) covers how to build the patch, s
 
 ## Profile records
 
-On the signed controller `597d921f` and Octavia `300b2638` source pair, the local upstream Standard GATEWAY-HTTP Core suite passed 40/40 cases and Extended passed 50/63 cases. [Original reports and fixture scope](common-gateway/597d921f-300b2638/README.md)
+On the signed controller `597d921f` and Octavia `300b2638` source pair, the local Standard GATEWAY-HTTP Core suite passed 40/40. Two local Standard Extended runs passed 50/63 with default Go test parallelism and 53/63 with `-test.parallel=1`. Eight Extended cases failed under both settings. [Original reports and fixture scope](common-gateway/597d921f-300b2638/README.md) · [Per-case results](common-gateway/597d921f-300b2638/parallelism-comparison.json)
 
 With signed Git source revisions `13a6870cb63a` for the controller and `e62a57c49177` for Octavia, the upstream v1.7.0 HTTP Core profile passed 39/40 (0 skipped) on Standard and 40/40 (0 skipped) on Experimental. HTTP Extended passed 39/63 (0 skipped) on Standard and 40/64 (0 skipped) on Experimental. The Extended reports name 21 failed cases in common. All 33 request assertions passed in the Standard Core hostname-intersection case. The case failed when the suite could not confirm deletion of its HTTPRoute within 30 seconds. These runs used a local Kubernetes and Octavia environment. [Original reports and per-case results](common-gateway/13a6870c-e62a57c4/README.md)
 

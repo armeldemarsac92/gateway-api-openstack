@@ -328,13 +328,20 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	acceptClass()
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
 
-	pilot.Spec.Template.Spec.Containers[0].Image = ambientComponentImage(t, "consumer-routes.yaml")
-	update(pilot)
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
-	markRolledOut()
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
-	if hasConsumer() {
-		t.Fatal("limited consumer header pilot advertised MeshConsumerRoute")
+	// An existing installation can retain the published producer-only ServiceImport pilot.
+	for _, image := range []string{
+		ambientComponentImage(t, "consumer-routes.yaml"),
+		"ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+		ambientComponentImage(t, "service-import-parents.yaml"),
+	} {
+		pilot.Spec.Template.Spec.Containers[0].Image = image
+		update(pilot)
+		awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
+		markRolledOut()
+		awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
+		if hasConsumer() {
+			t.Fatalf("%s advertised MeshConsumerRoute", image)
+		}
 	}
 
 	classVersion := class.ResourceVersion
