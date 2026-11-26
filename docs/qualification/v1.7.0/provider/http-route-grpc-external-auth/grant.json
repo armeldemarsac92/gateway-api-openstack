@@ -1,0 +1,463 @@
+{
+  "channel": "experimental",
+  "scope": "signed",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "kubernetesVersion": "v1.36.2",
+  "schema": {
+    "servesExternalAuth": true,
+    "sha256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d"
+  },
+  "controller": {
+    "sourceRevision": "13a6870cb63abafa131527b7b1b67048d962cd57",
+    "managerSHA256": "503fb37ac7f738c3e1fe55853423472bff8966c67c0fd44ca6a203e9c7dcb3f1",
+    "manifestDigest": "sha256:3c4eb3b1be49b95133f447be47b107a56730d3046b1dd995895108bf5e5f713b",
+    "ociArchiveSHA256": "70ac3cde8b42981aac14c41edfea4ae75b092ae2e01e47a282310478bb98b24d"
+  },
+  "octavia": {
+    "revision": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543",
+    "version": "19.0.1.dev99",
+    "sha256": "33cc7ef8de6f0372e711ce4a7b1f23bf6a8b07a34c30808b7ff442e9b4c82f90",
+    "filesVerified": 673
+  },
+  "octaviaLib": {
+    "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+    "version": "3.12.1.dev22",
+    "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+    "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+    "nativeExternalAuth": true,
+    "nativeGRPCExternalAuth": true
+  },
+  "octaviaAPIVersion": "v2.30",
+  "passed": true,
+  "case": "grant",
+  "supplement": {
+    "adapterSHA256": "4dd3095799f67fc6bdfb2e5b0bd11c2880d979b065ab2fa267536bb46eac51c7",
+    "peerSHA256": "9a40ba6a6c5c4f10e6636c094c2d50109677344cf8d616287779e92626d068ba",
+    "luaSHA256": "6846878663284ff6930a7e9810be3c3629e8f781c0fd99a864e52fcc86ef02bc"
+  },
+  "publicProbesDuringChanges": {
+    "grantWithdrawal": {
+      "200": 74
+    },
+    "grantRestoration": {
+      "200": 76
+    }
+  },
+  "grpcAuthorizationTransitions": [
+    {
+      "recovery": false,
+      "restoration": false,
+      "phase": "applied",
+      "listenerEnabled": true,
+      "policyActions": {
+        "REDIRECT_TO_POOL": 1,
+        "FIXED_RESPONSE": 2
+      },
+      "listenerStatus": "ACTIVE"
+    },
+    {
+      "recovery": false,
+      "restoration": true,
+      "phase": "reverting",
+      "listenerEnabled": true,
+      "policyActions": {
+        "REDIRECT_TO_POOL": 1,
+        "FIXED_RESPONSE": 2
+      },
+      "listenerStatus": "ERROR"
+    },
+    {
+      "recovery": true,
+      "restoration": true,
+      "phase": "failed",
+      "listenerEnabled": true,
+      "policyActions": {
+        "REDIRECT_TO_POOL": 1,
+        "FIXED_RESPONSE": 2
+      },
+      "listenerStatus": "ACTIVE"
+    },
+    {
+      "recovery": false,
+      "restoration": true,
+      "phase": "applied",
+      "listenerEnabled": true,
+      "policyActions": {
+        "REDIRECT_TO_POOL": 3
+      },
+      "listenerStatus": "ACTIVE"
+    }
+  ],
+  "phases": {
+    "grant_present": {
+      "kubernetes": {
+        "routeGeneration": 1,
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "gateway": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed",
+          "AddressesAssigned": "True/AddressesAssigned"
+        },
+        "listener": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "Conflicted": "False/NoConflicts",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 1
+      },
+      "nativeHAProxyReady": true,
+      "provider": {
+        "activePolicyCount": 3,
+        "gRPCAuthorizerPools": 2,
+        "policies": {
+          "/public": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": null,
+            "origin": "26f0744bd5c30b6e",
+            "authPool": null
+          },
+          "/protected/allow": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": "GRPC",
+            "origin": "a3a56118dc6bff51",
+            "authPool": "91163eb1ec32f4a8",
+            "authTransport": {
+              "backendH2C": true,
+              "tlsEnabled": false,
+              "hostname": null,
+              "h2Required": false
+            }
+          },
+          "/secure/allow": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": "GRPC",
+            "origin": "a3a56118dc6bff51",
+            "authPool": "340c7b415a0a19cd",
+            "authTransport": {
+              "backendH2C": false,
+              "tlsEnabled": true,
+              "hostname": "authz.test",
+              "h2Required": true
+            }
+          }
+        },
+        "nativeConfigSHA256": "13f90472d06a1d26d7eb985b26ac9f5b6524fc4e322e901bcf369afce9d25a94",
+        "nativeReloads": 3
+      },
+      "traffic": {
+        "publicSibling": {
+          "status": 200,
+          "authorizerCalls": 0,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": false,
+              "pathMatched": true
+            }
+          ]
+        },
+        "protectedAllow": {
+          "status": 200,
+          "authorizerCalls": 1,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [
+            {
+              "Transport": "h2c",
+              "Bodyless": true
+            }
+          ],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": true,
+              "pathMatched": true
+            }
+          ]
+        },
+        "protectedDeny": {
+          "status": 401,
+          "authorizerCalls": 1,
+          "originCalls": 0,
+          "originResponse": false,
+          "authorizationChecks": [
+            {
+              "Transport": "h2c",
+              "Bodyless": true
+            }
+          ],
+          "origin": []
+        },
+        "tlsAllow": {
+          "status": 200,
+          "authorizerCalls": 1,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [
+            {
+              "Transport": "tls",
+              "Bodyless": true
+            }
+          ],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": true,
+              "pathMatched": true
+            }
+          ]
+        }
+      }
+    },
+    "grant_revoked": {
+      "kubernetes": {
+        "routeGeneration": 1,
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "False/RefNotPermitted",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        },
+        "gateway": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed",
+          "AddressesAssigned": "True/AddressesAssigned"
+        },
+        "listener": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "Conflicted": "False/NoConflicts",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 1
+      },
+      "nativeHAProxyReady": true,
+      "provider": {
+        "activePolicyCount": 3,
+        "gRPCAuthorizerPools": 2,
+        "policies": {
+          "/public": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": null,
+            "origin": "26f0744bd5c30b6e",
+            "authPool": null
+          },
+          "/protected/allow": {
+            "action": "FIXED_RESPONSE",
+            "fixed": {
+              "status_code": 500
+            },
+            "authorizationProtocol": null,
+            "origin": null,
+            "authPool": null
+          },
+          "/secure/allow": {
+            "action": "FIXED_RESPONSE",
+            "fixed": {
+              "status_code": 500
+            },
+            "authorizationProtocol": null,
+            "origin": null,
+            "authPool": null
+          }
+        },
+        "nativeConfigSHA256": "4f379c7b1cf84f1a4370f974bfbf0ffff6a79607e11575a107291c1c1241d019",
+        "nativeReloads": 5
+      },
+      "traffic": {
+        "publicSibling": {
+          "status": 200,
+          "authorizerCalls": 0,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": false,
+              "pathMatched": true
+            }
+          ]
+        },
+        "protectedAllowPath": {
+          "status": 500,
+          "authorizerCalls": 0,
+          "originCalls": 0,
+          "originResponse": false,
+          "authorizationChecks": [],
+          "origin": []
+        },
+        "protectedDenyPath": {
+          "status": 500,
+          "authorizerCalls": 0,
+          "originCalls": 0,
+          "originResponse": false,
+          "authorizationChecks": [],
+          "origin": []
+        },
+        "tlsAllowPath": {
+          "status": 500,
+          "authorizerCalls": 0,
+          "originCalls": 0,
+          "originResponse": false,
+          "authorizationChecks": [],
+          "origin": []
+        }
+      }
+    },
+    "grant_restored": {
+      "kubernetes": {
+        "routeGeneration": 1,
+        "route": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "gateway": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed",
+          "AddressesAssigned": "True/AddressesAssigned"
+        },
+        "listener": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "Conflicted": "False/NoConflicts",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 1
+      },
+      "nativeHAProxyReady": true,
+      "provider": {
+        "activePolicyCount": 3,
+        "gRPCAuthorizerPools": 2,
+        "policies": {
+          "/public": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": null,
+            "origin": "26f0744bd5c30b6e",
+            "authPool": null
+          },
+          "/protected/allow": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": "GRPC",
+            "origin": "fffeeffa0fdd2f53",
+            "authPool": "0637f9fe53d6bca9",
+            "authTransport": {
+              "backendH2C": true,
+              "tlsEnabled": false,
+              "hostname": null,
+              "h2Required": false
+            }
+          },
+          "/secure/allow": {
+            "action": "REDIRECT_TO_POOL",
+            "fixed": null,
+            "authorizationProtocol": "GRPC",
+            "origin": "fffeeffa0fdd2f53",
+            "authPool": "9dc3e93208f9ff17",
+            "authTransport": {
+              "backendH2C": false,
+              "tlsEnabled": true,
+              "hostname": "authz.test",
+              "h2Required": true
+            }
+          }
+        },
+        "nativeConfigSHA256": "c3d9cbd72cdee6e649f0ba4f5cf94acd29136ced1521f83104082c487f7e65c1",
+        "nativeReloads": 6
+      },
+      "traffic": {
+        "publicSibling": {
+          "status": 200,
+          "authorizerCalls": 0,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": false,
+              "pathMatched": true
+            }
+          ]
+        },
+        "protectedAllow": {
+          "status": 200,
+          "authorizerCalls": 1,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [
+            {
+              "Transport": "h2c",
+              "Bodyless": true
+            }
+          ],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": true,
+              "pathMatched": true
+            }
+          ]
+        },
+        "protectedDeny": {
+          "status": 401,
+          "authorizerCalls": 1,
+          "originCalls": 0,
+          "originResponse": false,
+          "authorizationChecks": [
+            {
+              "Transport": "h2c",
+              "Bodyless": true
+            }
+          ],
+          "origin": []
+        },
+        "tlsAllow": {
+          "status": 200,
+          "authorizerCalls": 1,
+          "originCalls": 1,
+          "originResponse": true,
+          "authorizationChecks": [
+            {
+              "Transport": "tls",
+              "Bodyless": true
+            }
+          ],
+          "origin": [
+            {
+              "originalBody": true,
+              "hostMatched": true,
+              "identityForwarded": true,
+              "pathMatched": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

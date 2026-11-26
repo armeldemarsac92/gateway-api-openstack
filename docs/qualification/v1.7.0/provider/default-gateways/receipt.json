@@ -1,0 +1,918 @@
+{
+  "sourceRevision": "9388be4580dd0fac002e160c3433d65cf1665a86",
+  "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ece9bf11d672ffe1af201d394ddd24a47debc5ff3bc4d0eb04fc461a53b0e11e",
+  "managerSHA256": "a0dd97f7b47818887591dfbdf1c414052b0b9e2aefb3a846628b7d33b45a713d",
+  "runs": {
+    "httpStandard": {
+      "rawReceiptSHA256": "07eefc31347a73433b564195fc3f8c4dfba07cab5ed44b5482612f3dccb31421",
+      "channel": "standard",
+      "boundary": "Local Kubernetes envtest API and etcd, real manager, installed Octavia WSGI API, SQLAlchemy DB, Amphora renderer and native HAProxy to one live origin. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters.",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kubernetesVersion": "v1.36.2",
+      "schema": {
+        "Gateway": {
+          "field": "defaultScope",
+          "servedV1HasField": false,
+          "v1SchemaSHA256": "d569580e022980500157a952e91165581f9af58cedb433da416631043e5b848c",
+          "strictServerDryRunUnknownField": true
+        },
+        "HTTPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": false,
+          "v1SchemaSHA256": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c",
+          "strictServerDryRunUnknownField": true
+        },
+        "GRPCRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": false,
+          "v1SchemaSHA256": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+        },
+        "TLSRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": false,
+          "v1SchemaSHA256": "124cbb8830492ea87320c33d6dc1a257171fedf9ba0c9922971488d6a38bbd65"
+        },
+        "TCPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": false,
+          "v1SchemaSHA256": "2580b6c8dd46fff2e35a9d005ebfd007b38d4b9ca538cbb787de8718b7068317"
+        },
+        "UDPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": false,
+          "v1SchemaSHA256": "0a01137d53457c0836fb9db516b94708e149f40c4127e6709a85010cf90f10c5"
+        }
+      },
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=standard",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "phases": {
+        "explicit_parent": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "storedParentRefs": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "west",
+                "namespace": "default-gateway-edges"
+              }
+            ],
+            "routeParents": {
+              "west": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "gateways": {
+              "east": {
+                "generation": 1,
+                "attachedRoutes": 0,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            }
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 0,
+              "publicPoolCount": 0,
+              "activeHAProxyConfigSHA256": "637c2e5ba885e2d3d12fb077a63a56eac59fa34f7bc9a8903f8f3b90674340fd",
+              "HAProxyReloads": 1
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "b6fbb736cabed4c215aeedcbaafd98f175d35f026a64abd2616433fc78412647",
+              "HAProxyReloads": 2
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 503,
+              "origin": false
+            },
+            "west": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        }
+      }
+    },
+    "httpExperimental": {
+      "rawReceiptSHA256": "67323bd39bf17c3b686f3fd9e3eb8a33ea84ae20f41a733e754c06af47adc3a2",
+      "channel": "experimental",
+      "boundary": "Local Kubernetes envtest API and etcd, real manager, installed Octavia WSGI API, SQLAlchemy DB, Amphora renderer and native HAProxy to one live origin. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters.",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kubernetesVersion": "v1.36.2",
+      "schema": {
+        "Gateway": {
+          "field": "defaultScope",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "2eaf8e278290ef2e5388607ef2633898ff027c5a80b92fdee8e3fc14f8bdb349",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "HTTPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "GRPCRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "TLSRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "f82d91d446f9b4c9c1a88b9714080f893bae2dd735913257f67f8361a932b34a",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "TCPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "496c460578b363bf9f2c6fe8f13ead34eed3343ffe99fc9355fdb5bf7a1e881b",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "UDPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "a995e70fca03154d65b034f4f44827b85de2b9ea4fa41a4108547cf4c15a58f9",
+          "enum": [
+            "All",
+            "None"
+          ]
+        }
+      },
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "phases": {
+        "two_default_gateways": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "storedParentRefs": null,
+            "routeParents": {
+              "east": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "west": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "gateways": {
+              "east": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            },
+            "bindings": {
+              "east": "Attached",
+              "west": "Attached"
+            },
+            "bindingFinalizerCount": 2,
+            "routeFinalizer": true
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "1f2100c94a3edb8a82a279e4701a9751c2e25598c775bdda7553a27277da785d",
+              "HAProxyReloads": 2
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "f5c877d8e1e57a8fab61c3b2e87ca01921ad0cc6aae846a4b3f32ebd0379c69d",
+              "HAProxyReloads": 2
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 200,
+              "origin": true
+            },
+            "west": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "east_scope_withdrawn": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "storedParentRefs": null,
+            "routeParents": {
+              "west": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "gateways": {
+              "east": {
+                "generation": 2,
+                "attachedRoutes": 0,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            },
+            "bindings": {
+              "west": "Attached"
+            },
+            "bindingFinalizerCount": 1,
+            "routeFinalizer": true
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 0,
+              "publicPoolCount": 0,
+              "activeHAProxyConfigSHA256": "31fa735494dd4f6fb61e4b6bdfabcc2a01e95bfab96e6946700298c07bdb3adb",
+              "HAProxyReloads": 3
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "f5c877d8e1e57a8fab61c3b2e87ca01921ad0cc6aae846a4b3f32ebd0379c69d",
+              "HAProxyReloads": 2
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 503,
+              "origin": false
+            },
+            "west": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "east_scope_restored": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "storedParentRefs": null,
+            "routeParents": {
+              "west": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "east": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "gateways": {
+              "east": {
+                "generation": 3,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned",
+                  "DefaultGateway": "True/Accepted"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            },
+            "bindings": {
+              "west": "Attached",
+              "east": "Attached"
+            },
+            "bindingFinalizerCount": 2,
+            "routeFinalizer": true
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "cb6b6a5089f2665d27e4eee182aede3dd87dbbdaf9562ec54ae06006b597ff00",
+              "HAProxyReloads": 4
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "f5c877d8e1e57a8fab61c3b2e87ca01921ad0cc6aae846a4b3f32ebd0379c69d",
+              "HAProxyReloads": 2
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 200,
+              "origin": true
+            },
+            "west": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "east_denied_by_allowed_routes": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "storedParentRefs": null,
+            "routeParents": {
+              "west": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "east": {
+                "Accepted": "False/NotAllowedByListeners",
+                "ResolvedRefs": "Unknown/Pending",
+                "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+              }
+            },
+            "gateways": {
+              "east": {
+                "generation": 4,
+                "attachedRoutes": 0,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned",
+                  "DefaultGateway": "True/Accepted"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            },
+            "bindings": {
+              "west": "Attached"
+            },
+            "bindingFinalizerCount": 1,
+            "routeFinalizer": true
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 0,
+              "publicPoolCount": 0,
+              "activeHAProxyConfigSHA256": "31fa735494dd4f6fb61e4b6bdfabcc2a01e95bfab96e6946700298c07bdb3adb",
+              "HAProxyReloads": 5
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "f5c877d8e1e57a8fab61c3b2e87ca01921ad0cc6aae846a4b3f32ebd0379c69d",
+              "HAProxyReloads": 2
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 503,
+              "origin": false
+            },
+            "west": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "east_allowed_again": {
+          "kubernetes": {
+            "routeGeneration": 1,
+            "storedParentRefs": null,
+            "routeParents": {
+              "west": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "east": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            },
+            "gateways": {
+              "east": {
+                "generation": 5,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned",
+                  "DefaultGateway": "True/Accepted"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 1,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            },
+            "bindings": {
+              "west": "Attached",
+              "east": "Attached"
+            },
+            "bindingFinalizerCount": 2,
+            "routeFinalizer": true
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "c2364af5b8014f7c39b330468685b1ddade0f75a519591360deb6270c4a6ac11",
+              "HAProxyReloads": 6
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 1,
+              "publicPoolCount": 1,
+              "activeHAProxyConfigSHA256": "f5c877d8e1e57a8fab61c3b2e87ca01921ad0cc6aae846a4b3f32ebd0379c69d",
+              "HAProxyReloads": 2
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 200,
+              "origin": true
+            },
+            "west": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "route_opted_out": {
+          "kubernetes": {
+            "routeGeneration": 2,
+            "storedParentRefs": null,
+            "routeParents": {},
+            "gateways": {
+              "east": {
+                "generation": 5,
+                "attachedRoutes": 0,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned",
+                  "DefaultGateway": "True/Accepted"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.30"
+                ]
+              },
+              "west": {
+                "generation": 1,
+                "attachedRoutes": 0,
+                "gatewayConditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "DefaultGateway": "True/Accepted",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listenerConditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                },
+                "VIPs": [
+                  "192.0.2.31"
+                ]
+              }
+            },
+            "bindings": {},
+            "bindingFinalizerCount": 0,
+            "routeFinalizer": false
+          },
+          "octaviaAndHAProxy": {
+            "east": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 0,
+              "publicPoolCount": 0,
+              "activeHAProxyConfigSHA256": "31fa735494dd4f6fb61e4b6bdfabcc2a01e95bfab96e6946700298c07bdb3adb",
+              "HAProxyReloads": 7
+            },
+            "west": {
+              "activeListener": "HTTP",
+              "publicPolicyCount": 0,
+              "publicPoolCount": 0,
+              "activeHAProxyConfigSHA256": "504942fd6e88681f74f9d2ea615aabeb0aca30c91f390deeaa4d18f048fb9350",
+              "HAProxyReloads": 3
+            }
+          },
+          "traffic": {
+            "east": {
+              "status": 503,
+              "origin": false
+            },
+            "west": {
+              "status": 503,
+              "origin": false
+            }
+          }
+        }
+      }
+    },
+    "tcpExperimental": {
+      "rawReceiptSHA256": "efd4ecef7b8f801638d6c314034ff42acbad07e067e280518293f3eff15e8e3e",
+      "channel": "experimental",
+      "boundary": "Local Kubernetes envtest API and etcd, real manager, installed Octavia WSGI API, SQLAlchemy DB, Amphora renderer and native HAProxy to one live origin. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters.",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kubernetesVersion": "v1.36.2",
+      "schema": {
+        "Gateway": {
+          "field": "defaultScope",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "2eaf8e278290ef2e5388607ef2633898ff027c5a80b92fdee8e3fc14f8bdb349",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "HTTPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "GRPCRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "TLSRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "f82d91d446f9b4c9c1a88b9714080f893bae2dd735913257f67f8361a932b34a",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "TCPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "496c460578b363bf9f2c6fe8f13ead34eed3343ffe99fc9355fdb5bf7a1e881b",
+          "enum": [
+            "All",
+            "None"
+          ]
+        },
+        "UDPRoute": {
+          "field": "useDefaultGateways",
+          "servedV1HasField": true,
+          "v1SchemaSHA256": "a995e70fca03154d65b034f4f44827b85de2b9ea4fa41a4108547cf4c15a58f9",
+          "enum": [
+            "All",
+            "None"
+          ]
+        }
+      },
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "phases": {
+        "tcp_through_two_defaults": {
+          "routeParents": {
+            "east": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            },
+            "west": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            }
+          },
+          "storedParentRefs": null,
+          "vipTraffic": {
+            "east": {
+              "VIP": "192.0.2.30",
+              "attachedRoutes": 1,
+              "status": 200,
+              "origin": true
+            },
+            "west": {
+              "VIP": "192.0.2.31",
+              "attachedRoutes": 1,
+              "status": 200,
+              "origin": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "kubernetesAttachmentChecks": {
+    "sourceTree": "c8381f3425b8a321c6f22f342c08c9e06588d01a",
+    "package": "internal/controller",
+    "test": "TestControllerEnvtest/default_Gateways_attach_and_withdraw_independently",
+    "channel": "experimental",
+    "protocols": [
+      "HTTP",
+      "TCP"
+    ],
+    "scenarios": [
+      "withdraw and restore the namespace selector label",
+      "remove one default Gateway",
+      "opt out the route",
+      "HTTP attachment and listener count with 32 foreign parent status entries"
+    ],
+    "logSHA256": "4df23b2f8646b4abd8fa7023edde4a7c4ce16f26a3f7056554433a190cd7e2cf"
+  }
+}

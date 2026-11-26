@@ -1,0 +1,33 @@
+{
+  "sourceRevision": "bce32f44ecad22ab18dd62428fd48ecd3309a5d3",
+  "sourceTree": "76cc8ec81d46c5d40f2b5b5e2d6918fa3e87c1f6",
+  "manifestDigest": "sha256:0b15ae1bde9fc6145e8c1316ca0197ed6317d96acfb38339e7e105d1398aab67",
+  "scope": "Gateway reconciliation with a fake Kubernetes client and a route-scoped provider programming error.",
+  "test": "TestGatewayTransportRouteFailureRefreshesAttachments",
+  "cases": [
+    {
+      "scenario": "TCP",
+      "result": "pass",
+      "acceptedRoutes": 2,
+      "publishedAttachedRoutes": 2
+    },
+    {
+      "scenario": "UDP",
+      "result": "pass",
+      "acceptedRoutes": 2,
+      "publishedAttachedRoutes": 2
+    },
+    {
+      "scenario": "renamed_UDP_listener",
+      "result": "pass",
+      "acceptedRoutes": 2,
+      "publishedAttachedRoutes": 2
+    }
+  ],
+  "renamedListener": {
+    "oldSectionRemoved": true,
+    "Accepted": "True",
+    "Programmed": "False/Pending"
+  },
+  "upstreamProfileRun": false
+}
