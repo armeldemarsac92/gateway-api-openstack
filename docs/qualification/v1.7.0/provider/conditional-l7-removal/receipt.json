@@ -1,0 +1,455 @@
+{
+  "source": "aff86b828a53163d34dd5cab90334768b5f43408",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "aff86b828a53163d34dd5cab90334768b5f43408",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:6e1a128cf8f71a30f1a19855917694e65c47ef14db7e5b5916e831ebedcfe4a9",
+    "configDigest": "sha256:36262f08e382b217c4071f09b6816bae650d8b83f6912e858072301bebb5a8ef",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "23e880be1cf25b3cb2d5152638d8f6ac9a25005dc52d89182091c78a62203270",
+    "managerSHA256": "19f1b3e119dd70f94194af50b34fab63feaaef13f2d75aa72d5b080914e6847b",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "providerRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-l7policy-conditional-removal-041a2becdc07",
+  "channels": {
+    "standard": {
+      "rawReceiptSHA256": "058a135be4cf82ca117c1162f879e6855b69bc52f0141abd73ac51f546f3e3f7",
+      "boundary": "Local Kubernetes envtest API and etcd, real controller manager, installed Octavia WSGI/Amphora renderer and real HAProxy to a local origin. RPC transport uses a queue in the fixture. Conditional removal uses installed Endpoints, ControllerWorker, TaskFlow and DB task. Other CRUD completion, Keystone, Neutron and agent transport use fixture adapters.",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "octaviaAPIVersion": "v2.30",
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "advertisedCapability": {
+        "name": "l7policy_conditional_removal_v1",
+        "default": false,
+        "enabled": true
+      },
+      "phases": {
+        "before": {
+          "routes": {
+            "retiring": {
+              "UID": "551ea5b2e6580de3",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "routeFinalizers": [
+                "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+              ]
+            },
+            "neighbor": {
+              "UID": "5175db0103c39721",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "routeFinalizers": [
+                "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+              ]
+            }
+          },
+          "listener": "e309c9f3b214e101",
+          "policy": "583ab4d54a299600",
+          "neighborPolicy": "c46aa983d5d6412e",
+          "database": {
+            "policyExists": true,
+            "knownRules": 2
+          },
+          "enabled": true,
+          "provisioningStatus": "ACTIVE",
+          "proxy": {
+            "configSHA256": "05556fd09ea112f0cb4d77da1c8fd7420dc8a455289045209b1c7cdd46c3b6e2",
+            "reloads": 3
+          },
+          "traffic": {
+            "retiring": {
+              "status": 200,
+              "origin": true
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "acceptedBeforeDelivery": {
+          "enabled": false,
+          "provisioningStatus": "ACTIVE",
+          "routePendingDeletion": true,
+          "routeFinalizers": [
+            "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+          ],
+          "database": {
+            "policyExists": true,
+            "knownRules": 2
+          },
+          "proxy": {
+            "configSHA256": "5858cf3dcf6e3851cbfaae51eb0c30709ac1eab55b5891e6ceae2ea53187b9be",
+            "reloads": 4
+          },
+          "traffic": {
+            "retiring": {
+              "status": 404,
+              "origin": false
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "workerCommitted": {
+          "database": {
+            "policyExists": false,
+            "knownRules": 0
+          },
+          "proxy": {
+            "configSHA256": "5858cf3dcf6e3851cbfaae51eb0c30709ac1eab55b5891e6ceae2ea53187b9be",
+            "reloads": 4
+          },
+          "traffic": {
+            "retiring": {
+              "status": 404,
+              "origin": false
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "after": {
+          "retiringRouteAbsent": true,
+          "retiringPolicyStatus": 404,
+          "retiringRuleStatuses": [
+            404,
+            404
+          ],
+          "listenerPolicyIDs": [
+            "c46aa983d5d6412e"
+          ],
+          "neighbor": {
+            "UID": "5175db0103c39721",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "routeFinalizers": [
+              "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+            ]
+          },
+          "neighborActiveRules": 2,
+          "proxy": {
+            "configSHA256": "5858cf3dcf6e3851cbfaae51eb0c30709ac1eab55b5891e6ceae2ea53187b9be",
+            "reloads": 4
+          },
+          "traffic": {
+            "retiring": {
+              "status": 404,
+              "origin": false
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "neighborSamplesDuringRetirement": {
+          "200/True": 85
+        }
+      },
+      "managerConditionalRequests": [
+        {
+          "status": 202,
+          "policy": "583ab4d54a299600",
+          "expectedRevisionMatchesGET": true,
+          "snapshotEnabled": false,
+          "snapshotRules": 2
+        }
+      ],
+      "workerDeliveries": [
+        {
+          "policy": "583ab4d54a299600",
+          "returned": true,
+          "elapsedMilliseconds": 136,
+          "retiredDatabase": {
+            "policyExists": false,
+            "knownRules": 0
+          },
+          "neighborDatabase": {
+            "policyExists": true,
+            "knownRules": 2
+          }
+        }
+      ],
+      "managerInventoryConfirmations": {
+        "listener": {
+          "status": 200,
+          "explicitArray": true,
+          "pendingDeletion": true,
+          "routeFinalizers": [
+            "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+          ],
+          "policyIDs": [
+            "c46aa983d5d6412e"
+          ]
+        },
+        "collection": {
+          "status": 200,
+          "explicitArray": true,
+          "pendingDeletion": true,
+          "routeFinalizers": [
+            "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+          ],
+          "policyIDs": [
+            "c46aa983d5d6412e"
+          ]
+        }
+      },
+      "managerStockDeletes": []
+    },
+    "experimental": {
+      "rawReceiptSHA256": "edac0a649d5ca96c09b1fc6aa9a781fe3f95a40f056e640642aff572191e393c",
+      "boundary": "Local Kubernetes envtest API and etcd, real controller manager, installed Octavia WSGI/Amphora renderer and real HAProxy to a local origin. RPC transport uses a queue in the fixture. Conditional removal uses installed Endpoints, ControllerWorker, TaskFlow and DB task. Other CRUD completion, Keystone, Neutron and agent transport use fixture adapters.",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "octavia": {
+        "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "version": "19.0.1.dev93",
+        "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+        "filesVerified": 672
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "octaviaAPIVersion": "v2.30",
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "advertisedCapability": {
+        "name": "l7policy_conditional_removal_v1",
+        "default": false,
+        "enabled": true
+      },
+      "phases": {
+        "before": {
+          "routes": {
+            "retiring": {
+              "UID": "ab4116405e4c62c7",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "routeFinalizers": [
+                "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+              ]
+            },
+            "neighbor": {
+              "UID": "9b7d8a35068f9c46",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "routeFinalizers": [
+                "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+              ]
+            }
+          },
+          "listener": "a66898129ff347fc",
+          "policy": "43a14050cd3b8747",
+          "neighborPolicy": "d1d3d75a756f24a9",
+          "database": {
+            "policyExists": true,
+            "knownRules": 2
+          },
+          "enabled": true,
+          "provisioningStatus": "ACTIVE",
+          "proxy": {
+            "configSHA256": "6e0ee95e9c21c6cbf6d01e5f8608b91f903fd52ebb7fe1978d9786180c13670d",
+            "reloads": 3
+          },
+          "traffic": {
+            "retiring": {
+              "status": 200,
+              "origin": true
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "acceptedBeforeDelivery": {
+          "enabled": false,
+          "provisioningStatus": "ACTIVE",
+          "routePendingDeletion": true,
+          "routeFinalizers": [
+            "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+          ],
+          "database": {
+            "policyExists": true,
+            "knownRules": 2
+          },
+          "proxy": {
+            "configSHA256": "03d899f47677e59c94d43ffca1d714556a92bb5379eaaac68ec633ab2d3c9a94",
+            "reloads": 4
+          },
+          "traffic": {
+            "retiring": {
+              "status": 404,
+              "origin": false
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "workerCommitted": {
+          "database": {
+            "policyExists": false,
+            "knownRules": 0
+          },
+          "proxy": {
+            "configSHA256": "03d899f47677e59c94d43ffca1d714556a92bb5379eaaac68ec633ab2d3c9a94",
+            "reloads": 4
+          },
+          "traffic": {
+            "retiring": {
+              "status": 404,
+              "origin": false
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "after": {
+          "retiringRouteAbsent": true,
+          "retiringPolicyStatus": 404,
+          "retiringRuleStatuses": [
+            404,
+            404
+          ],
+          "listenerPolicyIDs": [
+            "d1d3d75a756f24a9"
+          ],
+          "neighbor": {
+            "UID": "9b7d8a35068f9c46",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "routeFinalizers": [
+              "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+            ]
+          },
+          "neighborActiveRules": 2,
+          "proxy": {
+            "configSHA256": "03d899f47677e59c94d43ffca1d714556a92bb5379eaaac68ec633ab2d3c9a94",
+            "reloads": 4
+          },
+          "traffic": {
+            "retiring": {
+              "status": 404,
+              "origin": false
+            },
+            "neighbor": {
+              "status": 200,
+              "origin": true
+            }
+          }
+        },
+        "neighborSamplesDuringRetirement": {
+          "200/True": 85
+        }
+      },
+      "managerConditionalRequests": [
+        {
+          "status": 202,
+          "policy": "43a14050cd3b8747",
+          "expectedRevisionMatchesGET": true,
+          "snapshotEnabled": false,
+          "snapshotRules": 2
+        }
+      ],
+      "workerDeliveries": [
+        {
+          "policy": "43a14050cd3b8747",
+          "returned": true,
+          "elapsedMilliseconds": 136,
+          "retiredDatabase": {
+            "policyExists": false,
+            "knownRules": 0
+          },
+          "neighborDatabase": {
+            "policyExists": true,
+            "knownRules": 2
+          }
+        }
+      ],
+      "managerInventoryConfirmations": {
+        "collection": {
+          "status": 200,
+          "explicitArray": true,
+          "pendingDeletion": true,
+          "routeFinalizers": [
+            "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+          ],
+          "policyIDs": [
+            "d1d3d75a756f24a9"
+          ]
+        },
+        "listener": {
+          "status": 200,
+          "explicitArray": true,
+          "pendingDeletion": true,
+          "routeFinalizers": [
+            "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d"
+          ],
+          "policyIDs": [
+            "d1d3d75a756f24a9"
+          ]
+        }
+      },
+      "managerStockDeletes": []
+    }
+  }
+}

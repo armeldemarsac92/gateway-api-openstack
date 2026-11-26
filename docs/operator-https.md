@@ -6,6 +6,8 @@ In the stock configuration, two HTTPS listeners claiming the same port report `C
 
 ## Share an HTTPS port
 
+If two HTTPS sections refer to different certificate Secrets, the shared frontend stays closed. With no cross-namespace grant, both sections report `ResolvedRefs=False/RefNotPermitted`, including a section whose Secret does not exist. [Listener status on Standard and Experimental](qualification/v1.7.0/provider/shared-https-secret-grant-evidence/receipt.json)
+
 Upgrade the regional Octavia API, database, provider library, workers and Amphora agent with HTTPS listener isolation support. Enable `enabled_https_listener_isolation_providers = amphora` in Octavia's `[api_settings]`. Verify that the authenticated regional `GET /v2/lbaas/providers/amphora/gateway_capabilities` includes `https_listener_isolation_v1`. Use the standalone or Magnum shared-listener overlay to set `--octavia-https-listener-isolation` along with the operator certificate map. [Standalone overlay](../config/octavia-https-listener-isolation/kustomization.yaml) · [Magnum workload overlay](../integrations/magnum-capi-helm/workload-octavia-https-listener-isolation/kustomization.yaml)
 
 Give each HTTPS section on the port a distinct hostname. Use an exact DNS name, a leading wildcard such as `*.example.test`, or one section with no hostname. All sections must reference the same authorized Secret in the same namespace and use its current enrolled certificate revision. The certificate must cover the frontend hostnames that clients will verify.

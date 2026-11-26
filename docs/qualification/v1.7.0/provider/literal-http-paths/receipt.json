@@ -1,0 +1,635 @@
+{
+  "previousStandard": {
+    "channel": "standard",
+    "controller": {
+      "sourceRevision": "3b7ad5dccd7d48abaded6e4f95737e37bc3306a8",
+      "managerSHA256": "6bc70ed07bfb9e86260156a941cf1ad86cb5ec8ea4cfe3bd1f5c271a73787849",
+      "manifestDigest": "sha256:36b9573fd0a7da946a53b0ed57a78a18bf65947492a237c3713dde6e41fb6b0c",
+      "ociArchiveSHA256": "03716b841b810a606a7e3956ae1bba437263662d5666b8b432244c9a9ca7b98c"
+    },
+    "octaviaRevision": "592e32f88b0a11ef3526ba544a3bf1aac9718deb",
+    "sourceReceiptSHA256": "8495386f01b4c013fc906798908b8599a5a4ad7c8d44bb19f05e0b5fe3e52dd7",
+    "admittedExactPathBytes": 1024,
+    "accepted": "False/UnsupportedValue",
+    "reportedEncodedLimit": true,
+    "exactHTTP": 503,
+    "exactOriginRequests": 0,
+    "shortHTTP": 200
+  },
+  "enrolled": {
+    "standard": {
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kubernetesVersion": "v1.36.2",
+      "startedAt": "2026-11-25T23:25:58.664+00:00",
+      "completedAt": "2026-11-25T23:27:15.468+00:00",
+      "regionalDeploymentVerified": false,
+      "sourceReceiptSHA256": "1b67cb20962a878dd4bcb336f364548aded7d0dca1117859d512bd92836bb131",
+      "regionalCapability": {
+        "http_literal_path_v1": true
+      },
+      "controller": {
+        "sourceRevision": "93f73f9e24db8d4a0a1b7a82c11e21477a505dd1",
+        "managerSHA256": "9e63f7b59b14507c4f5b1b9156d9c187c09b71c6c09e79ae8b2cf32ecece7234",
+        "manifestDigest": "sha256:b38ebd0d582d8cf666be3ce38fea0e1e5cd73a9e78b684b9f1670e22badb94cc",
+        "ociArchiveSHA256": "36adc315d899f8ed3f9e2151ea610198f3a93dcc328dfac4862be5495ac13243"
+      },
+      "octavia": {
+        "revision": "81ff5285a88f47a0e6f0d66e1f8cf4d93e8d0300",
+        "version": "19.0.1.dev108",
+        "sha256": "d3dd1d40425070327f2056e2a109f734be9da46b06bc75f26c802fff2ef58f98"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+      },
+      "routes": {
+        "exact-long": {
+          "kind": "Exact",
+          "pathBytes": 1024,
+          "pathSHA256": "0c21f7dc0dd1fa3fe3d73c6b50000941aeb292de8b9bcc3c7c1b447b6d7d0956",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "prefix-long": {
+          "kind": "PathPrefix",
+          "pathBytes": 1024,
+          "pathSHA256": "f5f6299ee90629645e59c3371779d9e92d8427a31b3a92d9f54ee4c72ea5cd15",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "STARTS_WITH",
+          "renderedACLCount": 2
+        },
+        "short-ampersand": {
+          "kind": "Exact",
+          "pathBytes": 10,
+          "pathSHA256": "4c9c5123eb8317277653ad8b34dcfd460f257185a9fd901e83aee54723db78a3",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "short-apostrophe": {
+          "kind": "Exact",
+          "pathBytes": 11,
+          "pathSHA256": "bdf935dce269e2b25aa6cfcebe536d31456a133c4f65150f7fbc0c1f90e311c5",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "short-control": {
+          "kind": "Exact",
+          "pathBytes": 14,
+          "pathSHA256": "c55540b2de587125517f4cf38105a1303182ac9c24d2b5e97869afdeab502f8c",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "PATH",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "short-percent": {
+          "kind": "Exact",
+          "pathBytes": 10,
+          "pathSHA256": "7ea7ab2c2a136cb9052a95c5200bc6e7aafa4e89271badd4428759e2222370cb",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "PATH",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        }
+      },
+      "percentAdmitted": true,
+      "responses": {
+        "short-control": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 14
+        },
+        "short-control-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 19
+        },
+        "exact": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 1024
+        },
+        "exact-child-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 1030
+        },
+        "prefix": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 1024
+        },
+        "prefix-child": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 1030
+        },
+        "prefix-segment-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 1025
+        },
+        "short-apostrophe": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 11
+        },
+        "apostrophe-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 10
+        },
+        "short-ampersand": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 10
+        },
+        "ampersand-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 9
+        },
+        "short-percent": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 10
+        },
+        "percent-decoded-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 8
+        }
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kubernetesVersion": "v1.36.2",
+      "startedAt": "2026-11-25T23:25:58.856+00:00",
+      "completedAt": "2026-11-25T23:27:23.762+00:00",
+      "regionalDeploymentVerified": false,
+      "sourceReceiptSHA256": "962bcacfe5d1e754fc927015e26fc0294426a8aa4caa7719c23774050ab08317",
+      "regionalCapability": {
+        "http_literal_path_v1": true
+      },
+      "controller": {
+        "sourceRevision": "93f73f9e24db8d4a0a1b7a82c11e21477a505dd1",
+        "managerSHA256": "9e63f7b59b14507c4f5b1b9156d9c187c09b71c6c09e79ae8b2cf32ecece7234",
+        "manifestDigest": "sha256:b38ebd0d582d8cf666be3ce38fea0e1e5cd73a9e78b684b9f1670e22badb94cc",
+        "ociArchiveSHA256": "36adc315d899f8ed3f9e2151ea610198f3a93dcc328dfac4862be5495ac13243"
+      },
+      "octavia": {
+        "revision": "81ff5285a88f47a0e6f0d66e1f8cf4d93e8d0300",
+        "version": "19.0.1.dev108",
+        "sha256": "d3dd1d40425070327f2056e2a109f734be9da46b06bc75f26c802fff2ef58f98"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+      },
+      "routes": {
+        "exact-long": {
+          "kind": "Exact",
+          "pathBytes": 1024,
+          "pathSHA256": "0c21f7dc0dd1fa3fe3d73c6b50000941aeb292de8b9bcc3c7c1b447b6d7d0956",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "prefix-long": {
+          "kind": "PathPrefix",
+          "pathBytes": 1024,
+          "pathSHA256": "f5f6299ee90629645e59c3371779d9e92d8427a31b3a92d9f54ee4c72ea5cd15",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "STARTS_WITH",
+          "renderedACLCount": 2
+        },
+        "short-ampersand": {
+          "kind": "Exact",
+          "pathBytes": 10,
+          "pathSHA256": "4c9c5123eb8317277653ad8b34dcfd460f257185a9fd901e83aee54723db78a3",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "short-apostrophe": {
+          "kind": "Exact",
+          "pathBytes": 11,
+          "pathSHA256": "bdf935dce269e2b25aa6cfcebe536d31456a133c4f65150f7fbc0c1f90e311c5",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "HTTP_PATH_LITERAL",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "short-control": {
+          "kind": "Exact",
+          "pathBytes": 14,
+          "pathSHA256": "c55540b2de587125517f4cf38105a1303182ac9c24d2b5e97869afdeab502f8c",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "PATH",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        },
+        "short-percent": {
+          "kind": "Exact",
+          "pathBytes": 10,
+          "pathSHA256": "7ea7ab2c2a136cb9052a95c5200bc6e7aafa4e89271badd4428759e2222370cb",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "ruleType": "PATH",
+          "comparison": "EQUAL_TO",
+          "renderedACLCount": 1
+        }
+      },
+      "percentAdmitted": true,
+      "responses": {
+        "short-control": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 14
+        },
+        "short-control-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 19
+        },
+        "exact": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 1024
+        },
+        "exact-child-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 1030
+        },
+        "prefix": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 1024
+        },
+        "prefix-child": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 1030
+        },
+        "prefix-segment-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 1025
+        },
+        "short-apostrophe": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 11
+        },
+        "apostrophe-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 10
+        },
+        "short-ampersand": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 10
+        },
+        "ampersand-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 9
+        },
+        "short-percent": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "rawRequestTargetPreserved": true,
+          "sentPathBytes": 10
+        },
+        "percent-decoded-miss": {
+          "httpStatus": 503,
+          "originRequests": 0,
+          "rawRequestTargetPreserved": false,
+          "sentPathBytes": 8
+        }
+      }
+    }
+  },
+  "withFixedResponses": {
+    "standard": {
+      "controller": {
+        "sourceRevision": "93f73f9e24db8d4a0a1b7a82c11e21477a505dd1",
+        "managerSHA256": "9e63f7b59b14507c4f5b1b9156d9c187c09b71c6c09e79ae8b2cf32ecece7234",
+        "manifestDigest": "sha256:b38ebd0d582d8cf666be3ce38fea0e1e5cd73a9e78b684b9f1670e22badb94cc",
+        "ociArchiveSHA256": "36adc315d899f8ed3f9e2151ea610198f3a93dcc328dfac4862be5495ac13243"
+      },
+      "octavia": {
+        "revision": "81ff5285a88f47a0e6f0d66e1f8cf4d93e8d0300",
+        "version": "19.0.1.dev108",
+        "sha256": "d3dd1d40425070327f2056e2a109f734be9da46b06bc75f26c802fff2ef58f98"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+      },
+      "channel": "standard",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "sourceReceiptSHA256": "a456ba33ac9073c35da05d46f61ec5423c8c0651de6bfd20398db1a882533ed0",
+      "startedAt": "2026-11-25T23:29:45.245+00:00",
+      "completedAt": "2026-11-25T23:31:17.771+00:00",
+      "regionalDeploymentVerified": false,
+      "regionalCapability": {
+        "http_literal_path_v1": true,
+        "fixed_http_responses_v1": true
+      },
+      "defaultHTTPResponse": {
+        "status_code": 404
+      },
+      "percentAdmitted": true,
+      "routesAtAcceptedGeneration": [
+        "exact-long",
+        "prefix-long",
+        "short-ampersand",
+        "short-apostrophe",
+        "short-control",
+        "short-percent"
+      ],
+      "responses": {
+        "short-control": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 14
+        },
+        "short-control-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 19
+        },
+        "exact": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 1024
+        },
+        "exact-child-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 1030
+        },
+        "prefix": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 1024
+        },
+        "prefix-child": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 1030
+        },
+        "prefix-segment-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 1025
+        },
+        "short-apostrophe": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 11
+        },
+        "apostrophe-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 10
+        },
+        "short-ampersand": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 10
+        },
+        "ampersand-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 9
+        },
+        "short-percent": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 10
+        },
+        "percent-decoded-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 8
+        }
+      }
+    },
+    "experimental": {
+      "controller": {
+        "sourceRevision": "93f73f9e24db8d4a0a1b7a82c11e21477a505dd1",
+        "managerSHA256": "9e63f7b59b14507c4f5b1b9156d9c187c09b71c6c09e79ae8b2cf32ecece7234",
+        "manifestDigest": "sha256:b38ebd0d582d8cf666be3ce38fea0e1e5cd73a9e78b684b9f1670e22badb94cc",
+        "ociArchiveSHA256": "36adc315d899f8ed3f9e2151ea610198f3a93dcc328dfac4862be5495ac13243"
+      },
+      "octavia": {
+        "revision": "81ff5285a88f47a0e6f0d66e1f8cf4d93e8d0300",
+        "version": "19.0.1.dev108",
+        "sha256": "d3dd1d40425070327f2056e2a109f734be9da46b06bc75f26c802fff2ef58f98"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+      },
+      "channel": "experimental",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "sourceReceiptSHA256": "baaec221f84beffd5625a82fd7c05d1f1ee116c67b81ab8005e0546da7642c37",
+      "startedAt": "2026-11-25T23:29:45.659+00:00",
+      "completedAt": "2026-11-25T23:31:18.461+00:00",
+      "regionalDeploymentVerified": false,
+      "regionalCapability": {
+        "http_literal_path_v1": true,
+        "fixed_http_responses_v1": true
+      },
+      "defaultHTTPResponse": {
+        "status_code": 404
+      },
+      "percentAdmitted": true,
+      "routesAtAcceptedGeneration": [
+        "exact-long",
+        "prefix-long",
+        "short-ampersand",
+        "short-apostrophe",
+        "short-control",
+        "short-percent"
+      ],
+      "responses": {
+        "short-control": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 14
+        },
+        "short-control-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 19
+        },
+        "exact": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 1024
+        },
+        "exact-child-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 1030
+        },
+        "prefix": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 1024
+        },
+        "prefix-child": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 1030
+        },
+        "prefix-segment-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 1025
+        },
+        "short-apostrophe": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 11
+        },
+        "apostrophe-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 10
+        },
+        "short-ampersand": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 10
+        },
+        "ampersand-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 9
+        },
+        "short-percent": {
+          "httpStatus": 200,
+          "originRequests": 1,
+          "sentPathBytes": 10
+        },
+        "percent-decoded-miss": {
+          "httpStatus": 404,
+          "originRequests": 0,
+          "sentPathBytes": 8
+        }
+      }
+    }
+  }
+}
