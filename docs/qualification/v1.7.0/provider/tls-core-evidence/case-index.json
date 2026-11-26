@@ -1,0 +1,173 @@
+{
+  "allCases": [
+    "GatewayClassObservedGenerationBump",
+    "GatewayInvalidRouteKind",
+    "GatewayInvalidTLSConfiguration",
+    "GatewayListenerUnsupportedProtocol",
+    "GatewayModifyListeners",
+    "GatewayNameMaximumLength",
+    "GatewayObservedGenerationBump",
+    "GatewayPreserveForeignConditions",
+    "GatewaySecretInvalidReferenceGrant",
+    "GatewaySecretMissingReferenceGrant",
+    "GatewaySecretReferenceGrantAllInNamespace",
+    "GatewaySecretReferenceGrantSpecific",
+    "TLSRouteHostnameIntersection",
+    "TLSRouteInvalidBackendRefNonexistent",
+    "TLSRouteInvalidBackendRefUnknownKind",
+    "TLSRouteInvalidNoMatchingListener",
+    "TLSRouteInvalidNoMatchingListenerHostname",
+    "TLSRouteInvalidReferenceGrant",
+    "TLSRouteListenerPassthroughSupportedKinds",
+    "TLSRouteListenerTerminateNotSupported",
+    "TLSRouteSimpleSameNamespace"
+  ],
+  "caseSources": {
+    "GatewayClassObservedGenerationBump": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gatewayclass-observed-generation-bump.go"
+    },
+    "GatewayInvalidRouteKind": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-route-kind.go"
+    },
+    "GatewayInvalidTLSConfiguration": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-tls-configuration.go"
+    },
+    "GatewayListenerUnsupportedProtocol": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-listeners-unsupported-protocol.go"
+    },
+    "GatewayModifyListeners": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-modify-listeners.go"
+    },
+    "GatewayNameMaximumLength": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-name-maximum-length.go"
+    },
+    "GatewayObservedGenerationBump": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-observed-generation-bump.go"
+    },
+    "GatewayPreserveForeignConditions": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-preserve-foreign-conditions.go"
+    },
+    "GatewaySecretInvalidReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-invalid-reference-grant.go"
+    },
+    "GatewaySecretMissingReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-missing-reference-grant.go"
+    },
+    "GatewaySecretReferenceGrantAllInNamespace": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-reference-grant-all-in-namespace.go"
+    },
+    "GatewaySecretReferenceGrantSpecific": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-reference-grant-specific.go"
+    },
+    "TLSRouteHostnameIntersection": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-hostname-intersection.go"
+    },
+    "TLSRouteInvalidBackendRefNonexistent": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-invalid-backendref-nonexistent.go"
+    },
+    "TLSRouteInvalidBackendRefUnknownKind": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-invalid-backendref-unknown-kind.go"
+    },
+    "TLSRouteInvalidNoMatchingListener": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-invalid-no-matching-listener.go"
+    },
+    "TLSRouteInvalidNoMatchingListenerHostname": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-invalid-no-matching-listener-hostname.go"
+    },
+    "TLSRouteInvalidReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-invalid-reference-grant.go"
+    },
+    "TLSRouteListenerPassthroughSupportedKinds": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-listener-passthrough-supported-kinds.go"
+    },
+    "TLSRouteListenerTerminateNotSupported": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-listener-terminate-not-supported.go"
+    },
+    "TLSRouteSimpleSameNamespace": {
+      "features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "source": "tlsroute-simple-same-namespace.go"
+    }
+  },
+  "coreFeatures": [
+    "Gateway",
+    "ReferenceGrant",
+    "TLSRoute"
+  ],
+  "profile": "GATEWAY-TLS"
+}

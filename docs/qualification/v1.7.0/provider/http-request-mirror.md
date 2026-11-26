@@ -17,3 +17,5 @@ An earlier run resolved the Service references and left the route pending when O
 | `HTTPRouteRequestPercentageMirror` | [3 checks passed](http-request-mirror-evidence/standard-HTTPRouteRequestPercentageMirror.yaml) | [3 checks passed](http-request-mirror-evidence/experimental-HTTPRouteRequestPercentageMirror.yaml) |
 
 The percentage case sends 500 requests per distribution check and reads the destination Pod logs. The other cases exercise full copies, multiple destinations, and request header changes. [Observed counts, active policies and image hashes](http-request-mirror-evidence/receipt.json)
+
+A supplemental Gateway API v1.7.0 Standard run exercised a `BackendTLSPolicy` on the mirror Service's named port. The primary returned HTTP 200 while HAProxy rejected the mirror connection when the policy trusted a different CA. [Backend TLS evidence](http-request-mirror-backend-tls/README.md)
