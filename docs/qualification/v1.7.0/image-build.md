@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-HTTPRoute and GRPCRoute can mirror requests to ServiceImport endpoints. [Build record](image.json) · [Per-origin mirror traffic](provider/service-import-request-mirror/README.md)
+TCPRoute and UDPRoute can forward to ServiceImport endpoints. [Build record](image.json) · [Connection and datagram counts](provider/transport-service-imports/README.md)
+
+HTTPRoute and GRPCRoute can mirror requests to ServiceImport endpoints. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-19258c824a1c2660d551a01335f8aeb836e2be7e/image.json) · [Per-origin mirror traffic](provider/service-import-request-mirror/README.md)
 
 GRPCRoute can forward protobuf calls to Pods selected by an Experimental XBackend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-892bc37a0f8892a15b0839a4979e9080bf541f74/image.json) · [gRPC transport and Pod selection](provider/grpcroute-xbackend/README.md)
 

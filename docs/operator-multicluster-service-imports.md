@@ -67,6 +67,8 @@ The local trials recorded HTTP traffic to distinct published ports, an imported 
 
 ## Forward TCPRoute connections and UDPRoute packets
 
+A local trial exercised a 3:1 rule with a same-named Service and Headless ServiceImport. Removing the import grant left the separate control route reachable through both protocols. [TCP connections and UDP packet counts](qualification/v1.7.0/provider/transport-service-imports/README.md)
+
 Use the same `backendRefs` example under a TCPRoute or UDPRoute rule on a listener with the matching protocol. The import and a homonymous core Service can appear in the same rule with separate weights. For example, an import at weight 3 and a Service at weight 1 give the import three quarters of the traffic.
 
 Enable `--octavia-tcp-connection-rejection` for TCPRoute or `--octavia-udp-packet-drop` for UDPRoute in a region that advertises the corresponding proportional rejection capability. UDP packet discard requires a dedicated IPv4 Endpoint listener and uses EndpointSlice readiness for Headless imports. A missing grant, invalid import or loss of the last eligible Headless endpoint rejects the TCP share or discards the UDP share. When the applicable capability is unavailable, the controller withdraws forwarding for the affected route until it can honor those weights. A zero-weight import is still validated and contributes no traffic.
