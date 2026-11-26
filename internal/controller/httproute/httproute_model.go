@@ -181,6 +181,12 @@ func (r *Reconciler) projectedHTTPFilterRules(route *gatewayv1.HTTPRoute) ([]gat
 	return route.Spec.Rules, ""
 }
 
+func (r *Reconciler) routeWithAdmittedRules(route *gatewayv1.HTTPRoute) *gatewayv1.HTTPRoute {
+	projected := *route
+	projected.Spec.Rules, _ = r.projectedHTTPFilterRules(route)
+	return &projected
+}
+
 func (r *Reconciler) hasProjectableRules(route *gatewayv1.HTTPRoute) bool {
 	return hasProjectableHTTPFilters(route) || r.hasInlinePersistence(route)
 }
@@ -215,7 +221,7 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 	if model.HasHTTPRequestPolicy(rule) || model.HasRequestMirrors(rule) {
 		return true
 	}
-	if r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+	if r.Config.XBackendEnabled() {
 		for _, ref := range rule.BackendRefs {
 			if _, supported := model.XBackendReference(route.Namespace, ref.BackendObjectReference); supported {
 				return true
@@ -303,14 +309,20 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 	if backend.Weight != nil && *backend.Weight <= 0 {
 		return newRouteBuildError(routeErrorUnsupported, "a single backendRef must have positive weight")
 	}
-	if _, supported := model.XBackendReference("", backend.BackendObjectReference); supported && r.Config.XBackendEnabled() && !grpc {
-		if backend.Port != nil {
+	if _, supported := model.XBackendReference("", backend.BackendObjectReference); supported && r.Config.XBackendEnabled() {
+		if backend.Port != nil && !grpc {
 			return newRouteBuildError(routeErrorUnsupported, "backendRef.port must be omitted for XBackend")
 		}
 		return nil
 	}
 	if _, imported := model.ServiceImportReference("", backend.BackendObjectReference); imported && r.Config.MulticlusterServiceImports {
 		return nil
+	}
+	// A GRPCRoute keeps an unsupported kind's match as a gRPC refusal.
+	if grpc {
+		if _, service := model.BackendServiceReference("", backend.BackendObjectReference); !service {
+			return nil
+		}
 	}
 	if backend.Group != nil && *backend.Group != gatewayv1.Group("") {
 		return newRouteBuildError(routeErrorInvalidKind, "backendRef group %q is unsupported; use a core Service", *backend.Group)
@@ -705,8 +717,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, diagnostic)
 		targets[rule.Index].mirrors = mirrors
 		zeroOnly := spec.GRPC && !slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool { return backend.Weight > 0 })
-		if !spec.GRPC && len(rule.Backends) == 1 && rule.Backends[0].FilterDiagnostic != nil && !r.Config.WeightedHTTPTargets {
-			diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *rule.Backends[0].FilterDiagnostic)
+		if issue := singleBackendRefusal(rule, spec.GRPC); !r.Config.WeightedHTTPTargets && issue != nil {
+			diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *issue)
 			targets[rule.Index].fixed = ptr.To(len(spec.FixedHTTPRules))
 			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
 			continue
@@ -725,6 +737,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 				} else if backend.ServiceImport.Name != "" {
 					issue := serviceImportTransportIssue(backend, spec.MemberMode, inputs.serviceImportH2CIssue)
 					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, issue)
+				} else if backend.XBackend.Name != "" {
+					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, inputs.grpcXBackendTransportDiagnostic(backend))
 				}
 				for _, mirror := range backend.RequestMirrors {
 					issue := inputs.requestMirrorDiagnostic(mirror.Backend, spec.GRPC, false)
@@ -890,6 +904,29 @@ func (inputs *routeModelInputs) requestMirrorDiagnostic(backend model.BackendGro
 		}
 	}
 	return model.Diagnostic{}
+}
+
+// grpcXBackendTransportDiagnostic resolves capabilities even when a primary
+// reference has no positive share or the route has not been programmed yet.
+func (inputs *routeModelInputs) grpcXBackendTransportDiagnostic(backend model.BackendGroup) model.Diagnostic {
+	if backend.XBackendTLSRequired && inputs.backendTLSValidation(backend, true).Denied {
+		return inputs.xBackendTLSDiagnostic(backend)
+	}
+	if backend.XBackendUsesH2C {
+		return inputs.xBackendH2CIssue
+	}
+	return model.Diagnostic{}
+}
+
+func singleBackendRefusal(rule model.Rule, grpc bool) *model.Diagnostic {
+	if len(rule.Backends) != 1 {
+		return nil
+	}
+	backend := rule.Backends[0]
+	if grpc && !hasHTTPBackendKey(backend) {
+		return backend.Diagnostic
+	}
+	return backend.FilterDiagnostic
 }
 
 func hasHTTPBackendKey(backend model.BackendGroup) bool {
@@ -1060,12 +1097,12 @@ type routeLoweredMatch struct {
 // selected by admission before lowering any backend or policy.
 func (r *Reconciler) lowerableRouteRules(route *gatewayv1.HTTPRoute, inputs *routeModelInputs, selected map[model.ListenerSection]*gatewayv1.Listener) ([]routeLoweredMatch, []model.Rule, error) {
 	ordinaryHTTP := model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
-	return supportedRouteModel(inputs.routeFragment(route), selected, r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets,
+	return supportedRouteModel(inputs.routeFragment(route), selected, !ordinaryHTTP, r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets,
 		r.Config.WeightedHTTPTargets, r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP,
 		r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && ordinaryHTTP)
 }
 
-func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSection]*gatewayv1.Listener, fixedResponses, weightedTargets, exactHeaders, methodMatch, exactQueryParams bool) ([]routeLoweredMatch, []model.Rule, error) {
+func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSection]*gatewayv1.Listener, grpc, fixedResponses, weightedTargets, exactHeaders, methodMatch, exactQueryParams bool) ([]routeLoweredMatch, []model.Rule, error) {
 	unsupported := func() ([]routeLoweredMatch, []model.Rule, error) {
 		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
@@ -1099,7 +1136,7 @@ func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSecti
 			continue
 		}
 		if !weightedTargets && (len(rule.Backends) != 1 ||
-			(!hasHTTPBackendKey(rule.Backends[0]) && (!fixedResponses || rule.Backends[0].FilterDiagnostic == nil)) ||
+			(!hasHTTPBackendKey(rule.Backends[0]) && (!fixedResponses || singleBackendRefusal(rule, grpc) == nil)) ||
 			rule.Backends[0].Weight <= 0) {
 			return unsupported()
 		}

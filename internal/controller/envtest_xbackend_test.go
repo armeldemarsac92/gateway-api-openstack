@@ -431,3 +431,206 @@ func testTCPXBackend(t *testing.T, c client.Client, cfg controller.Config, provi
 	waitForPool(gatewayv1.RouteReasonResolvedRefs, []cloud.Member{{Address: "10.1.2.99", Port: 9099}}, nil)
 	waitForAncestors("", "Accepted", false)
 }
+
+func testGRPCXBackend(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider) {
+	t.Helper()
+	ctx := t.Context()
+	const namespace = "grpc-xbackend"
+	const backendName = "echo"
+	parameters := envtestClassParameters(namespace)
+	parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: namespace},
+		Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName, ParametersRef: &gatewayv1.ParametersReference{
+			Group: configv1alpha1.GroupName, Kind: configv1alpha1.GatewayClassConfigKind, Name: parameters.Name,
+		}},
+	}
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "edge"},
+		Spec: gatewayv1.GatewaySpec{GatewayClassName: gatewayv1.ObjectName(class.Name), Listeners: []gatewayv1.Listener{{
+			Name: "rpc", Protocol: gatewayv1.HTTPProtocolType, Port: 80,
+		}}},
+	}
+	backend := &gatewayx.XBackend{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: backendName},
+		Spec: gatewayx.BackendSpec{
+			Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 8087},
+			EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+				MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": backendName},
+			}},
+		},
+	}
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: backendName},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "rpc", Port: 8088, AppProtocol: ptr.To("kubernetes.io/h2c")}}},
+	}
+	slice := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Namespace: namespace, Name: backendName, Labels: map[string]string{discoveryv1.LabelServiceName: backendName}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("rpc"), Port: ptr.To(int32(8088))}},
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.1.2.99"}}},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "selected", Labels: map[string]string{"app": backendName}},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "rpc", Image: "example.invalid/echo"}}},
+	}
+	xref := gatewayv1.GRPCBackendRef{BackendRef: gatewayv1.BackendRef{Weight: ptr.To(int32(2)), BackendObjectReference: gatewayv1.BackendObjectReference{
+		Group: ptr.To(gatewayv1.Group(gatewayx.GroupName)), Kind: ptr.To(gatewayv1.Kind("XBackend")), Name: backendName,
+	}}}
+	foreignRef := xref.DeepCopy()
+	foreignRef.Namespace, foreignRef.Weight = ptr.To(gatewayv1.Namespace("default")), ptr.To(int32(5))
+	foreignBackend := backend.DeepCopy()
+	foreignBackend.Namespace = "default"
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "grpc-xbackend"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "GRPCRoute", Namespace: namespace}},
+			To:   []gatewayv1.ReferenceGrantTo{{Group: gatewayx.GroupName, Kind: "XBackend", Name: ptr.To(gatewayv1.ObjectName(backendName))}},
+		},
+	}
+	route := &gatewayv1.GRPCRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: backendName},
+		Spec: gatewayv1.GRPCRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}},
+			Rules: []gatewayv1.GRPCRouteRule{{BackendRefs: []gatewayv1.GRPCBackendRef{
+				xref,
+				{BackendRef: gatewayv1.BackendRef{Weight: ptr.To(int32(3)), BackendObjectReference: gatewayv1.BackendObjectReference{
+					Name: backendName, Port: ptr.To(gatewayv1.PortNumber(8088)),
+				}}},
+				*foreignRef,
+			}}},
+		},
+	}
+	for _, object := range []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}},
+		parameters, class, gateway, foreignBackend, grant, service, slice, backend, pod, route} {
+		require.NoError(t, c.Create(ctx, object))
+	}
+	routeKey, backendKey := client.ObjectKeyFromObject(route), client.ObjectKeyFromObject(backend)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("last GRPCRoute status: %+v", route.Status)
+			t.Logf("last XBackend status: %+v", backend.Status)
+		}
+	})
+	wantMembers := []cloud.Member{{Address: "10.1.2.8", Port: 8087}}
+	waitForGraph := func(reason gatewayv1.RouteConditionReason, matches func(cloud.RouteSpec) bool) {
+		t.Helper()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, routeKey, route); err != nil {
+				return false, err
+			}
+			if len(route.Status.Parents) != 1 || route.Status.Parents[0].ControllerName != cfg.ControllerName {
+				return false, nil
+			}
+			conditions := route.Status.Parents[0].Conditions
+			resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+			if resolved == nil || resolved.Reason != string(reason) || resolved.ObservedGeneration != route.Generation ||
+				!meta.IsStatusConditionTrue(conditions, "Accepted") || !meta.IsStatusConditionTrue(conditions, cfg.Domain()+"/Programmed") {
+				return false, nil
+			}
+			provider.mu.Lock()
+			defer provider.mu.Unlock()
+			for _, graph := range slices.Backward(provider.graphSpecs) {
+				for _, node := range graph.Routes {
+					if node.Spec.Identity.RouteUID == string(route.UID) && node.Disposition == cloud.GraphEnsure {
+						return node.Spec.GRPC && matches(node.Spec), nil
+					}
+				}
+			}
+			return false, nil
+		})
+	}
+	waitForAncestor := func(status metav1.ConditionStatus, reason string) {
+		t.Helper()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, backendKey, backend); err != nil {
+				return false, err
+			}
+			for _, ancestor := range backend.Status.Ancestors {
+				if ancestor.ControllerName == cfg.ControllerName && ancestor.AncestorRef.Name == gatewayv1.ObjectName(gateway.Name) {
+					accepted := meta.FindStatusCondition(ancestor.Conditions, "Accepted")
+					return accepted != nil && accepted.Status == status && accepted.Reason == reason && accepted.ObservedGeneration == backend.Generation, nil
+				}
+			}
+			return false, nil
+		})
+	}
+	pod.Status.PodIP = wantMembers[0].Address
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	require.NoError(t, c.Status().Update(ctx, pod))
+	waitForGraph(gatewayv1.RouteReasonRefNotPermitted, func(spec cloud.RouteSpec) bool {
+		if len(spec.WeightedHTTPRules) != 1 || len(spec.HTTPBackends) != 2 {
+			return false
+		}
+		targets := spec.WeightedHTTPRules[0].Targets
+		if len(targets) != 3 || targets[0].BackendIndex == nil || targets[1].BackendIndex == nil {
+			return false
+		}
+		origin, witness := spec.HTTPBackends[*targets[0].BackendIndex], spec.HTTPBackends[*targets[1].BackendIndex]
+		return origin.Kind == cloud.HTTPBackendKindXBackend && origin.BackendH2C && origin.BackendTLS == nil &&
+			origin.XBackendTCPHealthMonitor && slices.Equal(origin.Members, wantMembers) &&
+			witness.Kind == "" && witness.BackendH2C && slices.Equal(witness.Members, []cloud.Member{{Address: "10.1.2.99", Port: 8088}}) &&
+			targets[0].Weight == 2 && targets[1].Weight == 3 && targets[2].Weight == 5 && targets[2].BackendIndex == nil
+	})
+	waitForAncestor(metav1.ConditionTrue, "Accepted")
+	require.True(t, apierrors.IsNotFound(c.Get(ctx, routeKey, &gatewayv1.HTTPRoute{})))
+
+	// Leave a single primary to observe in-place transport and readiness changes.
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.GRPCBackendRef{xref}
+	require.NoError(t, c.Update(ctx, route))
+	wantH2C := func(members []cloud.Member) func(cloud.RouteSpec) bool {
+		return func(spec cloud.RouteSpec) bool {
+			return len(spec.WeightedHTTPRules) == 0 && len(spec.HTTPBackends) == 1 &&
+				spec.HTTPBackends[0].BackendH2C && slices.Equal(spec.HTTPBackends[0].Members, members)
+		}
+	}
+	waitForGraph(gatewayv1.RouteReasonResolvedRefs, wantH2C(wantMembers))
+	pod.Status.Conditions[0].Status = corev1.ConditionFalse
+	require.NoError(t, c.Status().Update(ctx, pod))
+	waitForGraph(gatewayv1.RouteReasonResolvedRefs, wantH2C(nil))
+	pod.Status.Conditions[0].Status = corev1.ConditionTrue
+	require.NoError(t, c.Status().Update(ctx, pod))
+
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP11)
+	require.NoError(t, c.Update(ctx, backend))
+	waitForGraph(gatewayv1.RouteReasonUnsupportedProtocol, func(spec cloud.RouteSpec) bool {
+		return len(spec.HTTPBackends) == 1 && spec.HTTPBackends[0].Unavailable && !spec.HTTPBackends[0].BackendH2C && len(spec.HTTPBackends[0].Members) == 0
+	})
+	waitForAncestor(metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedProtocol))
+
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "echo-ca"}, Data: map[string]string{"ca.crt": backendTLSTestCA(t)}}
+	require.NoError(t, c.Create(ctx, ca))
+	backend.Spec.Protocol = nil
+	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{
+		Hostname: "echo.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+	}}
+	require.NoError(t, c.Update(ctx, backend))
+	waitForGraph(gatewayv1.RouteReasonResolvedRefs, func(spec cloud.RouteSpec) bool {
+		if len(spec.HTTPBackends) != 1 {
+			return false
+		}
+		target := spec.HTTPBackends[0]
+		return !target.BackendH2C && target.BackendTLS != nil && !target.BackendTLS.Denied && target.BackendTLS.RequireH2 &&
+			target.BackendTLS.CAConfigMapUID == string(ca.UID) && slices.Equal(target.Members, wantMembers)
+	})
+	waitForAncestor(metav1.ConditionTrue, "Accepted")
+	require.NoError(t, c.Delete(ctx, ca))
+	waitForGraph(gatewayv1.RouteConditionReason(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef), func(spec cloud.RouteSpec) bool {
+		return len(spec.HTTPBackends) == 1 && spec.HTTPBackends[0].BackendTLS != nil &&
+			spec.HTTPBackends[0].BackendTLS.Denied && len(spec.HTTPBackends[0].Members) == 0
+	})
+	waitForAncestor(metav1.ConditionFalse, string(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate))
+
+	foreignAncestor := gatewayx.BackendAncestorStatus{ControllerName: "other.example.com/controller", AncestorRef: gatewayv1.ParentReference{Name: "other"}}
+	backend.Status.Ancestors = append(backend.Status.Ancestors, foreignAncestor)
+	require.NoError(t, c.Status().Update(ctx, backend))
+	require.NoError(t, c.Delete(ctx, route))
+	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+		if err := c.Get(ctx, backendKey, backend); err != nil {
+			return false, err
+		}
+		ancestors := backend.Status.Ancestors
+		return len(ancestors) == 1 && ancestors[0].ControllerName == foreignAncestor.ControllerName &&
+			ancestors[0].AncestorRef.Name == foreignAncestor.AncestorRef.Name, nil
+	})
+}

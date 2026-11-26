@@ -467,9 +467,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		return nil
 	}
 	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
-		projected := *route
-		projected.Spec.Rules, _ = r.projectedHTTPFilterRules(route)
-		return r.resolveGRPCRouteReferences(ctx, &projected, gateway, status)
+		return r.resolveGRPCRouteReferences(ctx, r.routeWithAdmittedRules(route), gateway, status)
 	}
 	grantsByNamespace, rejection, err := r.observeRouteBackendPermissions(ctx, route)
 	if err != nil {
@@ -552,7 +550,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 				// Check the spec and class now while topology is pending.
 				profile.MemberMode = cloud.MemberModeEndpoint
 			}
-			observation, err := tlsObserver.ObserveXBackendReference(ctx, key, profile, gateway.Spec.GatewayClassName, r.XBackendClientCertificates)
+			observation, err := tlsObserver.ObserveXBackendReference(ctx, key, gateway.Spec.GatewayClassName, r.XBackendClientCertificates, profile)
 			if err != nil {
 				return err
 			}
@@ -612,9 +610,28 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 	if r.APIReader == nil {
 		return controller.ErrAPIReaderRequired
 	}
-	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C, EnableServiceImport: r.Config.MulticlusterServiceImports}
+	input := model.Input{
+		Gateway: gateway, Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C,
+		EnableServiceImport: r.Config.MulticlusterServiceImports, EnableXBackend: r.Config.XBackendEnabled(),
+	}
 	if err := graph.CollectBackendReferenceInputs(ctx, r.APIReader, &input); err != nil {
 		return err
+	}
+	var topologyPending bool
+	if input.EnableXBackend && len(model.LocalXBackendReferences(route)) != 0 {
+		profile, err := r.xBackendProfile(gateway)
+		if err != nil {
+			return err
+		}
+		topologyPending = profile.MemberMode == ""
+		if topologyPending {
+			profile.MemberMode = cloud.MemberModeEndpoint
+		}
+		input.XBackendProfile = profile
+		observer := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
+		if err := graph.CollectXBackendReferenceInputs(ctx, r.APIReader, &input, observer, r.XBackendClientCertificates); err != nil {
+			return err
+		}
 	}
 	inputs := routeModelInputs{}
 	if r.Config.BackendTLSPolicy {
@@ -626,6 +643,14 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 			return err
 		}
 		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, input.Routes, input)
+	}
+	if slices.ContainsFunc(input.XBackends, func(backend model.XBackendObservation) bool {
+		profile := input.XBackendProfile
+		profile.RouteKind = model.GRPCRouteKind
+		return model.XBackendUsesH2C(model.XBackendSpecForRoute(backend.Spec, profile.RouteKind)) &&
+			model.CheckXBackendObservation(backend.Key, &backend, profile) == nil
+	}) {
+		inputs.xBackendH2CIssue = r.xBackendH2CDiagnostic(ctx)
 	}
 	var diagnostic model.Diagnostic
 	resolveMirrors := func(filters []gatewayv1.HTTPRouteFilter, canForward bool) {
@@ -651,6 +676,13 @@ func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gate
 				canForward = canForward && issue.Reason == ""
 			} else if backend.Diagnostic != nil {
 				diagnostic = preferredBackendDiagnostic(diagnostic, *backend.Diagnostic)
+			} else if backend.XBackend.Name != "" {
+				issue := inputs.grpcXBackendTransportDiagnostic(backend)
+				if issue.Reason == "" && topologyPending {
+					issue = model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Gateway member mode is pending"}
+				}
+				diagnostic = preferredBackendDiagnostic(diagnostic, issue)
+				canForward = canForward && issue.Reason == ""
 			}
 			tls := inputs.backendTLSValidation(backend, true)
 			resolveMirrors(rule.BackendRefs[i].Filters, canForward && (tls == nil || !tls.Denied))

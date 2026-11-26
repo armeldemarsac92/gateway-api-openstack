@@ -203,6 +203,14 @@ func TestControllerEnvtest(t *testing.T) {
 		if err := config.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); err != nil {
 			t.Fatalf("configured channel rejected its genuine release CRDs: %v", err)
 		}
+		if config.GatewayAPIChannel == "standard" {
+			crd := &unstructured.Unstructured{}
+			crd.SetAPIVersion("apiextensions.k8s.io/v1")
+			crd.SetKind("CustomResourceDefinition")
+			if err := apiClient.Get(t.Context(), client.ObjectKey{Name: "xbackends.gateway.networking.x-k8s.io"}, crd); !apierrors.IsNotFound(err) {
+				t.Fatalf("Standard must omit XBackend CRD: %v", err)
+			}
+		}
 		other := config
 		other.GatewayAPIChannel = "experimental"
 		if config.GatewayAPIChannel == "experimental" {
@@ -391,6 +399,15 @@ func TestControllerEnvtest(t *testing.T) {
 			t.Run("TCPRoute raw stream lifecycle and weighted rejection", func(t *testing.T) {
 				testTCPXBackend(t, apiClient, xBackendConfig, provider)
 			})
+		})
+		t.Run("Experimental GRPCRoute XBackend transport and authorization", func(t *testing.T) {
+			grpcConfig := statusConfig
+			grpcConfig.ControllerName = "grpc-xbackend.example.com/gateway-api-openstack"
+			grpcConfig.BackendH2C, grpcConfig.WeightedHTTPTargets = true, true
+			grpcConfig.OpenStackResyncInterval = 5 * time.Minute
+			provider := &recordingProvider{}
+			startManager(t, restConfig, grpcConfig, provider)
+			testGRPCXBackend(t, apiClient, grpcConfig, provider)
 		})
 	}
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {

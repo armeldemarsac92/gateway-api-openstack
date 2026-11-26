@@ -40,6 +40,7 @@ const XBackendKind = "XBackend"
 
 // XBackendProfile describes the transport and topology permitted for this Gateway.
 type XBackendProfile struct {
+	RouteKind          gatewayv1.Kind
 	MemberMode         cloud.MemberMode
 	H2C                bool
 	ServerTLS          bool
@@ -52,13 +53,14 @@ type XBackendProfile struct {
 // XBackendObservation contains the backend configuration and eligible endpoints
 // used for cloud lowering. Status and unrelated Pod updates do not change it.
 type XBackendObservation struct {
-	Key        types.NamespacedName
-	UID        types.UID
-	Generation int64
-	Spec       gatewayx.BackendSpec
-	Endpoints  []Endpoint
-	TLS        backendtls.ValidationResult
-	ReadIssue  *Diagnostic
+	Key               types.NamespacedName
+	UID               types.UID
+	Generation        int64
+	Spec              gatewayx.BackendSpec
+	Endpoints         []Endpoint
+	TLS               backendtls.ValidationResult
+	ReadIssue         *Diagnostic
+	EndpointReadIssue *Diagnostic
 
 	ClientCertificateReference string `json:"-"`
 	ClientCertificateIssue     *Diagnostic
@@ -89,6 +91,14 @@ func XBackendRequiresH2(spec gatewayx.BackendSpec) bool {
 	return protocol == gatewayx.BackendProtocolHTTP2 || protocol == gatewayx.BackendProtocolGRPC && XBackendRequiresTLS(spec)
 }
 
+// XBackendSpecForRoute selects the inherited transport while leaving the observed spec intact.
+func XBackendSpecForRoute(spec gatewayx.BackendSpec, kind gatewayv1.Kind) gatewayx.BackendSpec {
+	if kind == GRPCRouteKind && spec.Protocol == nil {
+		spec.Protocol = ptr.To(gatewayx.BackendProtocolGRPC)
+	}
+	return spec
+}
+
 func XBackendReference(namespace string, reference gatewayv1.BackendObjectReference) (types.NamespacedName, bool) {
 	if ptr.Deref(reference.Group, "") != gatewayx.GroupName || ptr.Deref(reference.Kind, "") != XBackendKind {
 		return types.NamespacedName{}, false
@@ -99,7 +109,7 @@ func XBackendReference(namespace string, reference gatewayv1.BackendObjectRefere
 	}, true
 }
 
-// LocalXBackendReferences lists the XBackends whose state may affect this HTTPRoute.
+// LocalXBackendReferences lists the well-formed local primary references of an HTTPRoute or projected GRPCRoute.
 func LocalXBackendReferences(route *gatewayv1.HTTPRoute) []types.NamespacedName {
 	var keys []types.NamespacedName
 	for _, rule := range route.Spec.Rules {
@@ -133,7 +143,7 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 	group.XBackend = key
 	if key.Namespace != route.Namespace {
 		group.Authorization = BackendAuthorizationDenied
-		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonRefNotPermitted, "XBackend must be in the same namespace as its HTTPRoute")
+		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonRefNotPermitted, fmt.Sprintf("XBackend must be in the same namespace as its %s", HTTPProfileRouteKind(route)))
 		return group
 	}
 	group.Authorization = BackendAuthorizationAllowed
@@ -150,11 +160,13 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 			group.XBackendPort = int(backend.Spec.Port.Number)
 		}
 	}
-	if diagnostic := CheckXBackendObservation(key, backend, input.XBackendProfile); diagnostic != nil {
+	profile := input.XBackendProfile
+	profile.RouteKind = HTTPProfileRouteKind(route)
+	if diagnostic := CheckXBackendObservation(key, backend, profile); diagnostic != nil {
 		group.Diagnostic = diagnostic
 		return group
 	}
-	spec := &backend.Spec
+	spec := XBackendSpecForRoute(backend.Spec, profile.RouteKind)
 	group.XBackendRoutedExternal = spec.Type == gatewayx.BackendTypeExternalHostname
 	group.XBackendTLS = backend.TLS.Validation
 	group.XBackendClientCertificateReference = backend.ClientCertificateReference
@@ -180,8 +192,9 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 		}
 	}
 	group.State = BackendResolved
-	group.XBackendUsesH2C = XBackendUsesH2C(*spec)
-	group.XBackendRequiresH2 = XBackendRequiresH2(*spec)
+	group.XBackendUsesH2C = XBackendUsesH2C(spec)
+	group.XBackendRequiresH2 = XBackendRequiresH2(spec)
+	group.XBackendTCPHealthMonitor = profile.RouteKind == GRPCRouteKind
 	// These application protocols need not serve an ordinary HTTP GET.
 	switch ptr.Deref(spec.Protocol, "") {
 	case gatewayx.BackendProtocolGRPC, gatewayx.BackendProtocolWSS, gatewayx.BackendProtocolMCP:
@@ -213,6 +226,9 @@ func CheckXBackendObservation(key types.NamespacedName, backend *XBackendObserva
 	if backend.ReadIssue != nil {
 		return backend.ReadIssue
 	}
+	if backend.EndpointReadIssue != nil {
+		return backend.EndpointReadIssue
+	}
 	if diagnostic := ValidateXBackend(backend.Spec, profile); diagnostic != nil {
 		return diagnostic
 	}
@@ -233,9 +249,20 @@ func CheckXBackendObservation(key types.NamespacedName, backend *XBackendObserva
 	return nil
 }
 
-// ValidateXBackend defines the XBackend configuration supported by the HTTPRoute profile.
+// ValidateXBackend checks the XBackend in its consuming route's profile.
 func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
 	const unsupported = gatewayv1.RouteReasonUnsupportedValue
+	spec = XBackendSpecForRoute(spec, profile.RouteKind)
+	if profile.RouteKind == GRPCRouteKind {
+		switch {
+		case spec.Type != gatewayx.BackendTypeEndpointSelector:
+			return backendDiagnostic(unsupported, "GRPCRoute XBackend requires type EndpointSelector")
+		case spec.SessionPersistence != nil:
+			return backendDiagnostic(unsupported, "XBackend sessionPersistence is unsupported on GRPCRoute")
+		case *spec.Protocol != gatewayx.BackendProtocolGRPC && *spec.Protocol != gatewayx.BackendProtocolHTTP2 && *spec.Protocol != gatewayx.BackendProtocolH2C:
+			return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute XBackend requires GRPC, HTTP2 with authenticated TLS, or H2C without TLS")
+		}
+	}
 	switch {
 	case profile.MemberMode != cloud.MemberModeEndpoint:
 		return backendDiagnostic(unsupported, "XBackend requires Endpoint member mode with Unmanaged backend security")

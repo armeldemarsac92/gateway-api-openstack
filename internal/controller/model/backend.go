@@ -48,7 +48,7 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 		Authorization: BackendAuthorizationNotChecked, State: BackendInvalid,
 		Endpoints: []Endpoint{},
 	}
-	if key, xbackend := XBackendReference(route.Namespace, reference.BackendObjectReference); xbackend && input.EnableXBackend && HTTPProfileRouteKind(route) == HTTPRouteKind {
+	if key, xbackend := XBackendReference(route.Namespace, reference.BackendObjectReference); xbackend && input.EnableXBackend {
 		return resolveXBackend(route, group, key, input)
 	}
 	if key, imported := ServiceImportReference(route.Namespace, reference.BackendObjectReference); imported && input.EnableServiceImport {

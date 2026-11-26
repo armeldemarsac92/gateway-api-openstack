@@ -42,3 +42,5 @@ The campaign ran against local Kubernetes, Octavia and native HAProxy. Qualifica
 | GATEWAY-UDP | experimental | extended | The UDP fixture referenced an obsolete selection variable before launching the upstream executable. |
 
 On Experimental, TLS Core recorded 20 passes and one failure. All 11 traffic subtests in `TLSRouteHostnameIntersection` passed. The suite reached its 30-second deadline waiting to confirm deletion of the Gateway with no listener hostname. [Observation and source log digest](results.json)
+
+The five follow-up attempts produced 5 upstream reports with the same controller and Octavia revisions. The UDP fixture was corrected before running the original selections. [Follow-up results](recovery/README.md)

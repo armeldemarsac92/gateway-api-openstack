@@ -34,15 +34,11 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-// ObserveXBackendClientWithdrawals reads only bound HTTPRoutes and the current
+// ObserveXBackendClientWithdrawals reads bound HTTPRoutes and GRPCRoutes and the current
 // authorization of their client identities. A Service dependency may be unreadable.
 func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, identity cloud.Identity, gateway *gatewayv1.Gateway) ([]cloud.XBackendClientWithdrawal, error) {
 	if !r.Config.XBackendEnabled() || !controllerutil.ContainsFinalizer(gateway, r.Config.BackendCAFinalizer()) {
 		return nil, nil
-	}
-	routes, err := r.forRouteKind(model.HTTPRouteKind).listLiveRoutes(ctx)
-	if err != nil {
-		return nil, err
 	}
 	type observation struct {
 		reference string
@@ -50,7 +46,16 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 	}
 	observed := make(map[types.NamespacedName]observation)
 	var targets []cloud.XBackendClientWithdrawal
+	var routes []gatewayv1.HTTPRoute
 	var readErrors error
+	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
+		current, err := r.forRouteKind(kind).listLiveRoutes(ctx)
+		if err != nil {
+			readErrors = errors.Join(readErrors, fmt.Errorf("list %ss for XBackend client withdrawal: %w", kind, err))
+			continue
+		}
+		routes = append(routes, current...)
+	}
 	for i := range routes {
 		route := &routes[i]
 		if !route.DeletionTimestamp.IsZero() || !controller.RouteClaimsGateway(r.Config, route, identity) ||

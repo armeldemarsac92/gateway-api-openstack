@@ -437,7 +437,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		xBackend := backend.Kind == cloud.HTTPBackendKindXBackend
 		serviceImport := backend.Kind == cloud.HTTPBackendKindServiceImport
 		validPort := backend.Port >= 1 && backend.Port <= 65535 || backend.Port == 0 &&
-			(xBackend && (backend.InvalidReference || deniedTLS) || serviceImport && unavailable)
+			(xBackend && (backend.InvalidReference || deniedTLS || spec.GRPC && unavailable) || serviceImport && unavailable)
 		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" ||
 			(backend.Kind != "" && !xBackend && !serviceImport) || !validPort ||
 			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
@@ -446,7 +446,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		if backend.XBackendTCPHealthMonitor && !xBackend {
 			return invalid(errors.New("a TCP monitor on an HTTP backend requires an XBackend"))
 		}
-		if backend.BackendH2CPending && (!xBackend || !backend.BackendH2C || spec.GRPC || backend.BackendTLS != nil) {
+		if backend.BackendH2CPending && (!xBackend || !backend.BackendH2C || backend.BackendTLS != nil) {
 			return invalid(errors.New("pending h2c requires a cleartext HTTP XBackend pool"))
 		}
 		if serviceImport && (backend.BackendTLS != nil || backend.BackendRetryBudget != nil || backend.BackendRetryBudgetPending ||
@@ -459,8 +459,17 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return invalid(errors.New("routed external members require an unmanaged Endpoint pool for ServiceImport or HTTP XBackend"))
 		}
 		if xBackend && backend.BackendTLS != nil && !deniedTLS &&
-			(spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {
+			(spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {
 			return invalid(errors.New("authenticated XBackends require an unmanaged HTTP endpoint pool"))
+		}
+		if xBackend && spec.GRPC && !deniedTLS {
+			if !unavailable && spec.MemberMode != cloud.MemberModeEndpoint {
+				return invalid(errors.New("GRPCRoute XBackend forwarding requires unmanaged Endpoint members"))
+			}
+			if backend.BackendTLS != nil && !backend.BackendTLS.RequireH2 ||
+				backend.BackendTLS == nil && !unavailable && !backend.BackendH2C {
+				return invalid(errors.New("GRPCRoute XBackend forwarding requires h2c or authenticated TLS with h2"))
+			}
 		}
 		if backend.XBackendClientCertificateReference != "" && (!xBackend || backend.BackendTLS == nil || deniedTLS || backend.InvalidReference || mirrorsUsed[index]) {
 			return invalid(errors.New("an XBackend client certificate requires an authenticated XBackend forwarding pool"))
@@ -510,7 +519,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.xBackend = xBackend
 		part.xBackendTCPHealthMonitor = backend.XBackendTCPHealthMonitor
 		part.xBackendH2CPending = backend.BackendH2CPending
-		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
+		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil && (!spec.GRPC || backend.BackendH2C)
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
 		// Invalid backends keep their match for the rejection response. Leaving
 		// the header unset withdraws any persistence from the former pool.
@@ -567,7 +576,12 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 		if err != nil {
 			return nil, err
 		}
-		part.fixedResponse = true
+		// An empty pool yields HTTP 503, which maps to gRPC UNAVAILABLE.
+		// Octavia's fixed HTTP 500 would map to UNKNOWN.
+		part.fixedResponse = !spec.GRPC
+		if spec.GRPC {
+			part.healthMonitor = cloud.HealthMonitorConfig{}
+		}
 		if err := p.buildHTTPMatchPolicies(&part, rule.Matches, spec.HTTPBackends); err != nil {
 			return invalid(err)
 		}

@@ -30,6 +30,7 @@ import (
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 )
 
 func TestXBackendSelectsReadyPodIPsOnItsOwnPort(t *testing.T) {
@@ -298,6 +299,70 @@ func TestTCPXBackendProfileLimits(t *testing.T) {
 			diagnostic := ValidateTCPXBackend(*backend, cloud.MemberModeEndpoint)
 			require.NotNil(t, diagnostic)
 			require.Equal(t, string(test.reason), diagnostic.Reason)
+		})
+	}
+}
+
+func TestGRPCRouteXBackendTransport(t *testing.T) {
+	route := ProjectGRPCRoute(&gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "apps"}})
+	reference := gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+		Group: ptr.To(gatewayv1.Group(gatewayx.GroupName)), Kind: ptr.To(gatewayv1.Kind(XBackendKind)), Name: "origin",
+	}}}
+	tls := &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{Hostname: "origin.example.test"}}
+	tlsObservation := backendtls.ValidationResult{Validation: &backendtls.Validation{Hostname: "origin.example.test"}}
+	for _, test := range []struct {
+		name     string
+		protocol *gatewayx.BackendProtocol
+		tls      *gatewayx.BackendTLS
+		h2c      bool
+		valid    bool
+	}{
+		{name: "inherited h2c", h2c: true, valid: true},
+		{name: "explicit cleartext GRPC", protocol: ptr.To(gatewayx.BackendProtocolGRPC), h2c: true, valid: true},
+		{name: "explicit H2C", protocol: ptr.To(gatewayx.BackendProtocolH2C), h2c: true, valid: true},
+		{name: "inherited strict h2", tls: tls, valid: true},
+		{name: "explicit GRPC with TLS", protocol: ptr.To(gatewayx.BackendProtocolGRPC), tls: tls, valid: true},
+		{name: "explicit HTTP2 with TLS", protocol: ptr.To(gatewayx.BackendProtocolHTTP2), tls: tls, valid: true},
+		{name: "HTTP2 without TLS", protocol: ptr.To(gatewayx.BackendProtocolHTTP2), h2c: true},
+		{name: "H2C with TLS", protocol: ptr.To(gatewayx.BackendProtocolH2C), tls: tls, h2c: true},
+		{name: "HTTP11 even with TLS", protocol: ptr.To(gatewayx.BackendProtocolHTTP11), tls: tls, h2c: true},
+		{name: "HTTP with ALPN fallback", protocol: ptr.To(gatewayx.BackendProtocolHTTP), tls: tls, h2c: true},
+		{name: "inherited transport without h2c enrollment"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spec := gatewayx.BackendSpec{
+				Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 9443},
+				EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+					MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "origin"},
+				}},
+				Protocol: test.protocol, TLS: test.tls,
+			}
+			input := Input{EnableXBackend: true, XBackendProfile: XBackendProfile{MemberMode: cloud.MemberModeEndpoint, H2C: test.h2c, ServerTLS: true},
+				XBackends: []XBackendObservation{{Key: types.NamespacedName{Namespace: "apps", Name: "origin"}, Spec: spec, TLS: tlsObservation}}}
+			// A plaintext observation cannot carry partly resolved TLS data.
+			if test.tls == nil {
+				input.XBackends[0].TLS = backendtls.ValidationResult{}
+			}
+			group := resolveBackend(route, reference, input)
+			require.Equal(t, test.protocol, input.XBackends[0].Spec.Protocol)
+			if !test.valid {
+				require.NotNil(t, group.Diagnostic)
+				require.Equal(t, string(gatewayv1.RouteReasonUnsupportedProtocol), group.Diagnostic.Reason)
+				require.Equal(t, BackendInvalid, group.State)
+				return
+			}
+			require.Nil(t, group.Diagnostic)
+			require.Equal(t, BackendResolved, group.State)
+			require.Equal(t, test.tls == nil, group.UsesH2C())
+			require.Equal(t, test.tls != nil, group.XBackendRequiresH2)
+			require.True(t, group.XBackendTCPHealthMonitor)
+			if test.protocol == nil {
+				http := &gatewayv1.HTTPRoute{ObjectMeta: route.ObjectMeta}
+				ordinary := resolveBackend(http, reference, input)
+				require.Equal(t, BackendResolved, ordinary.State)
+				require.False(t, ordinary.UsesH2C())
+				require.False(t, ordinary.XBackendRequiresH2)
+			}
 		})
 	}
 }
