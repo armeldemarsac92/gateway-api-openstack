@@ -26,6 +26,8 @@ The overlap qualification used `ghcr.io/armeldemarsac92/gateway-api-openstack@sh
 
 With both flags enabled, HTTPRoute and GRPCRoute accept exact matches on valid ASCII field names of up to 256 bytes. Without the additional flag, a 256-byte name gets `Accepted=False` with reason `UnsupportedValue`. The published header case used the original profile.
 
+The 256-byte exact match reached its reserved backend over HTTP/1.1 and gRPC on both release channels. A change in the value’s case, a partial value, a shortened field name and an absent field all reached the fallback backend. [Regional capability withdrawal and restoration](qualification/v1.7.0/provider/exact-http-header-name-256/README.md)
+
 ## Withdraw the profile
 
 For names up to 255 bytes, a temporary error reading provider capabilities keeps the last verified policies serving and blocks new unverified policies. When Octavia explicitly withdraws the exact-header capability, the controller closes the affected listener before removing a guarded policy. After capability recovery, the controller verifies the affected policies before reopening the listener.
