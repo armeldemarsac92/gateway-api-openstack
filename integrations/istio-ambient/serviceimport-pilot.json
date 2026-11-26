@@ -1,0 +1,7 @@
+{
+  "sourceCommit": "82213f2b4cf5996d628272ed99cedf90914eaa5f",
+  "istioTree": "0a438180e12df1f42a81cab18364956addbc5e6e",
+  "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+  "ociArchiveSHA256": "45aaf310b52740321d479c67ec204231da805a84a1fe214f6dce3637711b6bd5",
+  "campaignSHA256": "18415010f2739f07d3041a53966048b9b34055e75242d7da0cbcd80329c32bfb"
+}
