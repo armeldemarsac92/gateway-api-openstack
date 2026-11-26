@@ -1,0 +1,785 @@
+{
+  "controller": "13627489822adf0aa9b182739a9ab7ff124d594a",
+  "image": "sha256:d9110316ff14fb8d638acc8c529c58eb60fefea8bdb3ecf09951f24b01a6e9f0",
+  "octavia": "1c25ce825547a93496bfd3524ed9583130f900fd",
+  "providerRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-https-listener-external-auth-body-1c25ce825547",
+  "regionalDeploymentVerified": false,
+  "results": {
+    "standard-http": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "schema": {
+        "listenerFiltersPresent": false,
+        "listenerForwardBodyPresent": false,
+        "gatewayV1SchemaSHA256": "d569580e022980500157a952e91165581f9af58cedb433da416631043e5b848c",
+        "strictServerDryRun": {
+          "plainGatewayAdmitted": true,
+          "filteredGatewayAdmitted": false,
+          "filteredGatewayError": "Error from server (BadRequest): Gateway in version \"v1\" cannot be handled as a Gateway: strict decoding error: unknown field \"spec.listeners[0].filters\""
+        }
+      },
+      "controller": {
+        "sourceRevision": "13627489822adf0aa9b182739a9ab7ff124d594a",
+        "managerSHA256": "d0490a3b74a1a9dd769992f79a864ecccc686e4fa813f87b1447a6c74ddd6d6e",
+        "manifestDigest": "sha256:d9110316ff14fb8d638acc8c529c58eb60fefea8bdb3ecf09951f24b01a6e9f0",
+        "ociArchiveSHA256": "6a714f20174c7e8426ab48469b95dad90c9ae487424c681722a15e325e71b00a"
+      },
+      "octavia": {
+        "revision": "1c25ce825547a93496bfd3524ed9583130f900fd",
+        "version": "19.0.1.dev102",
+        "sha256": "069668b89ccdae2aab220a63b1836488224af0e7087e408dcb9befb3406e55cb",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "nativeExternalAuth": true
+      },
+      "octaviaAPIVersion": "v2.30",
+      "boundary": "Local Kubernetes envtest API/etcd, pinned manager, installed Octavia WSGI/SQL, Amphora driver and renderer, native HAProxy and direct local HTTP peers through Service and EndpointSlice discovery. Keystone, Neutron, RPC completion and Amphora agent transport are provided by the fixture.",
+      "capabilities": {
+        "listener_request_filters_v1": true,
+        "listener_http_external_auth_forward_body_v1": true,
+        "l7policy_http_external_auth_forward_body_v1": true
+      },
+      "phases": {
+        "ordinary-sections": {
+          "kubernetes": {
+            "gatewayGeneration": 1,
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listeners": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "routes": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "physicalListeners": 1,
+          "publicCollectionAndDetailAgree": true,
+          "authorizerPoolHasActiveEndpoint": null,
+          "render": {
+            "activeConfigurationSHA256": "2ca25ed941e35527e55c52957e3f37f2a6aa3b0a90d7879870ee070bab06832d",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "httpBodyLimits": []
+          },
+          "traffic": {
+            "chosenAtLimit": {
+              "status": 200,
+              "payloadBytes": 65536,
+              "payloadSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                }
+              ]
+            },
+            "chosenOneByteOver": {
+              "status": 200,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65537,
+                  "status": 200,
+                  "contentLength": "65537",
+                  "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+                  "exactFixtureBytes": true
+                }
+              ]
+            },
+            "sisterOneByteOver": {
+              "status": 200,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65537,
+                  "status": 200,
+                  "contentLength": "65537",
+                  "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+                  "exactFixtureBytes": true
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "experimental-http": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schema": {
+        "listenerFiltersPresent": true,
+        "listenerForwardBodyPresent": true,
+        "gatewayV1SchemaSHA256": "2eaf8e278290ef2e5388607ef2633898ff027c5a80b92fdee8e3fc14f8bdb349",
+        "strictServerDryRun": {
+          "plainGatewayAdmitted": true,
+          "filteredGatewayAdmitted": true
+        }
+      },
+      "controller": {
+        "sourceRevision": "13627489822adf0aa9b182739a9ab7ff124d594a",
+        "managerSHA256": "d0490a3b74a1a9dd769992f79a864ecccc686e4fa813f87b1447a6c74ddd6d6e",
+        "manifestDigest": "sha256:d9110316ff14fb8d638acc8c529c58eb60fefea8bdb3ecf09951f24b01a6e9f0",
+        "ociArchiveSHA256": "6a714f20174c7e8426ab48469b95dad90c9ae487424c681722a15e325e71b00a"
+      },
+      "octavia": {
+        "revision": "1c25ce825547a93496bfd3524ed9583130f900fd",
+        "version": "19.0.1.dev102",
+        "sha256": "069668b89ccdae2aab220a63b1836488224af0e7087e408dcb9befb3406e55cb",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "nativeExternalAuth": true
+      },
+      "octaviaAPIVersion": "v2.30",
+      "boundary": "Local Kubernetes envtest API/etcd, pinned manager, installed Octavia WSGI/SQL, Amphora driver and renderer, native HAProxy and direct local HTTP peers through Service and EndpointSlice discovery. Keystone, Neutron, RPC completion and Amphora agent transport are provided by the fixture.",
+      "capabilities": {
+        "listener_request_filters_v1": true,
+        "listener_http_external_auth_forward_body_v1": true,
+        "l7policy_http_external_auth_forward_body_v1": true
+      },
+      "phases": {
+        "grant-present": {
+          "kubernetes": {
+            "gatewayGeneration": 1,
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "routes": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "physicalListeners": 1,
+          "publicCollectionAndDetailAgree": true,
+          "authorizerPoolHasActiveEndpoint": true,
+          "render": {
+            "activeConfigurationSHA256": "980216650a8a5fb840783ce88e85043095bac86f19624214ca632b9e7a69d528",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "httpBodyLimits": [
+              65536
+            ]
+          },
+          "traffic": {
+            "chosenAtLimit": {
+              "status": 200,
+              "payloadBytes": 65536,
+              "payloadSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+              "calls": {
+                "http": 1,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "http",
+                  "path": "/authorize/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                },
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                }
+              ]
+            },
+            "chosenOneByteOver": {
+              "status": 413,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 0
+              },
+              "originEchoedExactBytes": false,
+              "events": []
+            },
+            "sisterOneByteOver": {
+              "status": 200,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65537,
+                  "status": 200,
+                  "contentLength": "65537",
+                  "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+                  "exactFixtureBytes": true
+                }
+              ]
+            }
+          }
+        },
+        "grant-removed": {
+          "kubernetes": {
+            "gatewayGeneration": 1,
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "False/ListenersNotValid",
+              "AddressesAssigned": "True/AddressesAssigned",
+              "ResolvedRefs": "False/ListenersNotResolved"
+            },
+            "listeners": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "False/Invalid"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "routes": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "physicalListeners": 1,
+          "publicCollectionAndDetailAgree": true,
+          "authorizerPoolHasActiveEndpoint": null,
+          "render": {
+            "activeConfigurationSHA256": "df31209091d98c3322a88b691aa127b2a4a057f626dc1bb07940c78eb61689fe",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "httpBodyLimits": []
+          },
+          "traffic": {
+            "chosenAtLimit": {
+              "status": 403,
+              "payloadBytes": 65536,
+              "payloadSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+              "calls": {
+                "http": 0,
+                "origin": 0
+              },
+              "originEchoedExactBytes": false,
+              "events": []
+            },
+            "chosenOneByteOver": {
+              "status": 403,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 0
+              },
+              "originEchoedExactBytes": false,
+              "events": []
+            },
+            "sisterOneByteOver": {
+              "status": 200,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65537,
+                  "status": 200,
+                  "contentLength": "65537",
+                  "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+                  "exactFixtureBytes": true
+                }
+              ]
+            }
+          },
+          "siblingSamplesDuringChange": {
+            "200": 4,
+            "ConnectionRefusedError": 8
+          }
+        },
+        "grant-restored": {
+          "kubernetes": {
+            "gatewayGeneration": 1,
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "routes": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "physicalListeners": 1,
+          "publicCollectionAndDetailAgree": true,
+          "authorizerPoolHasActiveEndpoint": true,
+          "render": {
+            "activeConfigurationSHA256": "048dadbf082bd41d86399909f211505ff5d3aea5128b5fd5a8c5ec8cb6812bc1",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "httpBodyLimits": [
+              65536
+            ]
+          },
+          "traffic": {
+            "chosenAtLimit": {
+              "status": 200,
+              "payloadBytes": 65536,
+              "payloadSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+              "calls": {
+                "http": 1,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "http",
+                  "path": "/authorize/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                },
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                }
+              ]
+            },
+            "chosenOneByteOver": {
+              "status": 413,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 0
+              },
+              "originEchoedExactBytes": false,
+              "events": []
+            },
+            "sisterOneByteOver": {
+              "status": 200,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65537,
+                  "status": 200,
+                  "contentLength": "65537",
+                  "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+                  "exactFixtureBytes": true
+                }
+              ]
+            }
+          },
+          "siblingSamplesDuringChange": {
+            "200": 11,
+            "ConnectionRefusedError": 5
+          }
+        }
+      },
+      "siblingContinuouslyReachableInSample": false
+    },
+    "experimental-https": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schema": {
+        "listenerFiltersPresent": true,
+        "listenerForwardBodyPresent": true,
+        "gatewayV1SchemaSHA256": "2eaf8e278290ef2e5388607ef2633898ff027c5a80b92fdee8e3fc14f8bdb349",
+        "strictServerDryRun": {
+          "plainGatewayAdmitted": true,
+          "filteredGatewayAdmitted": true
+        }
+      },
+      "controller": {
+        "sourceRevision": "13627489822adf0aa9b182739a9ab7ff124d594a",
+        "managerSHA256": "d0490a3b74a1a9dd769992f79a864ecccc686e4fa813f87b1447a6c74ddd6d6e",
+        "manifestDigest": "sha256:d9110316ff14fb8d638acc8c529c58eb60fefea8bdb3ecf09951f24b01a6e9f0",
+        "ociArchiveSHA256": "6a714f20174c7e8426ab48469b95dad90c9ae487424c681722a15e325e71b00a"
+      },
+      "octavia": {
+        "revision": "1c25ce825547a93496bfd3524ed9583130f900fd",
+        "version": "19.0.1.dev102",
+        "sha256": "069668b89ccdae2aab220a63b1836488224af0e7087e408dcb9befb3406e55cb",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+        "nativeExternalAuth": true
+      },
+      "octaviaAPIVersion": "v2.30",
+      "boundary": "Local Kubernetes envtest API and etcd, running manager, Octavia WSGI API and SQLAlchemy DB, Amphora renderer and native HAProxy, isolated HTTP peers. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters. No regional deployment was exercised. Barbican WSGI runs locally with verified TLS and exact Secret revision enrollment.",
+      "capabilities": {
+        "https_listener_isolation_v1": true,
+        "listener_request_filters_v1": true,
+        "listener_https_external_auth_forward_body_v1": true
+      },
+      "phases": {
+        "shared-https": {
+          "kubernetes": {
+            "gatewayGeneration": 1,
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listeners": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "routes": {
+              "chosen": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sister": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          },
+          "physicalListeners": 1,
+          "publicCollectionAndDetailAgree": true,
+          "authorizerPoolHasActiveEndpoint": true,
+          "render": {
+            "activeConfigurationSHA256": "ef06e867e9fec90e207c8e26601ade6697101fff98200562c486ea57db17a92e",
+            "runningHAProxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+            "httpBodyLimits": [
+              65536
+            ]
+          },
+          "traffic": {
+            "chosenAtLimit": {
+              "status": 200,
+              "payloadBytes": 65536,
+              "payloadSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+              "calls": {
+                "http": 1,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "http",
+                  "path": "/authorize/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                },
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65536,
+                  "status": 200,
+                  "contentLength": "65536",
+                  "sha256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+                  "exactFixtureBytes": true
+                }
+              ],
+              "tls": {
+                "sni": "edge.example.test",
+                "authority": "edge.example.test",
+                "version": "TLSv1.3",
+                "alpn": "http/1.1",
+                "leafSHA256": "9cc1f968ab2e002c24b8c878654f2df8798212f529d1dcfdd4b5c93f2a74e7ec",
+                "requestProtocol": "HTTP/1.1",
+                "responseProtocol": "HTTP/1.0"
+              }
+            },
+            "chosenOneByteOver": {
+              "status": 413,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 0
+              },
+              "originEchoedExactBytes": false,
+              "events": [],
+              "tls": {
+                "sni": "edge.example.test",
+                "authority": "edge.example.test",
+                "version": "TLSv1.3",
+                "alpn": "http/1.1",
+                "leafSHA256": "9cc1f968ab2e002c24b8c878654f2df8798212f529d1dcfdd4b5c93f2a74e7ec",
+                "requestProtocol": "HTTP/1.1",
+                "responseProtocol": "HTTP/1.1"
+              }
+            },
+            "sisterOneByteOver": {
+              "status": 200,
+              "payloadBytes": 65537,
+              "payloadSHA256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+              "calls": {
+                "http": 0,
+                "origin": 1
+              },
+              "originEchoedExactBytes": true,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/application",
+                  "bodyBytes": 65537,
+                  "status": 200,
+                  "contentLength": "65537",
+                  "sha256": "f57d1f7b9ce4ca2834c51554c32b8e3c1e61af655e24d4802c1e02804d7e0ae7",
+                  "exactFixtureBytes": true
+                }
+              ],
+              "tls": {
+                "sni": "sibling.example.test",
+                "authority": "sibling.example.test",
+                "version": "TLSv1.3",
+                "alpn": "http/1.1",
+                "leafSHA256": "9cc1f968ab2e002c24b8c878654f2df8798212f529d1dcfdd4b5c93f2a74e7ec",
+                "requestProtocol": "HTTP/1.1",
+                "responseProtocol": "HTTP/1.0"
+              }
+            },
+            "mismatchedSNIAndAuthority": {
+              "status": 421,
+              "payloadBytes": 65536,
+              "payloadSHA256": "7daca2095d0438260fa849183dfc67faa459fdf4936e1bc91eec6b281b27e4c2",
+              "calls": {
+                "http": 0,
+                "origin": 0
+              },
+              "originEchoedExactBytes": false,
+              "events": [],
+              "tls": {
+                "sni": "sibling.example.test",
+                "authority": "edge.example.test",
+                "version": "TLSv1.3",
+                "alpn": "http/1.1",
+                "leafSHA256": "9cc1f968ab2e002c24b8c878654f2df8798212f529d1dcfdd4b5c93f2a74e7ec",
+                "requestProtocol": "HTTP/1.1",
+                "responseProtocol": "HTTP/1.1"
+              }
+            }
+          },
+          "provider": {
+            "protocol": "TERMINATED_HTTPS",
+            "port": 443,
+            "httpsVirtualHosts": [
+              "edge.example.test",
+              "sibling.example.test"
+            ],
+            "certificateRefMatches": true
+          }
+        }
+      },
+      "frontendCertificate": {
+        "exactSecretRevisionEnrolled": true,
+        "barbicanPayloadVerified": true,
+        "leafSHA256": "9cc1f968ab2e002c24b8c878654f2df8798212f529d1dcfdd4b5c93f2a74e7ec"
+      }
+    }
+  },
+  "nativeListener": {
+    "stable": {
+      "nativeListenerTests": 7,
+      "nativeListenerCases": [
+        "test_authorization_chain_precedes_route_and_preserves_request",
+        "test_listener_and_route_authorize_the_complete_body_in_order",
+        "test_priority_and_unfiltered_sections",
+        "test_named_tls_sections_require_selection_before_routing",
+        "test_https_h2_preserves_original_authority",
+        "test_https_listener_body_limit_and_authority_isolation",
+        "test_failures_stop_before_routing"
+      ],
+      "nativeListenerLogSHA256": "4bfcd6d5be342fc134209de353d2abb1dac33ec17cff6bf389ecaed76f470cbd",
+      "haproxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+    },
+    "master": {
+      "nativeListenerTests": 7,
+      "nativeListenerCases": [
+        "test_authorization_chain_precedes_route_and_preserves_request",
+        "test_listener_and_route_authorize_the_complete_body_in_order",
+        "test_priority_and_unfiltered_sections",
+        "test_named_tls_sections_require_selection_before_routing",
+        "test_https_h2_preserves_original_authority",
+        "test_https_listener_body_limit_and_authority_isolation",
+        "test_failures_stop_before_routing"
+      ],
+      "nativeListenerLogSHA256": "6003a221c907941d60cb9d439f1a1c89387c24fce33be991401f4a9cf68c80b0",
+      "haproxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+    }
+  }
+}

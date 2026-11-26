@@ -1,0 +1,2562 @@
+{
+  "baseline": {
+    "standard": {
+      "channel": "standard",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "routeSchemas": {
+        "GRPCRoute": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+      },
+      "xBackendCRD": false,
+      "admittedRoutes": {
+        "Control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "service",
+                  "port": 8081,
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Control",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+      "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "installedProvider": {
+        "octavia": {
+          "version": "19.0.1.dev109",
+          "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "filesVerified": 674
+        },
+        "octavia-lib": {
+          "version": "3.12.1.dev22",
+          "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "filesVerified": 24
+        }
+      },
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+      "grpcioVersion": "1.83.0",
+      "protobufVersion": "3.19.6",
+      "phases": {
+        "selected": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "listener": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "routes": {
+            "Control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            }
+          },
+          "xBackendAncestors": {},
+          "octavia": {
+            "methods": {
+              "Control": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "weight": 1
+                  }
+                }
+              }
+            },
+            "activeConfigSHA256": "ac95eb57b1beae7f96b23d53e2d3ee747b036b4b1299e8ee97fec99bbf1e4dfa",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConvergence": 8.144,
+          "traffic": {
+            "Control": {
+              "requests": 1,
+              "outcomes": {
+                "service": 1
+              },
+              "applicationReceives": {
+                "service": 1
+              }
+            }
+          }
+        }
+      },
+      "boundary": "Isolated envtest, Octavia WSGI and SQLAlchemy, installed Amphora agent routes, running HAProxy and gRPC servers. Local adapters provide cloud services and service control.",
+      "controller": {
+        "manifestDigest": "sha256:f5aaff9c00af26c85e8b9a9f561a2bf9d817616436f32b382c0ba462b5d58f1a",
+        "configDigest": "sha256:dab8d4ebf62f2170a47645121f53d4a44cc38033d68cd8c779da068a6ca54c49",
+        "ociArchiveSHA256": "28277dfc3f0a99b600ffaa0827c7acfd707c8c073a0042cd7237bd039040cb35",
+        "managerSHA256": "64fbbc3eb657941c105ad3010fb2890845257fcc9ad426c07e6645e02607ce9e",
+        "platform": "linux/amd64",
+        "sourceRevision": "62ac0896591cc64c266d9159453f143c4fc6d05c"
+      },
+      "rawReceiptSHA256": "99d23fd04e9cace7c7fb1f262074380062d6cc6b46a6968a61426489839f8f2b"
+    },
+    "experimental": {
+      "channel": "experimental",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "routeSchemas": {
+        "GRPCRoute": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+      },
+      "xBackendCRD": true,
+      "admittedRoutes": {
+        "Control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "service",
+                  "port": 8081,
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Control",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "Mixed": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "service",
+                  "port": 8081,
+                  "weight": 3
+                },
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "xbackend",
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Mixed",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "Secure": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "secure",
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Secure",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+      "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "installedProvider": {
+        "octavia": {
+          "version": "19.0.1.dev109",
+          "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "filesVerified": 674
+        },
+        "octavia-lib": {
+          "version": "3.12.1.dev22",
+          "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "filesVerified": 24
+        }
+      },
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+      "grpcioVersion": "1.83.0",
+      "protobufVersion": "3.19.6",
+      "phases": {
+        "selected": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            }
+          },
+          "listener": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 3
+          },
+          "routes": {
+            "Control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Mixed": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Secure": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+              },
+              "sameUIDAndSpec": true
+            }
+          },
+          "xBackendAncestors": {
+            "xbackend": [],
+            "secure": []
+          },
+          "pod": {
+            "labelMatches": true,
+            "ready": true,
+            "ipUnchanged": true
+          },
+          "octavia": {
+            "methods": {
+              "Control": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "weight": 3
+                  },
+                  "empty": {
+                    "protocol": "HTTP",
+                    "h2c": false,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "weight": 1
+                  }
+                }
+              },
+              "Secure": {
+                "action": "unobserved"
+              }
+            },
+            "activeConfigSHA256": "2b307695e9d1cf10e6a2f5a93e2fc4f0a5516c43396c9494b4ebe765a595ae15",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConvergence": 24.011,
+          "traffic": {
+            "Control": {
+              "requests": 1,
+              "outcomes": {
+                "service": 1
+              },
+              "applicationReceives": {
+                "service": 1
+              }
+            },
+            "Mixed": {
+              "requests": 160,
+              "outcomes": {
+                "service": 120,
+                "UNAVAILABLE": 40
+              },
+              "applicationReceives": {
+                "service": 120
+              }
+            },
+            "Secure": {
+              "requests": 1,
+              "outcomes": {
+                "UNIMPLEMENTED": 1
+              },
+              "applicationReceives": {}
+            }
+          }
+        }
+      },
+      "boundary": "Isolated envtest, Octavia WSGI and SQLAlchemy, installed Amphora agent routes, running HAProxy and gRPC servers. Local adapters provide cloud services and service control.",
+      "xBackendSpecs": {
+        "xbackend": {
+          "endpointSelector": {
+            "matchLabels": {
+              "wire-origin": "xbackend"
+            }
+          },
+          "port": {
+            "number": 43149
+          },
+          "protocol": "GRPC",
+          "tls": {
+            "mode": "None"
+          },
+          "type": "EndpointSelector"
+        },
+        "secure": {
+          "endpointSelector": {
+            "matchLabels": {
+              "wire-origin": "secure"
+            }
+          },
+          "port": {
+            "number": 41445
+          },
+          "protocol": "GRPC",
+          "tls": {
+            "mode": "ServerOnly",
+            "validation": {
+              "caCertificateRefs": [
+                {
+                  "group": "",
+                  "kind": "ConfigMap",
+                  "name": "origin-trust"
+                }
+              ],
+              "hostname": "origin.example.test"
+            }
+          },
+          "type": "EndpointSelector"
+        }
+      },
+      "controller": {
+        "manifestDigest": "sha256:f5aaff9c00af26c85e8b9a9f561a2bf9d817616436f32b382c0ba462b5d58f1a",
+        "configDigest": "sha256:dab8d4ebf62f2170a47645121f53d4a44cc38033d68cd8c779da068a6ca54c49",
+        "ociArchiveSHA256": "28277dfc3f0a99b600ffaa0827c7acfd707c8c073a0042cd7237bd039040cb35",
+        "managerSHA256": "64fbbc3eb657941c105ad3010fb2890845257fcc9ad426c07e6645e02607ce9e",
+        "platform": "linux/amd64",
+        "sourceRevision": "62ac0896591cc64c266d9159453f143c4fc6d05c"
+      },
+      "rawReceiptSHA256": "2592c890cebdab069e0c7240fac977424e351f2fa2a421045e0514450d219c6b"
+    }
+  },
+  "initialExperimentalRestoration": {
+    "passed": false,
+    "channel": "experimental",
+    "controller": {
+      "sourceRevision": "892bc37a0f8892a15b0839a4979e9080bf541f74",
+      "managerSHA256": "4644e9aa4171fe567692e463101c940e91d248f19b6c04463136bf28a37ededd"
+    },
+    "phases": {
+      "selected": {
+        "secondsToControlPlaneObservation": 50.537,
+        "mixedRPCs": {
+          "requests": 160,
+          "outcomes": {
+            "service": 112,
+            "xbackend": 48
+          },
+          "applicationReceives": {
+            "service": 112,
+            "xbackend": 48
+          }
+        },
+        "activeConfigSHA256": "83a6a778f29480b4157f034c981a32551197dca3e36767508802177ed0f0919e",
+        "octaviaTargets": {
+          "service": {
+            "protocol": "HTTP",
+            "h2c": true,
+            "tls": false,
+            "alpn": [],
+            "authenticatedName": null,
+            "strictH2": false,
+            "trustedCAConfigured": false,
+            "activeMembers": [
+              "service"
+            ],
+            "disabledMembers": [],
+            "poolProvisioningStatus": "ACTIVE",
+            "monitor": {
+              "type": "TCP",
+              "status": "ACTIVE"
+            },
+            "weight": 3
+          },
+          "xbackend": {
+            "protocol": "HTTP",
+            "h2c": true,
+            "tls": false,
+            "alpn": [],
+            "authenticatedName": null,
+            "strictH2": false,
+            "trustedCAConfigured": false,
+            "activeMembers": [
+              "xbackend"
+            ],
+            "disabledMembers": [],
+            "poolProvisioningStatus": "ACTIVE",
+            "monitor": {
+              "type": "TCP",
+              "status": "ACTIVE"
+            },
+            "weight": 1
+          }
+        }
+      },
+      "excluded": {
+        "secondsToControlPlaneObservation": 2.988,
+        "mixedRPCs": {
+          "requests": 160,
+          "outcomes": {
+            "UNAVAILABLE": 23,
+            "service": 137
+          },
+          "applicationReceives": {
+            "service": 137,
+            "xbackend": 0
+          }
+        },
+        "activeConfigSHA256": "1a0e5a088065bb96c244a30d4807846b7227a58628d529bcb206db9d9ceca95d",
+        "octaviaTargets": {
+          "service": {
+            "protocol": "HTTP",
+            "h2c": true,
+            "tls": false,
+            "alpn": [],
+            "authenticatedName": null,
+            "strictH2": false,
+            "trustedCAConfigured": false,
+            "activeMembers": [
+              "service"
+            ],
+            "disabledMembers": [],
+            "poolProvisioningStatus": "ACTIVE",
+            "monitor": {
+              "type": "TCP",
+              "status": "ACTIVE"
+            },
+            "weight": 3
+          },
+          "empty": {
+            "protocol": "HTTP",
+            "h2c": true,
+            "tls": false,
+            "alpn": [],
+            "authenticatedName": null,
+            "strictH2": false,
+            "trustedCAConfigured": false,
+            "activeMembers": [],
+            "disabledMembers": [
+              "xbackend"
+            ],
+            "poolProvisioningStatus": "ACTIVE",
+            "monitor": {
+              "type": "TCP",
+              "status": "ACTIVE"
+            },
+            "weight": 1
+          }
+        }
+      },
+      "restored": {
+        "secondsToControlPlaneObservation": 4.608,
+        "mixedRPCs": {
+          "requests": 160,
+          "outcomes": {
+            "service": 116,
+            "UNAVAILABLE": 44
+          },
+          "applicationReceives": {
+            "service": 116
+          }
+        },
+        "activeConfigSHA256": "83a6a778f29480b4157f034c981a32551197dca3e36767508802177ed0f0919e",
+        "octaviaTargets": {
+          "service": {
+            "protocol": "HTTP",
+            "h2c": true,
+            "tls": false,
+            "alpn": [],
+            "authenticatedName": null,
+            "strictH2": false,
+            "trustedCAConfigured": false,
+            "activeMembers": [
+              "service"
+            ],
+            "disabledMembers": [],
+            "poolProvisioningStatus": "ACTIVE",
+            "monitor": {
+              "type": "TCP",
+              "status": "ACTIVE"
+            },
+            "weight": 3
+          },
+          "xbackend": {
+            "protocol": "HTTP",
+            "h2c": true,
+            "tls": false,
+            "alpn": [],
+            "authenticatedName": null,
+            "strictH2": false,
+            "trustedCAConfigured": false,
+            "activeMembers": [
+              "xbackend"
+            ],
+            "disabledMembers": [],
+            "poolProvisioningStatus": "ACTIVE",
+            "monitor": {
+              "type": "TCP",
+              "status": "ACTIVE"
+            },
+            "weight": 1
+          }
+        }
+      }
+    },
+    "rawReceiptSHA256": "7b591772ba3646caffa1212e755f3086c398f2cc9f1b3828c3e8130740b5a07d"
+  },
+  "monitorReplays": {
+    "inheritedProfile": {
+      "outcome": "no recovery during observation window",
+      "rawReceiptSHA256": "6f5bafb9a529fa31e590063ce44c7be161b2964e579bcce1dca746512d19261e",
+      "monitor": {
+        "delay": 3600,
+        "timeout": 5,
+        "max_retries": 10,
+        "max_retries_down": 10
+      },
+      "restoredMember": [
+        "xbackend"
+      ],
+      "restoredSecondsToControlPlane": 5.797,
+      "samples": [
+        {
+          "secondsFromMutation": 5.797,
+          "octaviaTargetsConverged": true,
+          "previousWorkerExited": true,
+          "haProxy": {
+            "operationalState": 0,
+            "administrativeState": 0,
+            "checkHealth": 0,
+            "latestCheckResult": 0,
+            "status": "DOWN",
+            "latestCheck": "INI",
+            "intervalSeconds": 3600,
+            "fall": 10,
+            "rise": 10,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 19,
+              "latestCheckResult": 0
+            }
+          },
+          "outcomes": {
+            "service": 5,
+            "UNAVAILABLE": 1
+          },
+          "applicationReceives": {
+            "service": 5
+          },
+          "directOrigin": "xbackend",
+          "freshFrontendChannels": 6
+        },
+        {
+          "secondsFromMutation": 11.634,
+          "octaviaTargetsConverged": true,
+          "previousWorkerExited": true,
+          "haProxy": {
+            "operationalState": 0,
+            "administrativeState": 0,
+            "checkHealth": 0,
+            "latestCheckResult": 0,
+            "status": "DOWN",
+            "latestCheck": "INI",
+            "intervalSeconds": 3600,
+            "fall": 10,
+            "rise": 10,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 19,
+              "latestCheckResult": 0
+            }
+          },
+          "outcomes": {
+            "service": 5,
+            "UNAVAILABLE": 1
+          },
+          "applicationReceives": {
+            "service": 5
+          },
+          "directOrigin": "xbackend",
+          "freshFrontendChannels": 6
+        },
+        {
+          "secondsFromMutation": 16.307,
+          "octaviaTargetsConverged": true,
+          "previousWorkerExited": true,
+          "haProxy": {
+            "operationalState": 0,
+            "administrativeState": 0,
+            "checkHealth": 0,
+            "latestCheckResult": 0,
+            "status": "DOWN",
+            "latestCheck": "INI",
+            "intervalSeconds": 3600,
+            "fall": 10,
+            "rise": 10,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 19,
+              "latestCheckResult": 0
+            }
+          },
+          "outcomes": {
+            "UNAVAILABLE": 1,
+            "service": 5
+          },
+          "applicationReceives": {
+            "service": 5
+          },
+          "directOrigin": "xbackend",
+          "freshFrontendChannels": 6
+        },
+        {
+          "secondsFromMutation": 18.949,
+          "octaviaTargetsConverged": true,
+          "previousWorkerExited": true,
+          "haProxy": {
+            "operationalState": 0,
+            "administrativeState": 0,
+            "checkHealth": 0,
+            "latestCheckResult": 0,
+            "status": "DOWN",
+            "latestCheck": "INI",
+            "intervalSeconds": 3600,
+            "fall": 10,
+            "rise": 10,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 19,
+              "latestCheckResult": 0
+            }
+          },
+          "outcomes": {
+            "service": 4,
+            "UNAVAILABLE": 2
+          },
+          "applicationReceives": {
+            "service": 4
+          },
+          "directOrigin": "xbackend",
+          "freshFrontendChannels": 6
+        },
+        {
+          "secondsFromMutation": 20.911,
+          "octaviaTargetsConverged": true,
+          "previousWorkerExited": true,
+          "haProxy": {
+            "operationalState": 0,
+            "administrativeState": 0,
+            "checkHealth": 0,
+            "latestCheckResult": 0,
+            "status": "DOWN",
+            "latestCheck": "INI",
+            "intervalSeconds": 3600,
+            "fall": 10,
+            "rise": 10,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 19,
+              "latestCheckResult": 0
+            }
+          },
+          "outcomes": {
+            "service": 5,
+            "UNAVAILABLE": 1
+          },
+          "applicationReceives": {
+            "service": 5
+          },
+          "directOrigin": "xbackend",
+          "freshFrontendChannels": 6
+        },
+        {
+          "secondsFromMutation": 22.582,
+          "octaviaTargetsConverged": true,
+          "previousWorkerExited": true,
+          "haProxy": {
+            "operationalState": 0,
+            "administrativeState": 0,
+            "checkHealth": 0,
+            "latestCheckResult": 0,
+            "status": "DOWN",
+            "latestCheck": "INI",
+            "intervalSeconds": 3600,
+            "fall": 10,
+            "rise": 10,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 19,
+              "latestCheckResult": 0
+            }
+          },
+          "outcomes": {
+            "service": 5,
+            "UNAVAILABLE": 1
+          },
+          "applicationReceives": {
+            "service": 5
+          },
+          "directOrigin": "xbackend",
+          "freshFrontendChannels": 6
+        }
+      ]
+    },
+    "firstShortProfile": {
+      "outcome": "mixed route still pending at observation",
+      "rawReceiptSHA256": "7c7e0e171b262b5763ee9fda3bd16beea58538aa1e62f302ec30536ec0aaabe9",
+      "phase": "excluded",
+      "programmed": "False/Pending",
+      "mixedRPCs": {
+        "requests": 160,
+        "outcomes": {
+          "service": 122,
+          "UNAVAILABLE": 38
+        },
+        "applicationReceives": {
+          "service": 122,
+          "xbackend": 0
+        }
+      }
+    }
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "routeSchemas": {
+        "GRPCRoute": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+      },
+      "xBackendCRD": false,
+      "admittedRoutes": {
+        "Control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "missing",
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Unknown",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            },
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "service",
+                  "port": 8081,
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Control",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+      "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "installedProvider": {
+        "octavia": {
+          "version": "19.0.1.dev109",
+          "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "filesVerified": 674
+        },
+        "octavia-lib": {
+          "version": "3.12.1.dev22",
+          "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "filesVerified": 24
+        }
+      },
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+      "grpcioVersion": "1.83.0",
+      "protobufVersion": "3.19.6",
+      "phases": {
+        "selected": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "listener": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "routes": {
+            "Control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/InvalidKind",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            }
+          },
+          "xBackendAncestors": {},
+          "octavia": {
+            "methods": {
+              "Control": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 3600,
+                      "timeout": 5,
+                      "max_retries": 10,
+                      "max_retries_down": 10
+                    },
+                    "weight": 1
+                  }
+                }
+              }
+            },
+            "activeConfigSHA256": "c987dc778e904f91c2bdcad5bf12f05dd233333b33b368ee3e5d2e5fb0914aa3",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConvergence": 14.366,
+          "traffic": {
+            "Control": {
+              "requests": 1,
+              "outcomes": {
+                "service": 1
+              },
+              "applicationReceives": {
+                "service": 1
+              }
+            },
+            "Unknown": {
+              "requests": 1,
+              "outcomes": {
+                "UNAVAILABLE": 1
+              },
+              "applicationReceives": {}
+            }
+          }
+        }
+      },
+      "boundary": "Isolated envtest, Octavia WSGI and SQLAlchemy, installed Amphora agent routes, running HAProxy and gRPC servers. Local adapters provide cloud services and service control.",
+      "controller": {
+        "manifestDigest": "sha256:9eecb97cae17873b3341cd2fa98e67572b8d2ae914460ce2a0032affda670a57",
+        "configDigest": "sha256:48ffa61fe66a01badb888a84e86f93555792e94d06869f071f3bee8c84589399",
+        "ociArchiveSHA256": "b06474722d6fe41e2c660c620f7577d51628546baa08514534a1976839cfc893",
+        "managerSHA256": "4644e9aa4171fe567692e463101c940e91d248f19b6c04463136bf28a37ededd",
+        "platform": "linux/amd64",
+        "sourceRevision": "892bc37a0f8892a15b0839a4979e9080bf541f74"
+      },
+      "rawReceiptSHA256": "d0496c525cf2060c4fc9e8512c11beb4a67639dd43446e01b1ef36dae3a9a998"
+    },
+    "experimental": {
+      "channel": "experimental",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "routeSchemas": {
+        "GRPCRoute": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+      },
+      "xBackendCRD": true,
+      "admittedRoutes": {
+        "Control": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "service",
+                  "port": 8081,
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Control",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "Mixed": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "service",
+                  "port": 8081,
+                  "weight": 3
+                },
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "xbackend",
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Mixed",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "Secure": {
+          "parentRefs": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "edge",
+              "sectionName": "grpc"
+            }
+          ],
+          "rules": [
+            {
+              "backendRefs": [
+                {
+                  "group": "gateway.networking.x-k8s.io",
+                  "kind": "XBackend",
+                  "name": "secure",
+                  "weight": 1
+                }
+              ],
+              "matches": [
+                {
+                  "method": {
+                    "method": "Secure",
+                    "service": "wire.EndpointEcho",
+                    "type": "Exact"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+      "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "installedProvider": {
+        "octavia": {
+          "version": "19.0.1.dev109",
+          "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "filesVerified": 674
+        },
+        "octavia-lib": {
+          "version": "3.12.1.dev22",
+          "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "filesVerified": 24
+        }
+      },
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+      "grpcioVersion": "1.83.0",
+      "protobufVersion": "3.19.6",
+      "phases": {
+        "selected": {
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            }
+          },
+          "listener": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 3
+          },
+          "routes": {
+            "Control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Mixed": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Secure": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+              },
+              "sameUIDAndSpec": true
+            }
+          },
+          "xBackendAncestors": {
+            "xbackend": [
+              {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted"
+                },
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "edge",
+                  "namespace": "grpc-xbackend"
+                }
+              }
+            ],
+            "secure": [
+              {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted"
+                },
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "edge",
+                  "namespace": "grpc-xbackend"
+                }
+              }
+            ]
+          },
+          "pod": {
+            "labelMatches": true,
+            "ready": true,
+            "ipUnchanged": true
+          },
+          "octavia": {
+            "methods": {
+              "Control": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 3
+                  },
+                  "xbackend": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "xbackend"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Secure": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "secure": {
+                    "protocol": "HTTP",
+                    "h2c": false,
+                    "tls": true,
+                    "alpn": [
+                      "h2"
+                    ],
+                    "authenticatedName": "origin.example.test",
+                    "strictH2": true,
+                    "trustedCAConfigured": true,
+                    "activeMembers": [
+                      "secure"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              }
+            },
+            "activeConfigSHA256": "2a173bd1ef1335528424b1a8c5581b52ec2bacb70a7656027fe884bc5c056aec",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConvergence": 51.49,
+          "haProxyBeforeTraffic": {
+            "operationalState": 2,
+            "administrativeState": 0,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "UP",
+            "latestCheck": "L4OK",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 2,
+              "administrativeState": 0,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          },
+          "traffic": {
+            "Control": {
+              "requests": 1,
+              "outcomes": {
+                "service": 1
+              },
+              "applicationReceives": {
+                "service": 1
+              }
+            },
+            "Mixed": {
+              "requests": 160,
+              "outcomes": {
+                "service": 114,
+                "xbackend": 46
+              },
+              "applicationReceives": {
+                "service": 114,
+                "xbackend": 46
+              }
+            },
+            "Secure": {
+              "requests": 1,
+              "outcomes": {
+                "secure": 1
+              },
+              "applicationReceives": {
+                "secure": 1
+              },
+              "originTransportSecurity": "ssl"
+            }
+          },
+          "haProxyAfterTraffic": {
+            "operationalState": 2,
+            "administrativeState": 0,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "UP",
+            "latestCheck": "L4OK",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 2,
+              "administrativeState": 0,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          }
+        },
+        "excluded": {
+          "beforeMutation": {
+            "operationalState": 2,
+            "administrativeState": 0,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "UP",
+            "latestCheck": "L4OK",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 2,
+              "administrativeState": 0,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          },
+          "transition": [
+            {
+              "secondsFromMutation": 2.254,
+              "octaviaTargetsConverged": false,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 0,
+                "administrativeState": 5,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "MAINT",
+                "latestCheck": "",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": true,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 2,
+                  "administrativeState": 0,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "UNAVAILABLE": 1,
+                "service": 5
+              },
+              "applicationReceives": {
+                "service": 5
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 3.613,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 0,
+                "administrativeState": 5,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "MAINT",
+                "latestCheck": "",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": true,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 2,
+                  "administrativeState": 0,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "UNAVAILABLE": 3,
+                "service": 3
+              },
+              "applicationReceives": {
+                "service": 3
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 4.871,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 0,
+                "administrativeState": 5,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "MAINT",
+                "latestCheck": "",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": true,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 2,
+                  "administrativeState": 0,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 5,
+                "UNAVAILABLE": 1
+              },
+              "applicationReceives": {
+                "service": 5
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            }
+          ],
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            }
+          },
+          "listener": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 3
+          },
+          "routes": {
+            "Control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Mixed": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Secure": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+              },
+              "sameUIDAndSpec": true
+            }
+          },
+          "xBackendAncestors": {
+            "xbackend": [
+              {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted"
+                },
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "edge",
+                  "namespace": "grpc-xbackend"
+                }
+              }
+            ],
+            "secure": [
+              {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted"
+                },
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "edge",
+                  "namespace": "grpc-xbackend"
+                }
+              }
+            ]
+          },
+          "pod": {
+            "labelMatches": false,
+            "ready": true,
+            "ipUnchanged": true
+          },
+          "octavia": {
+            "methods": {
+              "Control": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 3
+                  },
+                  "empty": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [],
+                    "disabledMembers": [
+                      "xbackend"
+                    ],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Secure": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "secure": {
+                    "protocol": "HTTP",
+                    "h2c": false,
+                    "tls": true,
+                    "alpn": [
+                      "h2"
+                    ],
+                    "authenticatedName": "origin.example.test",
+                    "strictH2": true,
+                    "trustedCAConfigured": true,
+                    "activeMembers": [
+                      "secure"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              }
+            },
+            "activeConfigSHA256": "36e6c1bac9d5d13dd91ab4bd5e4b959bbebd2b45616ddea942287c7ca2035fa0",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConvergence": 3.613,
+          "secondsToDataPlane": 3.621,
+          "secondsToStableDataPlane": 4.9,
+          "haProxyBeforeTraffic": {
+            "operationalState": 0,
+            "administrativeState": 5,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "MAINT",
+            "latestCheck": "",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": true,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 2,
+              "administrativeState": 0,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          },
+          "traffic": {
+            "Control": {
+              "requests": 1,
+              "outcomes": {
+                "service": 1
+              },
+              "applicationReceives": {
+                "service": 1
+              }
+            },
+            "Mixed": {
+              "requests": 160,
+              "outcomes": {
+                "service": 112,
+                "UNAVAILABLE": 48
+              },
+              "applicationReceives": {
+                "service": 112,
+                "xbackend": 0
+              }
+            },
+            "Secure": {
+              "requests": 1,
+              "outcomes": {
+                "secure": 1
+              },
+              "applicationReceives": {
+                "secure": 1
+              },
+              "originTransportSecurity": "ssl"
+            }
+          },
+          "haProxyAfterTraffic": {
+            "operationalState": 0,
+            "administrativeState": 5,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "MAINT",
+            "latestCheck": "",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": true,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 2,
+              "administrativeState": 0,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          }
+        },
+        "restored": {
+          "beforeMutation": {
+            "operationalState": 0,
+            "administrativeState": 5,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "MAINT",
+            "latestCheck": "",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": true,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 2,
+              "administrativeState": 0,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          },
+          "transition": [
+            {
+              "secondsFromMutation": 2.157,
+              "octaviaTargetsConverged": false,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 0,
+                "administrativeState": 0,
+                "checkHealth": 0,
+                "latestCheckResult": 3,
+                "status": "DOWN",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 4,
+                "UNAVAILABLE": 2
+              },
+              "applicationReceives": {
+                "service": 4
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 3.375,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 0,
+                "administrativeState": 0,
+                "checkHealth": 1,
+                "latestCheckResult": 3,
+                "status": "DOWN 1/2",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 5,
+                "UNAVAILABLE": 1
+              },
+              "applicationReceives": {
+                "service": 5
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 4.46,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 0,
+                "administrativeState": 0,
+                "checkHealth": 1,
+                "latestCheckResult": 3,
+                "status": "DOWN 1/2",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 6
+              },
+              "applicationReceives": {
+                "service": 6
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 5.683,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 2,
+                "administrativeState": 0,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "UP",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "xbackend": 3,
+                "service": 3
+              },
+              "applicationReceives": {
+                "xbackend": 3,
+                "service": 3
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 7.168,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 2,
+                "administrativeState": 0,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "UP",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 6
+              },
+              "applicationReceives": {
+                "service": 6
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 8.38,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 2,
+                "administrativeState": 0,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "UP",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 6
+              },
+              "applicationReceives": {
+                "service": 6
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 9.362,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 2,
+                "administrativeState": 0,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "UP",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 6
+              },
+              "applicationReceives": {
+                "service": 6
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            },
+            {
+              "secondsFromMutation": 10.501,
+              "octaviaTargetsConverged": true,
+              "previousWorkerExited": true,
+              "haProxy": {
+                "operationalState": 2,
+                "administrativeState": 0,
+                "checkHealth": 3,
+                "latestCheckResult": 3,
+                "status": "UP",
+                "latestCheck": "L4OK",
+                "intervalSeconds": 2,
+                "fall": 2,
+                "rise": 2,
+                "configDisabled": false,
+                "sameActiveWorker": true,
+                "savedBeforeReload": {
+                  "operationalState": 0,
+                  "administrativeState": 5,
+                  "checkHealth": 3,
+                  "latestCheckResult": 3
+                }
+              },
+              "outcomes": {
+                "service": 5,
+                "xbackend": 1
+              },
+              "applicationReceives": {
+                "service": 5,
+                "xbackend": 1
+              },
+              "directOrigin": "xbackend",
+              "freshFrontendChannels": 6
+            }
+          ],
+          "gateway": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            }
+          },
+          "listener": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 3
+          },
+          "routes": {
+            "Control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Mixed": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+              },
+              "sameUIDAndSpec": true
+            },
+            "Secure": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+              },
+              "sameUIDAndSpec": true
+            }
+          },
+          "xBackendAncestors": {
+            "xbackend": [
+              {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted"
+                },
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "edge",
+                  "namespace": "grpc-xbackend"
+                }
+              }
+            ],
+            "secure": [
+              {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted"
+                },
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "name": "edge",
+                  "namespace": "grpc-xbackend"
+                }
+              }
+            ]
+          },
+          "pod": {
+            "labelMatches": true,
+            "ready": true,
+            "ipUnchanged": true
+          },
+          "octavia": {
+            "methods": {
+              "Control": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "service": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "service"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 3
+                  },
+                  "xbackend": {
+                    "protocol": "HTTP",
+                    "h2c": true,
+                    "tls": false,
+                    "alpn": [],
+                    "authenticatedName": null,
+                    "strictH2": false,
+                    "trustedCAConfigured": false,
+                    "activeMembers": [
+                      "xbackend"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              },
+              "Secure": {
+                "action": "REDIRECT_TO_POOL",
+                "rules": [
+                  "GRPC_CONTENT_TYPE",
+                  "PATH"
+                ],
+                "targets": {
+                  "secure": {
+                    "protocol": "HTTP",
+                    "h2c": false,
+                    "tls": true,
+                    "alpn": [
+                      "h2"
+                    ],
+                    "authenticatedName": "origin.example.test",
+                    "strictH2": true,
+                    "trustedCAConfigured": true,
+                    "activeMembers": [
+                      "secure"
+                    ],
+                    "disabledMembers": [],
+                    "poolProvisioningStatus": "ACTIVE",
+                    "monitor": {
+                      "type": "TCP",
+                      "status": "ACTIVE"
+                    },
+                    "monitorTiming": {
+                      "delay": 2,
+                      "timeout": 1,
+                      "max_retries": 2,
+                      "max_retries_down": 2
+                    },
+                    "weight": 1
+                  }
+                }
+              }
+            },
+            "activeConfigSHA256": "2a173bd1ef1335528424b1a8c5581b52ec2bacb70a7656027fe884bc5c056aec",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+          },
+          "secondsToConvergence": 3.375,
+          "secondsToDataPlane": 5.693,
+          "secondsToStableDataPlane": 10.518,
+          "haProxyBeforeTraffic": {
+            "operationalState": 2,
+            "administrativeState": 0,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "UP",
+            "latestCheck": "L4OK",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          },
+          "traffic": {
+            "Control": {
+              "requests": 1,
+              "outcomes": {
+                "service": 1
+              },
+              "applicationReceives": {
+                "service": 1
+              }
+            },
+            "Mixed": {
+              "requests": 160,
+              "outcomes": {
+                "service": 112,
+                "xbackend": 48
+              },
+              "applicationReceives": {
+                "service": 112,
+                "xbackend": 48
+              }
+            },
+            "Secure": {
+              "requests": 1,
+              "outcomes": {
+                "secure": 1
+              },
+              "applicationReceives": {
+                "secure": 1
+              },
+              "originTransportSecurity": "ssl"
+            }
+          },
+          "haProxyAfterTraffic": {
+            "operationalState": 2,
+            "administrativeState": 0,
+            "checkHealth": 3,
+            "latestCheckResult": 3,
+            "status": "UP",
+            "latestCheck": "L4OK",
+            "intervalSeconds": 2,
+            "fall": 2,
+            "rise": 2,
+            "configDisabled": false,
+            "sameActiveWorker": true,
+            "savedBeforeReload": {
+              "operationalState": 0,
+              "administrativeState": 5,
+              "checkHealth": 3,
+              "latestCheckResult": 3
+            }
+          }
+        }
+      },
+      "boundary": "Isolated envtest, Octavia WSGI and SQLAlchemy, installed Amphora agent routes, running HAProxy and gRPC servers. Local adapters provide cloud services and service control.",
+      "xBackendSpecs": {
+        "xbackend": {
+          "endpointSelector": {
+            "matchLabels": {
+              "wire-origin": "xbackend"
+            }
+          },
+          "port": {
+            "number": 44203
+          },
+          "protocol": "GRPC",
+          "tls": {
+            "mode": "None"
+          },
+          "type": "EndpointSelector"
+        },
+        "secure": {
+          "endpointSelector": {
+            "matchLabels": {
+              "wire-origin": "secure"
+            }
+          },
+          "port": {
+            "number": 35349
+          },
+          "protocol": "GRPC",
+          "tls": {
+            "mode": "ServerOnly",
+            "validation": {
+              "caCertificateRefs": [
+                {
+                  "group": "",
+                  "kind": "ConfigMap",
+                  "name": "origin-trust"
+                }
+              ],
+              "hostname": "origin.example.test"
+            }
+          },
+          "type": "EndpointSelector"
+        }
+      },
+      "controller": {
+        "manifestDigest": "sha256:9eecb97cae17873b3341cd2fa98e67572b8d2ae914460ce2a0032affda670a57",
+        "configDigest": "sha256:48ffa61fe66a01badb888a84e86f93555792e94d06869f071f3bee8c84589399",
+        "ociArchiveSHA256": "b06474722d6fe41e2c660c620f7577d51628546baa08514534a1976839cfc893",
+        "managerSHA256": "4644e9aa4171fe567692e463101c940e91d248f19b6c04463136bf28a37ededd",
+        "platform": "linux/amd64",
+        "sourceRevision": "892bc37a0f8892a15b0839a4979e9080bf541f74"
+      },
+      "rawReceiptSHA256": "b23e1d2c12d241ff019397a6764932bbd22a241812092ccde9d32d4283d8fabf"
+    }
+  }
+}
