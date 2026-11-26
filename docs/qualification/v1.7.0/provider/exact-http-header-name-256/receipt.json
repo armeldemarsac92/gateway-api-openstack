@@ -1,0 +1,1096 @@
+{
+  "previousNativeHTTP1": {
+    "sourceReceiptSHA256": "8b1a02848fd0a3ff2ef72cb74500954c0bc2860fea63e47fd5e40e9189363cc2",
+    "haproxySHA256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+    "protocol": "HTTP/1.1 over loopback",
+    "configCheckExit": 0,
+    "requests": [
+      {
+        "frontend": "parse_only",
+        "nameBytes": 7,
+        "value": "yes",
+        "status": 204,
+        "originHits": 0
+      },
+      {
+        "frontend": "parse_only",
+        "nameBytes": 255,
+        "value": "yes",
+        "status": 204,
+        "originHits": 0
+      },
+      {
+        "frontend": "parse_only",
+        "nameBytes": 256,
+        "value": "yes",
+        "status": 400,
+        "originHits": 0
+      },
+      {
+        "frontend": "exact",
+        "nameBytes": 7,
+        "value": "yes",
+        "status": 200,
+        "originHits": 1
+      },
+      {
+        "frontend": "exact",
+        "nameBytes": 255,
+        "value": "yes",
+        "status": 200,
+        "originHits": 1
+      },
+      {
+        "frontend": "exact",
+        "nameBytes": 256,
+        "value": "yes",
+        "status": 400,
+        "originHits": 0
+      },
+      {
+        "frontend": "exact",
+        "nameBytes": 255,
+        "value": "no",
+        "status": 404,
+        "originHits": 0
+      }
+    ]
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kubernetesVersion": "v1.36.2",
+      "octaviaAPIVersion": "v2.30",
+      "startedAt": "2026-11-26T00:06:44.781862+00:00",
+      "completedAt": "2026-11-26T00:10:35.618576+00:00",
+      "regionalDeploymentVerified": false,
+      "sourceReceiptSHA256": "858479dd9129c56dfef6e425f8982b0796d964dc7353db76711529868d1a82b5",
+      "controller": {
+        "sourceRevision": "1052c31a4db1137bb2e09d4cdbb2595c00c77ef1",
+        "managerSHA256": "3e80d9299f47db4f1d6e7cae14413198125c80425b4633f86ffc7954e8b2b61f",
+        "manifestDigest": "sha256:fdeabef3b75a7d1972815633fb2625cd1ca1ec0c8f96b3a9b7eb4402f48d2308",
+        "ociArchiveSHA256": "0bb688663586c1fe96cd0c0c9c6db9e01c41a2f289b071c6379d8ae7f5c415d8"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "agentDetails": {
+        "status": 200,
+        "http_header_name_256_v1": true
+      },
+      "phases": {
+        "enrolled": {
+          "regionalCapabilities": {
+            "backend_h2c_v1": true,
+            "fixed_http_responses_v1": true,
+            "grpc_content_type_v1": true,
+            "http_header_exact_v1": true,
+            "http_header_name_256_v1": true
+          },
+          "nativeDirectiveCount": 1,
+          "configSHA256": "5acb994a9851983c4d2b709fb275536c9eac4fc2c7ccc9a3f4532689f1a7790f",
+          "routes": {
+            "http": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "grpc": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            }
+          },
+          "exactRules": {
+            "control/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            },
+            "http/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            }
+          },
+          "traffic": {
+            "control/short": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/short": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/mixed-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/lower-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/case-in-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/partial-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/shortened-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/absent": {
+              "httpStatus": 200,
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/case-in-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/partial-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/shortened-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/absent": {
+              "grpcStatus": "OK",
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            }
+          }
+        },
+        "withdrawn": {
+          "regionalCapabilities": {
+            "backend_h2c_v1": true,
+            "fixed_http_responses_v1": true,
+            "grpc_content_type_v1": true,
+            "http_header_exact_v1": true,
+            "http_header_name_256_v1": false
+          },
+          "nativeDirectiveCount": 0,
+          "configSHA256": "3b99e7ca344766fc3429e0fbce104941b37cd3500b78f975f04f921455b3e1b0",
+          "routes": {
+            "http": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              },
+              "listener": {
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": false
+              }
+            },
+            "grpc": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              },
+              "listener": {
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": false
+              }
+            },
+            "control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            }
+          },
+          "exactRules": {
+            "control/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": false,
+              "backendH2C": true
+            },
+            "http/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": false,
+              "backendH2C": false
+            },
+            "grpc/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": false,
+              "backendH2C": true
+            }
+          },
+          "traffic": {
+            "control/short": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/closed": {
+              "transport": "ConnectionRefused",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": null,
+              "reservedRequests": 0,
+              "originRequests": 0
+            },
+            "grpc/closed": {
+              "grpcStatus": "UNAVAILABLE",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": null,
+              "reservedRequests": 0,
+              "originRequests": 0
+            }
+          }
+        },
+        "restored": {
+          "regionalCapabilities": {
+            "backend_h2c_v1": true,
+            "fixed_http_responses_v1": true,
+            "grpc_content_type_v1": true,
+            "http_header_exact_v1": true,
+            "http_header_name_256_v1": true
+          },
+          "nativeDirectiveCount": 1,
+          "configSHA256": "5acb994a9851983c4d2b709fb275536c9eac4fc2c7ccc9a3f4532689f1a7790f",
+          "routes": {
+            "http": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "grpc": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            }
+          },
+          "exactRules": {
+            "control/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            },
+            "http/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            }
+          },
+          "traffic": {
+            "control/short": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/short": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/mixed-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/lower-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/case-in-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/partial-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/shortened-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/absent": {
+              "httpStatus": 200,
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/case-in-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/partial-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/shortened-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/absent": {
+              "grpcStatus": "OK",
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            }
+          }
+        }
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kubernetesVersion": "v1.36.2",
+      "octaviaAPIVersion": "v2.30",
+      "startedAt": "2026-11-26T00:06:45.307632+00:00",
+      "completedAt": "2026-11-26T00:10:37.431995+00:00",
+      "regionalDeploymentVerified": false,
+      "sourceReceiptSHA256": "3c25b77edde6ba162effbfb35c83f0cc8905620e44201aeb783a591e0f83622a",
+      "controller": {
+        "sourceRevision": "1052c31a4db1137bb2e09d4cdbb2595c00c77ef1",
+        "managerSHA256": "3e80d9299f47db4f1d6e7cae14413198125c80425b4633f86ffc7954e8b2b61f",
+        "manifestDigest": "sha256:fdeabef3b75a7d1972815633fb2625cd1ca1ec0c8f96b3a9b7eb4402f48d2308",
+        "ociArchiveSHA256": "0bb688663586c1fe96cd0c0c9c6db9e01c41a2f289b071c6379d8ae7f5c415d8"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "agentDetails": {
+        "status": 200,
+        "http_header_name_256_v1": true
+      },
+      "phases": {
+        "enrolled": {
+          "regionalCapabilities": {
+            "backend_h2c_v1": true,
+            "fixed_http_responses_v1": true,
+            "grpc_content_type_v1": true,
+            "http_header_exact_v1": true,
+            "http_header_name_256_v1": true
+          },
+          "nativeDirectiveCount": 1,
+          "configSHA256": "4079e866f4cdaf92e5046c4fbc86b69546a576a6dab09eaa644a6b675d9be05e",
+          "routes": {
+            "http": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "grpc": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            }
+          },
+          "exactRules": {
+            "control/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            },
+            "http/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            }
+          },
+          "traffic": {
+            "control/short": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/short": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/mixed-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/lower-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/case-in-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/partial-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/shortened-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/absent": {
+              "httpStatus": 200,
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/case-in-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/partial-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/shortened-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/absent": {
+              "grpcStatus": "OK",
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            }
+          }
+        },
+        "withdrawn": {
+          "regionalCapabilities": {
+            "backend_h2c_v1": true,
+            "fixed_http_responses_v1": true,
+            "grpc_content_type_v1": true,
+            "http_header_exact_v1": true,
+            "http_header_name_256_v1": false
+          },
+          "nativeDirectiveCount": 0,
+          "configSHA256": "e51e31941af614afec69240b5176145856d45b470c7e5177706ab1ccae810ff3",
+          "routes": {
+            "http": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              },
+              "listener": {
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": false
+              }
+            },
+            "grpc": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              },
+              "listener": {
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": false
+              }
+            },
+            "control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            }
+          },
+          "exactRules": {
+            "control/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": false,
+              "backendH2C": true
+            },
+            "http/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": false,
+              "backendH2C": false
+            },
+            "grpc/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": false,
+              "backendH2C": true
+            }
+          },
+          "traffic": {
+            "control/short": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/closed": {
+              "transport": "ConnectionRefused",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": null,
+              "reservedRequests": 0,
+              "originRequests": 0
+            },
+            "grpc/closed": {
+              "grpcStatus": "UNAVAILABLE",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": null,
+              "reservedRequests": 0,
+              "originRequests": 0
+            }
+          }
+        },
+        "restored": {
+          "regionalCapabilities": {
+            "backend_h2c_v1": true,
+            "fixed_http_responses_v1": true,
+            "grpc_content_type_v1": true,
+            "http_header_exact_v1": true,
+            "http_header_name_256_v1": true
+          },
+          "nativeDirectiveCount": 1,
+          "configSHA256": "4079e866f4cdaf92e5046c4fbc86b69546a576a6dab09eaa644a6b675d9be05e",
+          "routes": {
+            "http": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "grpc": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            },
+            "control": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "nativeFrontend": true
+              }
+            }
+          },
+          "exactRules": {
+            "control/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            },
+            "http/select": {
+              "nameBytes": 256,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": false
+            },
+            "grpc/control": {
+              "nameBytes": 255,
+              "comparison": "EQUAL_TO",
+              "value": "Match,full",
+              "nativeComparisonHex": "4d617463682c66756c6c",
+              "nativeMatchLoaded": true,
+              "backendH2C": true
+            }
+          },
+          "traffic": {
+            "control/short": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/short": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/mixed-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "grpc/lower-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match,full",
+              "backend": "reserved",
+              "reservedRequests": 1,
+              "originRequests": 1
+            },
+            "http/case-in-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/partial-value": {
+              "httpStatus": 200,
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/shortened-name": {
+              "httpStatus": 200,
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "http/absent": {
+              "httpStatus": 200,
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/case-in-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/partial-value": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 256,
+              "sentValue": "Match",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/shortened-name": {
+              "grpcStatus": "OK",
+              "sentNameBytes": 255,
+              "sentValue": "Match,full",
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            },
+            "grpc/absent": {
+              "grpcStatus": "OK",
+              "sentNameBytes": null,
+              "sentValue": null,
+              "backend": "fallback",
+              "reservedRequests": 0,
+              "originRequests": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

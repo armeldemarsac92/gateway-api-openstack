@@ -1,0 +1,2536 @@
+{
+  "httpAndGRPC": {
+    "baseline": {
+      "qualification": "baseline",
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kubernetesVersion": "v1.36.2",
+      "controller": {
+        "sourceRevision": "adcc77aa0cc17bda1550d2cb376436a4e8c19f6b",
+        "sourceTree": "12ec2526d1575c08a49e80a31ba88f0392ec6426",
+        "managerSHA256": "eae3a66ce75d20c64fb0d22a746f7d03de78b917203d76b74c31e1cb1ee5be63"
+      },
+      "provider": {
+        "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "HAProxy": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1"
+      },
+      "MCS": {
+        "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+        "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+        "controllerServiceImportReadVerbs": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "apiVersion": "multicluster.x-k8s.io/v1beta1",
+        "status": {
+          "clusters": [
+            {
+              "cluster": "remote-east"
+            },
+            {
+              "cluster": "remote-west"
+            }
+          ],
+          "endpointSliceObjects": "Present"
+        },
+        "spec": {
+          "ipFamilies": [
+            "IPv4"
+          ],
+          "ports": [
+            {
+              "name": "http",
+              "port": 8080,
+              "protocol": "TCP"
+            }
+          ],
+          "type": "Headless"
+        },
+        "endpointSlices": [
+          {
+            "name": "echo",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+              "kubernetes.io/service-name": "echo"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.5"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 40733,
+                "protocol": "TCP"
+              }
+            ]
+          },
+          {
+            "name": "remote-east",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+              "multicluster.kubernetes.io/service-name": "echo",
+              "multicluster.kubernetes.io/source-cluster": "remote-east"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.6"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 43141,
+                "protocol": "TCP"
+              }
+            ]
+          },
+          {
+            "name": "remote-west",
+            "labels": {
+              "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+              "multicluster.kubernetes.io/service-name": "echo",
+              "multicluster.kubernetes.io/source-cluster": "remote-west"
+            },
+            "endpoints": [
+              {
+                "addresses": [
+                  "198.51.100.7"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true
+                }
+              }
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 42899,
+                "protocol": "TCP"
+              }
+            ]
+          }
+        ]
+      },
+      "accounts": {
+        "kubernetesReads": "controller ServiceAccount",
+        "octaviaReads": "fixture application project"
+      },
+      "boundary": "Local envtest and loopback VIPs, Octavia WSGI REST and SQLAlchemy, installed Amphora agent, active HAProxy and tagged applications. Cloud services and service control use fixture adapters. Probes start after each observed route and provider convergence. No TLS route in this fixture.",
+      "phases": {
+        "baseline": {
+          "referenceGrantsReadByControllerAccount": [
+            "http-service",
+            "http-serviceimport"
+          ],
+          "westEndpointReady": true,
+          "routes": {
+            "http": {
+              "generation": 1,
+              "sameUID": true,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/UnsupportedValue",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "resolvedRefsMessage": "backend ServiceImport must use ClusterSetIP"
+            }
+          },
+          "octaviaHTTP": {
+            "/service": {
+              "action": "REDIRECT_TO_POOL",
+              "targets": [
+                {
+                  "members": [
+                    [
+                      "198.51.100.5",
+                      40733
+                    ]
+                  ]
+                }
+              ]
+            },
+            "/import": {
+              "action": "FIXED_RESPONSE",
+              "targets": [
+                {
+                  "status": 500
+                }
+              ]
+            },
+            "/mixed": {
+              "action": "WEIGHTED_TARGETS",
+              "targets": [
+                {
+                  "members": [
+                    [
+                      "198.51.100.5",
+                      40733
+                    ]
+                  ],
+                  "weight": 3
+                },
+                {
+                  "status": 500,
+                  "weight": 1
+                }
+              ]
+            }
+          },
+          "activeHAProxyConfigSHA256": "725e92ac19ff587ee3c6301a47cb769d17c0ffa272b35eb619644bc5977bd632",
+          "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+          "secondsToConvergence": 14.176,
+          "traffic": {
+            "service": {
+              "completed": 2,
+              "http200ByOrigin": {
+                "local-service": 2,
+                "remote-east": 0,
+                "remote-west": 0
+              },
+              "http500WithoutOrigin": 0
+            },
+            "import": {
+              "completed": 4,
+              "http200ByOrigin": {
+                "local-service": 0,
+                "remote-east": 0,
+                "remote-west": 0
+              },
+              "http500WithoutOrigin": 4
+            },
+            "mixed": {
+              "completed": 64,
+              "http200ByOrigin": {
+                "local-service": 49,
+                "remote-east": 0,
+                "remote-west": 0
+              },
+              "http500WithoutOrigin": 15
+            }
+          }
+        }
+      },
+      "image": {
+        "manifestDigest": "sha256:57da7e227ebdcec74d232c3c4b50c72eef6777ff2101e0dd7378c2f4fcd8a9c4",
+        "configDigest": "sha256:01758a508e487512fb36a5e84e080215d3dda16cbe58d97531bd5fbb6b4cd6d1",
+        "ociArchiveSHA256": "6e9e092c9f4b3e37883b5bd98dae497e92181dbe8d815bd265f37735575630b7",
+        "managerSHA256": "eae3a66ce75d20c64fb0d22a746f7d03de78b917203d76b74c31e1cb1ee5be63",
+        "platform": "linux/amd64",
+        "sourceRevision": "adcc77aa0cc17bda1550d2cb376436a4e8c19f6b"
+      },
+      "providerArtifacts": {
+        "octavia": {
+          "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+        },
+        "octaviaLib": {
+          "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+        }
+      },
+      "HAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+      "rawReceiptSHA256": "5feba6b19f77bfc0806ba63d846cc8e0cf923c1f06b6d631c6873503b7284971"
+    },
+    "channels": {
+      "standard": {
+        "qualification": "headless",
+        "channel": "standard",
+        "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "kubernetesVersion": "v1.36.2",
+        "controller": {
+          "sourceRevision": "6a52d5a7d99f166a335775e9ba801cd04163a294",
+          "sourceTree": "083d4bc6e9607883b29c034001e05f4037e7e603",
+          "managerSHA256": "939a35ba9f9811d8fac478391d70ac40a571d032ed89f4e065acb7e6df5fe36d"
+        },
+        "provider": {
+          "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "HAProxy": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1"
+        },
+        "MCS": {
+          "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+          "controllerServiceImportReadVerbs": [
+            "get",
+            "list",
+            "watch"
+          ],
+          "apiVersion": "multicluster.x-k8s.io/v1beta1",
+          "status": {
+            "clusters": [
+              {
+                "cluster": "remote-east"
+              },
+              {
+                "cluster": "remote-west"
+              }
+            ],
+            "endpointSliceObjects": "Present"
+          },
+          "spec": {
+            "ipFamilies": [
+              "IPv4"
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 8080,
+                "protocol": "TCP"
+              },
+              {
+                "appProtocol": "kubernetes.io/h2c",
+                "name": "grpc",
+                "port": 8081,
+                "protocol": "TCP"
+              }
+            ],
+            "type": "Headless"
+          },
+          "endpointSlices": [
+            {
+              "name": "echo",
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+                "kubernetes.io/service-name": "echo"
+              },
+              "endpoints": [
+                {
+                  "addresses": [
+                    "198.51.100.5"
+                  ],
+                  "conditions": {
+                    "ready": true,
+                    "serving": true
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 40881,
+                  "protocol": "TCP"
+                },
+                {
+                  "name": "grpc",
+                  "port": 35183,
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            {
+              "name": "remote-east",
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+                "multicluster.kubernetes.io/service-name": "echo",
+                "multicluster.kubernetes.io/source-cluster": "remote-east"
+              },
+              "endpoints": [
+                {
+                  "addresses": [
+                    "198.51.100.6"
+                  ],
+                  "conditions": {
+                    "ready": true,
+                    "serving": true
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 42287,
+                  "protocol": "TCP"
+                },
+                {
+                  "name": "grpc",
+                  "port": 42843,
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            {
+              "name": "remote-west",
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+                "multicluster.kubernetes.io/service-name": "echo",
+                "multicluster.kubernetes.io/source-cluster": "remote-west"
+              },
+              "endpoints": [
+                {
+                  "addresses": [
+                    "198.51.100.7"
+                  ],
+                  "conditions": {
+                    "ready": true,
+                    "serving": true
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 39863,
+                  "protocol": "TCP"
+                },
+                {
+                  "name": "grpc",
+                  "port": 45871,
+                  "protocol": "TCP"
+                }
+              ]
+            }
+          ]
+        },
+        "accounts": {
+          "kubernetesReads": "controller ServiceAccount",
+          "octaviaReads": "fixture application project"
+        },
+        "boundary": "Local envtest and loopback VIPs, Octavia WSGI REST and SQLAlchemy, installed Amphora agent, active HAProxy and tagged applications. Cloud services and service control use fixture adapters. Probes start after each observed route and provider convergence. No TLS route in this fixture.",
+        "phases": {
+          "granted": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ],
+                      [
+                        "198.51.100.7",
+                        39863
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ],
+                      [
+                        "198.51.100.7",
+                        39863
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "c587c68acfb0dfd43037fdbb0ea81f9be06bf06b3a728a4773480b806ce424fc",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 33.041,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 8,
+                  "remote-west": 8
+                },
+                "http500WithoutOrigin": 0
+              },
+              "mixed": {
+                "completed": 64,
+                "http200ByOrigin": {
+                  "local-service": 46,
+                  "remote-east": 9,
+                  "remote-west": 9
+                },
+                "http500WithoutOrigin": 0
+              },
+              "grpc": {
+                "calls": 1,
+                "observed": {
+                  "grpcStatus": "OK",
+                  "body": "remote-east"
+                },
+                "origins": [
+                  {
+                    "backend": "remote-east",
+                    "protocol": "gRPC/h2c",
+                    "probe": "granted-grpc-select",
+                    "headers": []
+                  }
+                ]
+              }
+            }
+          },
+          "endpoint-disabled": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": false,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "3824347e00efb2d96286a5a66c20c151f0f251b5da761d252acc5c8faee3505c",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 6.345,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 16,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              }
+            }
+          },
+          "endpoint-restored": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ],
+                      [
+                        "198.51.100.7",
+                        39863
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ],
+                      [
+                        "198.51.100.7",
+                        39863
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "dfc411a285e6df31dc0149aeaf2acc3b982d67dbb9ed61501e4a8a6cfe6c0e61",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 6.36,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 8,
+                  "remote-west": 8
+                },
+                "http500WithoutOrigin": 0
+              }
+            }
+          },
+          "grant-withdrawn": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "False/RefNotPermitted",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "backend ServiceImport backend/echo is not permitted by a ReferenceGrant"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "FIXED_RESPONSE",
+                "targets": [
+                  {
+                    "status": 500
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "status": 500,
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "913651ed70fa02c6645b5f6b546c11cdeae0a85738053dd1ecec5c59b5330bf9",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 9.28,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 4,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 4
+              },
+              "mixed": {
+                "completed": 64,
+                "http200ByOrigin": {
+                  "local-service": 45,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 19
+              }
+            }
+          },
+          "grant-restored": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ],
+                      [
+                        "198.51.100.7",
+                        39863
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        40881
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        42287
+                      ],
+                      [
+                        "198.51.100.7",
+                        39863
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "dfc411a285e6df31dc0149aeaf2acc3b982d67dbb9ed61501e4a8a6cfe6c0e61",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 8.752,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 8,
+                  "remote-west": 8
+                },
+                "http500WithoutOrigin": 0
+              },
+              "mixed": {
+                "completed": 64,
+                "http200ByOrigin": {
+                  "local-service": 51,
+                  "remote-east": 7,
+                  "remote-west": 6
+                },
+                "http500WithoutOrigin": 0
+              }
+            }
+          }
+        },
+        "image": {
+          "manifestDigest": "sha256:a2ef2e3bdbda8db23567e577c8e51e00593a133d0f48878b3d91cb8a5ad49eb2",
+          "configDigest": "sha256:375690ca1ba2498393b49cbc4e54ca55c94d940dcec3d8d98309e4ac62f5ad03",
+          "ociArchiveSHA256": "090ed6f4c4d6b0ac5b6563bdcd67a69d094ed6600b9a19a3a078ba832af1780a",
+          "managerSHA256": "939a35ba9f9811d8fac478391d70ac40a571d032ed89f4e065acb7e6df5fe36d",
+          "platform": "linux/amd64",
+          "sourceRevision": "6a52d5a7d99f166a335775e9ba801cd04163a294"
+        },
+        "providerArtifacts": {
+          "octavia": {
+            "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+            "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+          },
+          "octaviaLib": {
+            "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+            "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+          }
+        },
+        "HAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+        "rawReceiptSHA256": "ec26d586ae309db712905de6e79480c691f72fb0e05d6808f27522f714f360e2"
+      },
+      "experimental": {
+        "qualification": "headless",
+        "channel": "experimental",
+        "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "kubernetesVersion": "v1.36.2",
+        "controller": {
+          "sourceRevision": "6a52d5a7d99f166a335775e9ba801cd04163a294",
+          "sourceTree": "083d4bc6e9607883b29c034001e05f4037e7e603",
+          "managerSHA256": "939a35ba9f9811d8fac478391d70ac40a571d032ed89f4e065acb7e6df5fe36d"
+        },
+        "provider": {
+          "octavia": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "HAProxy": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1"
+        },
+        "MCS": {
+          "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+          "controllerServiceImportReadVerbs": [
+            "get",
+            "list",
+            "watch"
+          ],
+          "apiVersion": "multicluster.x-k8s.io/v1beta1",
+          "status": {
+            "clusters": [
+              {
+                "cluster": "remote-east"
+              },
+              {
+                "cluster": "remote-west"
+              }
+            ],
+            "endpointSliceObjects": "Present"
+          },
+          "spec": {
+            "ipFamilies": [
+              "IPv4"
+            ],
+            "ports": [
+              {
+                "name": "http",
+                "port": 8080,
+                "protocol": "TCP"
+              },
+              {
+                "appProtocol": "kubernetes.io/h2c",
+                "name": "grpc",
+                "port": 8081,
+                "protocol": "TCP"
+              }
+            ],
+            "type": "Headless"
+          },
+          "endpointSlices": [
+            {
+              "name": "echo",
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+                "kubernetes.io/service-name": "echo"
+              },
+              "endpoints": [
+                {
+                  "addresses": [
+                    "198.51.100.5"
+                  ],
+                  "conditions": {
+                    "ready": true,
+                    "serving": true
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 44931,
+                  "protocol": "TCP"
+                },
+                {
+                  "name": "grpc",
+                  "port": 36183,
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            {
+              "name": "remote-east",
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+                "multicluster.kubernetes.io/service-name": "echo",
+                "multicluster.kubernetes.io/source-cluster": "remote-east"
+              },
+              "endpoints": [
+                {
+                  "addresses": [
+                    "198.51.100.6"
+                  ],
+                  "conditions": {
+                    "ready": true,
+                    "serving": true
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 43701,
+                  "protocol": "TCP"
+                },
+                {
+                  "name": "grpc",
+                  "port": 46251,
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            {
+              "name": "remote-west",
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "wire-mcs.local",
+                "multicluster.kubernetes.io/service-name": "echo",
+                "multicluster.kubernetes.io/source-cluster": "remote-west"
+              },
+              "endpoints": [
+                {
+                  "addresses": [
+                    "198.51.100.7"
+                  ],
+                  "conditions": {
+                    "ready": true,
+                    "serving": true
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 35703,
+                  "protocol": "TCP"
+                },
+                {
+                  "name": "grpc",
+                  "port": 33083,
+                  "protocol": "TCP"
+                }
+              ]
+            }
+          ]
+        },
+        "accounts": {
+          "kubernetesReads": "controller ServiceAccount",
+          "octaviaReads": "fixture application project"
+        },
+        "boundary": "Local envtest and loopback VIPs, Octavia WSGI REST and SQLAlchemy, installed Amphora agent, active HAProxy and tagged applications. Cloud services and service control use fixture adapters. Probes start after each observed route and provider convergence. No TLS route in this fixture.",
+        "phases": {
+          "granted": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ],
+                      [
+                        "198.51.100.7",
+                        35703
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ],
+                      [
+                        "198.51.100.7",
+                        35703
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "2daf5ec4a8beda320eeb91c512e21a458543ab2ab49e730bc19776ec91679d04",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 40.792,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 8,
+                  "remote-west": 8
+                },
+                "http500WithoutOrigin": 0
+              },
+              "mixed": {
+                "completed": 64,
+                "http200ByOrigin": {
+                  "local-service": 57,
+                  "remote-east": 4,
+                  "remote-west": 3
+                },
+                "http500WithoutOrigin": 0
+              },
+              "grpc": {
+                "calls": 1,
+                "observed": {
+                  "grpcStatus": "OK",
+                  "body": "remote-east"
+                },
+                "origins": [
+                  {
+                    "backend": "remote-east",
+                    "protocol": "gRPC/h2c",
+                    "probe": "granted-grpc-select",
+                    "headers": []
+                  }
+                ]
+              }
+            }
+          },
+          "endpoint-disabled": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": false,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "f7fae885919bc9f4cc53185976c3f1ca22c97f3737450985a70b7301bb8ff4a6",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 7.541,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 16,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              }
+            }
+          },
+          "endpoint-restored": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ],
+                      [
+                        "198.51.100.7",
+                        35703
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ],
+                      [
+                        "198.51.100.7",
+                        35703
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "cd5c5ad1e6cbafa29169df8bede77d1906d31553e9a178c6e559a3d2ec2757a6",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 7.432,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 8,
+                  "remote-west": 8
+                },
+                "http500WithoutOrigin": 0
+              }
+            }
+          },
+          "grant-withdrawn": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "False/RefNotPermitted",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "backend ServiceImport backend/echo is not permitted by a ReferenceGrant"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "FIXED_RESPONSE",
+                "targets": [
+                  {
+                    "status": 500
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "status": 500,
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "0ef701eebc2ffe8d17c5c4c9be69b2449ea5f48959e1ed50fe5fc12c5dad3c83",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 10.288,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 4,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 4
+              },
+              "mixed": {
+                "completed": 64,
+                "http200ByOrigin": {
+                  "local-service": 45,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 19
+              }
+            }
+          },
+          "grant-restored": {
+            "referenceGrantsReadByControllerAccount": [
+              "grpc-serviceimport",
+              "http-service",
+              "http-serviceimport"
+            ],
+            "westEndpointReady": true,
+            "routes": {
+              "http": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                },
+                "resolvedRefsMessage": "All backend references are resolved"
+              },
+              "grpc": {
+                "generation": 1,
+                "sameUID": true,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            },
+            "octaviaHTTP": {
+              "/service": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/import": {
+                "action": "REDIRECT_TO_POOL",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ],
+                      [
+                        "198.51.100.7",
+                        35703
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "/mixed": {
+                "action": "WEIGHTED_TARGETS",
+                "targets": [
+                  {
+                    "members": [
+                      [
+                        "198.51.100.5",
+                        44931
+                      ]
+                    ],
+                    "weight": 3
+                  },
+                  {
+                    "members": [
+                      [
+                        "198.51.100.6",
+                        43701
+                      ],
+                      [
+                        "198.51.100.7",
+                        35703
+                      ]
+                    ],
+                    "weight": 1
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "cd5c5ad1e6cbafa29169df8bede77d1906d31553e9a178c6e559a3d2ec2757a6",
+            "runningHAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "secondsToConvergence": 9.21,
+            "traffic": {
+              "service": {
+                "completed": 2,
+                "http200ByOrigin": {
+                  "local-service": 2,
+                  "remote-east": 0,
+                  "remote-west": 0
+                },
+                "http500WithoutOrigin": 0
+              },
+              "import": {
+                "completed": 16,
+                "http200ByOrigin": {
+                  "local-service": 0,
+                  "remote-east": 8,
+                  "remote-west": 8
+                },
+                "http500WithoutOrigin": 0
+              },
+              "mixed": {
+                "completed": 64,
+                "http200ByOrigin": {
+                  "local-service": 43,
+                  "remote-east": 11,
+                  "remote-west": 10
+                },
+                "http500WithoutOrigin": 0
+              }
+            }
+          }
+        },
+        "image": {
+          "manifestDigest": "sha256:a2ef2e3bdbda8db23567e577c8e51e00593a133d0f48878b3d91cb8a5ad49eb2",
+          "configDigest": "sha256:375690ca1ba2498393b49cbc4e54ca55c94d940dcec3d8d98309e4ac62f5ad03",
+          "ociArchiveSHA256": "090ed6f4c4d6b0ac5b6563bdcd67a69d094ed6600b9a19a3a078ba832af1780a",
+          "managerSHA256": "939a35ba9f9811d8fac478391d70ac40a571d032ed89f4e065acb7e6df5fe36d",
+          "platform": "linux/amd64",
+          "sourceRevision": "6a52d5a7d99f166a335775e9ba801cd04163a294"
+        },
+        "providerArtifacts": {
+          "octavia": {
+            "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+            "wheelSHA256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400"
+          },
+          "octaviaLib": {
+            "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+            "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+          }
+        },
+        "HAProxySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+        "rawReceiptSHA256": "346ab45072f8eea4fe78aacc5e4d6a808423835ca9b0887e43fd4d6671229f0d"
+      }
+    }
+  },
+  "tls": {
+    "baseline": {
+      "channel": "standard",
+      "predecessor": true,
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "gatewayAPIBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "TLSRouteSchemaSHA256": "124cbb8830492ea87320c33d6dc1a257171fedf9ba0c9922971488d6a38bbd65",
+      "kubernetesVersion": "v1.36.2",
+      "controller": {
+        "sourceRevision": "adcc77aa0cc17bda1550d2cb376436a4e8c19f6b",
+        "manifestDigest": "sha256:57da7e227ebdcec74d232c3c4b50c72eef6777ff2101e0dd7378c2f4fcd8a9c4",
+        "configDigest": "sha256:01758a508e487512fb36a5e84e080215d3dda16cbe58d97531bd5fbb6b4cd6d1",
+        "managerSHA256": "eae3a66ce75d20c64fb0d22a746f7d03de78b917203d76b74c31e1cb1ee5be63"
+      },
+      "octavia": {
+        "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+        "version": "19.0.1.dev109",
+        "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+        "filesVerified": 674
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+        "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+      },
+      "MCS": {
+        "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+        "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+        "apiVersion": "multicluster.x-k8s.io/v1beta1",
+        "type": "Headless",
+        "endpointSliceObjects": "Present",
+        "controllerReadVerbs": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "namedPort": {
+          "name": "tls",
+          "port": 18443,
+          "protocol": "TCP"
+        }
+      },
+      "regionalCapabilities": {
+        "tcp_connection_rejection_v1": false,
+        "tls_sni_passthrough_v1": true,
+        "tls_sni_passthrough_weighted_pools_v1": true,
+        "tls_sni_weighted_pools_v1": true
+      },
+      "routeWeights": {
+        "service": 3,
+        "import": 1
+      },
+      "wireSamplesPerPhase": 256,
+      "amphoraAgentRequests": {
+        "GET details 200": 9,
+        "GET info 200": 8,
+        "PUT haproxy 202": 8,
+        "PUT reload 202": 8
+      },
+      "tcpMemberBatchCallbacks": 0,
+      "phases": {
+        "predecessor": {
+          "kubernetes": {
+            "generation": 1,
+            "sameTLSRoute": true,
+            "sameReferenceGrant": true,
+            "sameServiceImport": true,
+            "importedReadyEndpoints": 1,
+            "routeConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/UnsupportedValue",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            },
+            "gatewayConditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listenerAttachedRoutes": 1,
+            "listenerConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          },
+          "octavia": {
+            "listener": {
+              "protocol": "TCP",
+              "port": 9443,
+              "tlsTermination": false
+            },
+            "action": "WEIGHTED_TARGETS",
+            "rule": {
+              "type": "TLS_SNI",
+              "operator": "EQUAL_TO",
+              "value": "mixed.echo.example.test"
+            },
+            "distinctTargetPools": 2,
+            "targets": [
+              {
+                "weight": 3,
+                "enabled": true,
+                "members": {
+                  "service": 1
+                },
+                "protocol": "TCP"
+              },
+              {
+                "weight": 1,
+                "enabled": false,
+                "members": {},
+                "protocol": "TCP"
+              }
+            ]
+          },
+          "HAProxy": {
+            "configSHA256": "7aacd5527fa48cd802b7cc98cebcfc5bece8703c11e86fcddee670671a82d2b6",
+            "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+            "weightedDrawSlots": 4
+          },
+          "secondsToConverge": 19.249,
+          "traffic": {
+            "service": 192,
+            "import": 0,
+            "closed": 64
+          },
+          "origins": {
+            "service": {
+              "tcpAccepts": 192,
+              "tlsHandshakes": 192,
+              "echoes": 192,
+              "resumed": 0
+            },
+            "import": {
+              "tcpAccepts": 0,
+              "tlsHandshakes": 0,
+              "echoes": 0,
+              "resumed": 0
+            }
+          },
+          "directOriginProbe": {
+            "service": "service",
+            "import": "import"
+          }
+        }
+      },
+      "boundary": "Local Kubernetes envtest, Octavia REST and SQLAlchemy, Amphora agent and active HAProxy with two TLS origins. Cloud identity, Neutron, Amphora transport and service control use local adapters. The test writes synthetic MCS objects to Kubernetes.",
+      "rawReceiptSHA256": "ec1aab9ab568f785c66bd5c1b1db653f1871f17ebf4e36a2e96ef9f7e28cfb03"
+    },
+    "channels": {
+      "standard": {
+        "channel": "standard",
+        "predecessor": false,
+        "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "gatewayAPIBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "TLSRouteSchemaSHA256": "124cbb8830492ea87320c33d6dc1a257171fedf9ba0c9922971488d6a38bbd65",
+        "kubernetesVersion": "v1.36.2",
+        "controller": {
+          "sourceRevision": "6a52d5a7d99f166a335775e9ba801cd04163a294",
+          "manifestDigest": "sha256:a2ef2e3bdbda8db23567e577c8e51e00593a133d0f48878b3d91cb8a5ad49eb2",
+          "configDigest": "sha256:375690ca1ba2498393b49cbc4e54ca55c94d940dcec3d8d98309e4ac62f5ad03",
+          "managerSHA256": "939a35ba9f9811d8fac478391d70ac40a571d032ed89f4e065acb7e6df5fe36d"
+        },
+        "octavia": {
+          "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "version": "19.0.1.dev109",
+          "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "filesVerified": 674
+        },
+        "octaviaLib": {
+          "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "version": "3.12.1.dev22",
+          "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "filesVerified": 24
+        },
+        "HAProxy": {
+          "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+          "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+        },
+        "MCS": {
+          "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+          "apiVersion": "multicluster.x-k8s.io/v1beta1",
+          "type": "Headless",
+          "endpointSliceObjects": "Present",
+          "controllerReadVerbs": [
+            "get",
+            "list",
+            "watch"
+          ],
+          "namedPort": {
+            "name": "tls",
+            "port": 18443,
+            "protocol": "TCP"
+          }
+        },
+        "regionalCapabilities": {
+          "tcp_connection_rejection_v1": false,
+          "tls_sni_passthrough_v1": true,
+          "tls_sni_passthrough_weighted_pools_v1": true,
+          "tls_sni_weighted_pools_v1": true
+        },
+        "routeWeights": {
+          "service": 3,
+          "import": 1
+        },
+        "wireSamplesPerPhase": 256,
+        "amphoraAgentRequests": {
+          "GET details 200": 31,
+          "GET info 200": 30,
+          "PUT haproxy 202": 30,
+          "PUT reload 202": 30
+        },
+        "tcpMemberBatchCallbacks": 0,
+        "phases": {
+          "ready": {
+            "kubernetes": {
+              "generation": 1,
+              "sameTLSRoute": true,
+              "sameReferenceGrant": true,
+              "sameServiceImport": true,
+              "importedReadyEndpoints": 1,
+              "routeConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              },
+              "gatewayConditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listenerAttachedRoutes": 1,
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "octavia": {
+              "listener": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false
+              },
+              "action": "REDIRECT_TO_POOL",
+              "rule": {
+                "type": "TLS_SNI",
+                "operator": "EQUAL_TO",
+                "value": "mixed.echo.example.test"
+              },
+              "distinctTargetPools": 1,
+              "targets": [
+                {
+                  "enabled": true,
+                  "members": {
+                    "service": 3,
+                    "import": 1
+                  },
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            "HAProxy": {
+              "configSHA256": "ea78f74726c23c14f78ad7828a4838b30eaa791bbd4555ba09319e2902858edd",
+              "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+              "weightedDrawSlots": 0
+            },
+            "secondsToConverge": 17.51,
+            "traffic": {
+              "service": 192,
+              "import": 64,
+              "closed": 0
+            },
+            "origins": {
+              "service": {
+                "tcpAccepts": 192,
+                "tlsHandshakes": 192,
+                "echoes": 192,
+                "resumed": 0
+              },
+              "import": {
+                "tcpAccepts": 64,
+                "tlsHandshakes": 64,
+                "echoes": 64,
+                "resumed": 0
+              }
+            },
+            "directOriginProbe": {
+              "service": "service",
+              "import": "import"
+            }
+          },
+          "empty": {
+            "kubernetes": {
+              "generation": 1,
+              "sameTLSRoute": true,
+              "sameReferenceGrant": true,
+              "sameServiceImport": true,
+              "importedReadyEndpoints": 0,
+              "routeConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              },
+              "gatewayConditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listenerAttachedRoutes": 1,
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "octavia": {
+              "listener": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false
+              },
+              "action": "WEIGHTED_TARGETS",
+              "rule": {
+                "type": "TLS_SNI",
+                "operator": "EQUAL_TO",
+                "value": "mixed.echo.example.test"
+              },
+              "distinctTargetPools": 2,
+              "targets": [
+                {
+                  "weight": 3,
+                  "enabled": true,
+                  "members": {
+                    "service": 1
+                  },
+                  "protocol": "TCP"
+                },
+                {
+                  "weight": 1,
+                  "enabled": false,
+                  "members": {},
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            "HAProxy": {
+              "configSHA256": "8e0345565ee56c22ec0336f1804ef0e18081f8670fce38f72739fa9bc8b101f2",
+              "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+              "weightedDrawSlots": 4
+            },
+            "secondsToConverge": 17.609,
+            "traffic": {
+              "service": 196,
+              "import": 0,
+              "closed": 60
+            },
+            "origins": {
+              "service": {
+                "tcpAccepts": 196,
+                "tlsHandshakes": 196,
+                "echoes": 196,
+                "resumed": 0
+              },
+              "import": {
+                "tcpAccepts": 0,
+                "tlsHandshakes": 0,
+                "echoes": 0,
+                "resumed": 0
+              }
+            },
+            "directOriginProbe": {
+              "service": "service",
+              "import": "import"
+            }
+          },
+          "restored": {
+            "kubernetes": {
+              "generation": 1,
+              "sameTLSRoute": true,
+              "sameReferenceGrant": true,
+              "sameServiceImport": true,
+              "importedReadyEndpoints": 1,
+              "routeConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              },
+              "gatewayConditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listenerAttachedRoutes": 1,
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "octavia": {
+              "listener": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false
+              },
+              "action": "REDIRECT_TO_POOL",
+              "rule": {
+                "type": "TLS_SNI",
+                "operator": "EQUAL_TO",
+                "value": "mixed.echo.example.test"
+              },
+              "distinctTargetPools": 1,
+              "targets": [
+                {
+                  "enabled": true,
+                  "members": {
+                    "service": 3,
+                    "import": 1
+                  },
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            "HAProxy": {
+              "configSHA256": "6f8472bf8daa4070fcfc9a704aa1351967f65283b82888d76e4d8bd574c73082",
+              "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+              "weightedDrawSlots": 0
+            },
+            "secondsToConverge": 27.376,
+            "traffic": {
+              "service": 192,
+              "import": 64,
+              "closed": 0
+            },
+            "origins": {
+              "service": {
+                "tcpAccepts": 192,
+                "tlsHandshakes": 192,
+                "echoes": 192,
+                "resumed": 0
+              },
+              "import": {
+                "tcpAccepts": 64,
+                "tlsHandshakes": 64,
+                "echoes": 64,
+                "resumed": 0
+              }
+            },
+            "directOriginProbe": {
+              "service": "service",
+              "import": "import"
+            }
+          }
+        },
+        "boundary": "Local Kubernetes envtest, Octavia REST and SQLAlchemy, Amphora agent and active HAProxy with two TLS origins. Cloud identity, Neutron, Amphora transport and service control use local adapters. The test writes synthetic MCS objects to Kubernetes.",
+        "rawReceiptSHA256": "d3741be7b3f984d065ae7ca8f4450c47760c87e599e1efe60e102d9973cd4b05"
+      },
+      "experimental": {
+        "channel": "experimental",
+        "predecessor": false,
+        "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "TLSRouteSchemaSHA256": "f82d91d446f9b4c9c1a88b9714080f893bae2dd735913257f67f8361a932b34a",
+        "kubernetesVersion": "v1.36.2",
+        "controller": {
+          "sourceRevision": "6a52d5a7d99f166a335775e9ba801cd04163a294",
+          "manifestDigest": "sha256:a2ef2e3bdbda8db23567e577c8e51e00593a133d0f48878b3d91cb8a5ad49eb2",
+          "configDigest": "sha256:375690ca1ba2498393b49cbc4e54ca55c94d940dcec3d8d98309e4ac62f5ad03",
+          "managerSHA256": "939a35ba9f9811d8fac478391d70ac40a571d032ed89f4e065acb7e6df5fe36d"
+        },
+        "octavia": {
+          "revision": "300b2638c072c10f9f1e59403eedb792b9cd98a5",
+          "version": "19.0.1.dev109",
+          "sha256": "676774cd7833b07fe77d5f08fa7f7920bb0bac29bba14480f22540416ebea400",
+          "filesVerified": 674
+        },
+        "octaviaLib": {
+          "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+          "version": "3.12.1.dev22",
+          "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+          "filesVerified": 24
+        },
+        "HAProxy": {
+          "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+          "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+        },
+        "MCS": {
+          "revision": "32672de8605f9719b9220992c75cb263ba6f3746",
+          "crdSHA256": "648c8b9c0cd33a7e678d35c5cfc402cfef64c8a82946fb08f76097b875a3b82a",
+          "apiVersion": "multicluster.x-k8s.io/v1beta1",
+          "type": "Headless",
+          "endpointSliceObjects": "Present",
+          "controllerReadVerbs": [
+            "get",
+            "list",
+            "watch"
+          ],
+          "namedPort": {
+            "name": "tls",
+            "port": 18443,
+            "protocol": "TCP"
+          }
+        },
+        "regionalCapabilities": {
+          "tcp_connection_rejection_v1": false,
+          "tls_sni_passthrough_v1": true,
+          "tls_sni_passthrough_weighted_pools_v1": true,
+          "tls_sni_weighted_pools_v1": true
+        },
+        "routeWeights": {
+          "service": 3,
+          "import": 1
+        },
+        "wireSamplesPerPhase": 256,
+        "amphoraAgentRequests": {
+          "GET details 200": 31,
+          "GET info 200": 30,
+          "PUT haproxy 202": 30,
+          "PUT reload 202": 30
+        },
+        "tcpMemberBatchCallbacks": 0,
+        "phases": {
+          "ready": {
+            "kubernetes": {
+              "generation": 1,
+              "sameTLSRoute": true,
+              "sameReferenceGrant": true,
+              "sameServiceImport": true,
+              "importedReadyEndpoints": 1,
+              "routeConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              },
+              "gatewayConditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listenerAttachedRoutes": 1,
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "octavia": {
+              "listener": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false
+              },
+              "action": "REDIRECT_TO_POOL",
+              "rule": {
+                "type": "TLS_SNI",
+                "operator": "EQUAL_TO",
+                "value": "mixed.echo.example.test"
+              },
+              "distinctTargetPools": 1,
+              "targets": [
+                {
+                  "enabled": true,
+                  "members": {
+                    "service": 3,
+                    "import": 1
+                  },
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            "HAProxy": {
+              "configSHA256": "a3fe5c99279b6e3cf217ff78e1d6923bc28853ac6cfed4ec1e36147124dac0e5",
+              "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+              "weightedDrawSlots": 0
+            },
+            "secondsToConverge": 20.412,
+            "traffic": {
+              "service": 192,
+              "import": 64,
+              "closed": 0
+            },
+            "origins": {
+              "service": {
+                "tcpAccepts": 192,
+                "tlsHandshakes": 192,
+                "echoes": 192,
+                "resumed": 0
+              },
+              "import": {
+                "tcpAccepts": 64,
+                "tlsHandshakes": 64,
+                "echoes": 64,
+                "resumed": 0
+              }
+            },
+            "directOriginProbe": {
+              "service": "service",
+              "import": "import"
+            }
+          },
+          "empty": {
+            "kubernetes": {
+              "generation": 1,
+              "sameTLSRoute": true,
+              "sameReferenceGrant": true,
+              "sameServiceImport": true,
+              "importedReadyEndpoints": 0,
+              "routeConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              },
+              "gatewayConditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listenerAttachedRoutes": 1,
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "octavia": {
+              "listener": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false
+              },
+              "action": "WEIGHTED_TARGETS",
+              "rule": {
+                "type": "TLS_SNI",
+                "operator": "EQUAL_TO",
+                "value": "mixed.echo.example.test"
+              },
+              "distinctTargetPools": 2,
+              "targets": [
+                {
+                  "weight": 3,
+                  "enabled": true,
+                  "members": {
+                    "service": 1
+                  },
+                  "protocol": "TCP"
+                },
+                {
+                  "weight": 1,
+                  "enabled": false,
+                  "members": {},
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            "HAProxy": {
+              "configSHA256": "045b885b615c824ed50dd5925038d2479bc1f886cd24d4ede650b1e5e90ca134",
+              "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+              "weightedDrawSlots": 4
+            },
+            "secondsToConverge": 18.357,
+            "traffic": {
+              "service": 196,
+              "import": 0,
+              "closed": 60
+            },
+            "origins": {
+              "service": {
+                "tcpAccepts": 196,
+                "tlsHandshakes": 196,
+                "echoes": 196,
+                "resumed": 0
+              },
+              "import": {
+                "tcpAccepts": 0,
+                "tlsHandshakes": 0,
+                "echoes": 0,
+                "resumed": 0
+              }
+            },
+            "directOriginProbe": {
+              "service": "service",
+              "import": "import"
+            }
+          },
+          "restored": {
+            "kubernetes": {
+              "generation": 1,
+              "sameTLSRoute": true,
+              "sameReferenceGrant": true,
+              "sameServiceImport": true,
+              "importedReadyEndpoints": 1,
+              "routeConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              },
+              "gatewayConditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listenerAttachedRoutes": 1,
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            },
+            "octavia": {
+              "listener": {
+                "protocol": "TCP",
+                "port": 9443,
+                "tlsTermination": false
+              },
+              "action": "REDIRECT_TO_POOL",
+              "rule": {
+                "type": "TLS_SNI",
+                "operator": "EQUAL_TO",
+                "value": "mixed.echo.example.test"
+              },
+              "distinctTargetPools": 1,
+              "targets": [
+                {
+                  "enabled": true,
+                  "members": {
+                    "service": 3,
+                    "import": 1
+                  },
+                  "protocol": "TCP"
+                }
+              ]
+            },
+            "HAProxy": {
+              "configSHA256": "356fd753edf80e4ff736ed385145c0e91574596e85ee1525122a4ff586f35787",
+              "binarySHA256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd",
+              "weightedDrawSlots": 0
+            },
+            "secondsToConverge": 27.605,
+            "traffic": {
+              "service": 192,
+              "import": 64,
+              "closed": 0
+            },
+            "origins": {
+              "service": {
+                "tcpAccepts": 192,
+                "tlsHandshakes": 192,
+                "echoes": 192,
+                "resumed": 0
+              },
+              "import": {
+                "tcpAccepts": 64,
+                "tlsHandshakes": 64,
+                "echoes": 64,
+                "resumed": 0
+              }
+            },
+            "directOriginProbe": {
+              "service": "service",
+              "import": "import"
+            }
+          }
+        },
+        "boundary": "Local Kubernetes envtest, Octavia REST and SQLAlchemy, Amphora agent and active HAProxy with two TLS origins. Cloud identity, Neutron, Amphora transport and service control use local adapters. The test writes synthetic MCS objects to Kubernetes.",
+        "rawReceiptSHA256": "633f597a4cecdff176cec7e5f9bd6a6392898a9543d32e1a52b737ca70814385"
+      }
+    }
+  }
+}

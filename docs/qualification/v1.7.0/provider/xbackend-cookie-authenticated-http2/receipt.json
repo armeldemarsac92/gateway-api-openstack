@@ -1,0 +1,382 @@
+{
+  "sourceRevision": "b01646187b1d31b50ee9df06883cd84aa5a084bf",
+  "image": "sha256:94ad74bcb15a76564694d027292fa11a21065f4450f8cd27de40d5e2d4c832be",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "runs": {
+    "serverOnly": {
+      "channel": "experimental",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "runningControllerSHA256": "6823fc58f1f240697f55cb21b637916007f7960ac131f6b29cdb1e2805c447a0",
+      "octavia": {
+        "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+        "version": "19.0.1.dev95",
+        "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "regionalCapabilities": [
+        "backend_tls_h2_alpn_v1",
+        "backend_tls_hostname_v1",
+        "http_cookie_name_v1"
+      ],
+      "controllerFlags": [
+        "--octavia-backend-tls-policy",
+        "--octavia-xbackend-session-persistence"
+      ],
+      "fixture": "isolated native Kubernetes 1.36.2 API server and etcd, with fixture Ready Pod objects",
+      "backendBoundary": "Two real local TLS/HTTP2 origins selected by Pod labels, alongside an independent HTTP/1.1 Service origin. Frontend requests use HTTP/1.1.",
+      "cloudBoundary": "Installed Octavia REST and SQLAlchemy DB, HTTPS Barbican, native Amphora rendering and HAProxy. Keystone, Neutron, Octavia RPC completion and Amphora agent transport are fixture boundaries.",
+      "barbicanVersion": "23.0.0",
+      "kubernetesVersion": "v1.36.2",
+      "xBackendCRDDiscovered": true,
+      "originSHA256": "7adf76c967c6b3b463eee70f91fdfbd9302fa78b3c7672e3453a1e1a3e4b80af",
+      "phases": {
+        "configured": {
+          "kubernetes": {
+            "gateway": "True/Programmed",
+            "attachedRoutes": 2,
+            "routes": {
+              "ordinary": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              },
+              "reports": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                  "gateway-api-openstack.github.io/XBackendCookieConfiguration": "True/Observed",
+                  "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+                }
+              }
+            },
+            "xbackend": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted"
+              }
+            }
+          },
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 1,
+                "tlsEnabled": false,
+                "namedCookieConfigured": false,
+                "nativeNamedCookieDirective": false
+              },
+              "reports": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 2,
+                "tlsEnabled": true,
+                "namedCookieConfigured": true,
+                "nativeNamedCookieDirective": true,
+                "strictHostnameAndSNI": true,
+                "verificationRequired": true,
+                "trustedCAReadbackMatched": true,
+                "requiredALPN": "h2",
+                "clientCertificateConfigured": false,
+                "poolFingerprint": "681bc95a7343c33b2c53fed66d35784a74504ec867b4efe7dca9b5f2404dde9d"
+              }
+            },
+            "activeHAProxyConfigSHA256": "66c6898ff88fd0008b7f66d1e029d19ee09dfc71cc65bef2761aa6a91891e8db",
+            "HAProxyReloads": 3
+          },
+          "traffic": {
+            "ordinary": {
+              "status": 200,
+              "requests": 3,
+              "originProtocol": "HTTP/1.1",
+              "cookieIssued": false
+            },
+            "reports": {
+              "status": 200,
+              "freshRequests": {
+                "a": 4,
+                "b": 4
+              },
+              "originProtocol": "HTTP/2.0",
+              "originALPN": "h2",
+              "originSNIMatched": true,
+              "cookieIssued": true,
+              "configuredCookieNameMatched": true,
+              "hostOnly": true,
+              "path": "/",
+              "lifetime": "Session",
+              "replayRequestsPerIssuer": {
+                "a": 6,
+                "b": 6
+              }
+            }
+          }
+        },
+        "trustReplaced": {
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 1,
+                "tlsEnabled": false,
+                "namedCookieConfigured": false,
+                "nativeNamedCookieDirective": false
+              },
+              "reports": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 2,
+                "tlsEnabled": true,
+                "namedCookieConfigured": true,
+                "nativeNamedCookieDirective": true,
+                "strictHostnameAndSNI": true,
+                "verificationRequired": true,
+                "trustedCAReadbackMatched": true,
+                "requiredALPN": "h2",
+                "clientCertificateConfigured": false,
+                "poolFingerprint": "681bc95a7343c33b2c53fed66d35784a74504ec867b4efe7dca9b5f2404dde9d"
+              }
+            },
+            "activeHAProxyConfigSHA256": "68817bec1ecd4fa2f5986ce27dc7faaab86b919955b3feb2cbed2f4487566001",
+            "HAProxyReloads": 7
+          },
+          "traffic": {
+            "ordinary": {
+              "status": 200,
+              "requests": 3,
+              "originProtocol": "HTTP/1.1",
+              "cookieIssued": false
+            },
+            "freshAndBothReplayStatuses": [
+              503,
+              503,
+              503
+            ]
+          }
+        },
+        "trustRestored": {
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 1,
+                "tlsEnabled": false,
+                "namedCookieConfigured": false,
+                "nativeNamedCookieDirective": false
+              },
+              "reports": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 2,
+                "tlsEnabled": true,
+                "namedCookieConfigured": true,
+                "nativeNamedCookieDirective": true,
+                "strictHostnameAndSNI": true,
+                "verificationRequired": true,
+                "trustedCAReadbackMatched": true,
+                "requiredALPN": "h2",
+                "clientCertificateConfigured": false,
+                "poolFingerprint": "681bc95a7343c33b2c53fed66d35784a74504ec867b4efe7dca9b5f2404dde9d"
+              }
+            },
+            "activeHAProxyConfigSHA256": "99cedfd05372b184d86aa137f2e31ec90a54c48af781896ba0d1b3caa16bdd8b",
+            "HAProxyReloads": 11
+          },
+          "traffic": {
+            "ordinary": {
+              "status": 200,
+              "requests": 3,
+              "originProtocol": "HTTP/1.1",
+              "cookieIssued": false
+            },
+            "reports": {
+              "status": 200,
+              "replayRequestsPerIssuer": {
+                "a": 6,
+                "b": 6
+              }
+            }
+          }
+        }
+      },
+      "runReceiptSHA256": "a2092998ffce1f20d4ee05cff23f4d61c2c4963277d23a8635e87bb84467a639"
+    },
+    "clientAndServer": {
+      "channel": "experimental",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "runningControllerSHA256": "6823fc58f1f240697f55cb21b637916007f7960ac131f6b29cdb1e2805c447a0",
+      "octavia": {
+        "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+        "version": "19.0.1.dev95",
+        "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "regionalCapabilities": [
+        "backend_tls_h2_alpn_v1",
+        "backend_tls_hostname_v1",
+        "http_cookie_name_v1"
+      ],
+      "boundary": "Native isolated Kubernetes API, HTTPS Barbican, installed Octavia REST and Amphora rendering, HAProxy, and a Go mutual TLS origin. Ready Pods and remaining cloud transport are fixtures.",
+      "backendFixtureSHA256": "ee3e5f8548c01d1e36d5374f9d6e8577c58002ca3fc04b41f1e1e2a2bc57eb1e",
+      "enrollment": {
+        "exactSecretRevisionAndPKCS12Readback": true,
+        "purpose": "xbackend-client"
+      },
+      "directOrigin": {
+        "verifiedClientCertificateHTTPStatus": 200,
+        "absentClientCertificateTLSRejected": true
+      },
+      "kubernetes": {
+        "gateway": "True/Programmed",
+        "attachedRoutes": 2,
+        "routes": {
+          "ordinary": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "reports": {
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/XBackendCookieConfiguration": "True/Observed",
+              "gateway-api-openstack.github.io/XBackendTransportConfiguration": "True/Observed"
+            }
+          }
+        },
+        "xbackend": {
+          "generation": 2,
+          "conditions": {
+            "Accepted": "True/Accepted"
+          }
+        }
+      },
+      "provider": {
+        "poolProtocol": "HTTP",
+        "activeMembers": 1,
+        "activeHAProxyConfigSHA256": "f4f1986991351177ea13b0a988305b1ac2cf1c2d7b0fae635fcfcccca6117246",
+        "enrolledClientReferenceMatched": true,
+        "strictHostnameAndSNI": true,
+        "verificationRequired": true,
+        "nativeClientCertificate": true,
+        "requiredALPN": "h2",
+        "nativeNamedCookieDirective": true
+      },
+      "traffic": {
+        "protected": {
+          "status": 200,
+          "authenticatedOriginReached": true,
+          "originProtocol": "HTTP/2.0",
+          "originALPN": "h2",
+          "originSNIMatched": true,
+          "originVerifiedClientIdentityMatched": true,
+          "configuredCookieNameMatched": true,
+          "issuerReplayRequests": 3
+        },
+        "ordinary": {
+          "status": 200,
+          "requests": 3,
+          "originProtocol": "HTTP/1.1",
+          "cookieIssued": false
+        }
+      },
+      "runReceiptSHA256": "ed617e0dd60a423c58c1581bada750de62d040d2d1b9b277d91396a7e578744d"
+    },
+    "standardControl": {
+      "channel": "standard",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "runningControllerSHA256": "6823fc58f1f240697f55cb21b637916007f7960ac131f6b29cdb1e2805c447a0",
+      "octavia": {
+        "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+        "version": "19.0.1.dev95",
+        "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "regionalCapabilities": [],
+      "controllerFlags": [],
+      "fixture": "isolated native Kubernetes 1.36.2 API server and etcd, with fixture Ready Pod objects",
+      "backendBoundary": "Two real local TLS/HTTP2 origins selected by Pod labels, alongside an independent HTTP/1.1 Service origin. Frontend requests use HTTP/1.1.",
+      "cloudBoundary": "Installed Octavia REST and SQLAlchemy DB, HTTPS Barbican, native Amphora rendering and HAProxy. Keystone, Neutron, Octavia RPC completion and Amphora agent transport are fixture boundaries.",
+      "barbicanVersion": "23.0.0",
+      "kubernetesVersion": "v1.36.2",
+      "xBackendCRDDiscovered": false,
+      "originSHA256": "7adf76c967c6b3b463eee70f91fdfbd9302fa78b3c7672e3453a1e1a3e4b80af",
+      "phases": {
+        "ordinary": {
+          "kubernetes": {
+            "gateway": "True/Programmed",
+            "attachedRoutes": 1,
+            "routes": {
+              "ordinary": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            }
+          },
+          "provider": {
+            "pools": {
+              "ordinary": {
+                "poolProtocol": "HTTP",
+                "activeMembers": 1,
+                "tlsEnabled": false,
+                "namedCookieConfigured": false,
+                "nativeNamedCookieDirective": false
+              }
+            },
+            "activeHAProxyConfigSHA256": "575f2dddc7551c8a4f0ce78b6890ecf4febc8ad7207dc49fd998c67a0cfb6ef3",
+            "HAProxyReloads": 2
+          },
+          "traffic": {
+            "ordinary": {
+              "status": 200,
+              "requests": 3,
+              "originProtocol": "HTTP/1.1",
+              "cookieIssued": false
+            }
+          }
+        }
+      },
+      "runReceiptSHA256": "eebcf4b11a671b5f02906c67c5d9e321cb78e9b37fe7e417a4b5149d381f2887"
+    }
+  }
+}

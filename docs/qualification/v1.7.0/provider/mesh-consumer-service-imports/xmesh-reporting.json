@@ -1,0 +1,339 @@
+{
+  "passed": true,
+  "managerOCI": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "c624b69a60e82da95597ad856b63ef3efd5b1044",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:96a393ea003e461d09ab85dce1b8b440fdefd42aad8ae4112b9e026a94b056b6",
+    "configDigest": "sha256:48236294ece8badac6fed1264b517eaeaf6e0a47742eba6b6020bde1d0e02ccf",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "fda9c7adda5bb5d3d794a9cdbd0225f2dc599b4574af73d8d7c51dfbb5e92e74",
+    "managerSHA256": "71dd260e2cc6ad2fcc75538a2b1ce740d1e9938e79e8eb9ff4cd17706fab5640"
+  },
+  "sourceSignatureVerifiedByReleaseCheck": true,
+  "controllerAccount": "system:serviceaccount:openstack-gateway-system:openstack-gateway-controller",
+  "kubernetes": {
+    "serverVersion": "v1.36.2",
+    "gatewayAPIBundle": "v1.7.0",
+    "channel": "experimental",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "localEnvtest": true
+  },
+  "installer": {
+    "helmManifestSHA256": "78681a8254b0a119811408c70adad9af7fd27eb093c6cb8a44a8fcf764c4b15b",
+    "currentPilot": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a4c0e37f5140f00a242d914b3199cc2fc5d4c97bf071f2fe85d592dce8e6f20",
+    "renderedObjectsUsed": [
+      "Deployment/istiod",
+      "DaemonSet/istio-cni-node",
+      "DaemonSet/ztunnel",
+      "ConfigMap/istio-cni-config"
+    ]
+  },
+  "fixtures": {
+    "network": "isolated loopback-only namespace",
+    "openstackCatalogRequests": {
+      "identity": 1,
+      "versionDiscovery": 2,
+      "unexpected": 0
+    },
+    "deploymentAndDaemonSetStatusWriter": "test",
+    "gatewayClassStatusWriter": "test",
+    "xmeshStatusWriter": "OCI manager",
+    "gatewayClass": {
+      "name": "istio-waypoint",
+      "generation": 1,
+      "controllerName": "istio.io/mesh-controller",
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-11-26T05:30:06Z",
+          "message": "Accepted by the local XMesh test fixture",
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        }
+      ]
+    },
+    "daemonsets": {
+      "istio-cni-node": {
+        "generation": 1,
+        "status": {
+          "currentNumberScheduled": 1,
+          "desiredNumberScheduled": 1,
+          "numberAvailable": 1,
+          "numberMisscheduled": 0,
+          "numberReady": 1,
+          "observedGeneration": 1,
+          "updatedNumberScheduled": 1
+        }
+      },
+      "ztunnel": {
+        "generation": 1,
+        "status": {
+          "currentNumberScheduled": 1,
+          "desiredNumberScheduled": 1,
+          "numberAvailable": 1,
+          "numberMisscheduled": 0,
+          "numberReady": 1,
+          "observedGeneration": 1,
+          "updatedNumberScheduled": 1
+        }
+      }
+    },
+    "dataplaneRan": false,
+    "cloudProviderRan": false
+  },
+  "observations": [
+    {
+      "phase": "historical-pilot-complete",
+      "observedAtUTC": "2026-11-26T05:30:09.825519+00:00",
+      "xmesh": {
+        "uid": "9fd2d137-64a0-4816-ba8a-0380de365b83",
+        "generation": 1,
+        "resourceVersion": "279",
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-26T05:30:09Z",
+              "message": "XMesh accepted by Hibiscus Istio ambient c624b69a60e82da95597ad856b63ef3efd5b1044 in namespace openstack-gateway-system",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-26T05:30:09Z",
+              "message": "Hibiscus Istio ambient c624b69a60e82da95597ad856b63ef3efd5b1044 in namespace openstack-gateway-system is ready with the accepted istio-waypoint class and qualified Istio rollouts",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "supportedFeatures": [
+            {
+              "name": "GRPCRoute"
+            },
+            {
+              "name": "HTTPRoute"
+            },
+            {
+              "name": "HTTPRoute303RedirectStatusCode"
+            },
+            {
+              "name": "HTTPRoute307RedirectStatusCode"
+            },
+            {
+              "name": "HTTPRoute308RedirectStatusCode"
+            },
+            {
+              "name": "HTTPRouteParentRefPort"
+            },
+            {
+              "name": "HTTPRouteResponseHeaderModification"
+            },
+            {
+              "name": "Mesh"
+            },
+            {
+              "name": "MeshClusterIPMatching"
+            },
+            {
+              "name": "MeshHTTPRouteBackendRequestHeaderModification"
+            },
+            {
+              "name": "MeshHTTPRouteNamedRouteRule"
+            },
+            {
+              "name": "MeshHTTPRouteQueryParamMatching"
+            },
+            {
+              "name": "MeshHTTPRouteRedirectPath"
+            },
+            {
+              "name": "MeshHTTPRouteRedirectPort"
+            },
+            {
+              "name": "MeshHTTPRouteRewritePath"
+            },
+            {
+              "name": "MeshHTTPRouteSchemeRedirect"
+            }
+          ]
+        }
+      },
+      "featureCount": 16,
+      "pilot": {
+        "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
+        "generation": 1,
+        "status": {
+          "availableReplicas": 1,
+          "observedGeneration": 1,
+          "readyReplicas": 1,
+          "replicas": 1,
+          "updatedReplicas": 1
+        }
+      },
+      "manager": {
+        "running": true,
+        "executableSHA256": "71dd260e2cc6ad2fcc75538a2b1ce740d1e9938e79e8eb9ff4cd17706fab5640",
+        "reportingEnabled": true,
+        "channel": "experimental"
+      }
+    },
+    {
+      "phase": "current-pilot-incomplete",
+      "observedAtUTC": "2026-11-26T05:30:20.520774+00:00",
+      "xmesh": {
+        "uid": "9fd2d137-64a0-4816-ba8a-0380de365b83",
+        "generation": 1,
+        "resourceVersion": "284",
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-26T05:30:09Z",
+              "message": "XMesh accepted by Hibiscus Istio ambient c624b69a60e82da95597ad856b63ef3efd5b1044 in namespace openstack-gateway-system",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-26T05:30:19Z",
+              "message": "Hibiscus Istio ambient c624b69a60e82da95597ad856b63ef3efd5b1044 in namespace openstack-gateway-system is waiting for the current istio-system/istiod rollout to finish",
+              "observedGeneration": 1,
+              "reason": "Pending",
+              "status": "Unknown",
+              "type": "Programmed"
+            }
+          ]
+        }
+      },
+      "featureCount": 0,
+      "pilot": {
+        "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a4c0e37f5140f00a242d914b3199cc2fc5d4c97bf071f2fe85d592dce8e6f20",
+        "generation": 2,
+        "status": {
+          "availableReplicas": 1,
+          "observedGeneration": 1,
+          "readyReplicas": 1,
+          "replicas": 1,
+          "updatedReplicas": 1
+        }
+      },
+      "manager": {
+        "running": true,
+        "executableSHA256": "71dd260e2cc6ad2fcc75538a2b1ce740d1e9938e79e8eb9ff4cd17706fab5640",
+        "reportingEnabled": true,
+        "channel": "experimental"
+      }
+    },
+    {
+      "phase": "current-pilot-complete",
+      "observedAtUTC": "2026-11-26T05:30:33.517410+00:00",
+      "xmesh": {
+        "uid": "9fd2d137-64a0-4816-ba8a-0380de365b83",
+        "generation": 1,
+        "resourceVersion": "289",
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-26T05:30:09Z",
+              "message": "XMesh accepted by Hibiscus Istio ambient c624b69a60e82da95597ad856b63ef3efd5b1044 in namespace openstack-gateway-system",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-26T05:30:29Z",
+              "message": "Hibiscus Istio ambient c624b69a60e82da95597ad856b63ef3efd5b1044 in namespace openstack-gateway-system is ready with the accepted istio-waypoint class and qualified Istio rollouts",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "supportedFeatures": [
+            {
+              "name": "GRPCRoute"
+            },
+            {
+              "name": "HTTPRoute"
+            },
+            {
+              "name": "HTTPRoute303RedirectStatusCode"
+            },
+            {
+              "name": "HTTPRoute307RedirectStatusCode"
+            },
+            {
+              "name": "HTTPRoute308RedirectStatusCode"
+            },
+            {
+              "name": "HTTPRouteParentRefPort"
+            },
+            {
+              "name": "HTTPRouteResponseHeaderModification"
+            },
+            {
+              "name": "Mesh"
+            },
+            {
+              "name": "MeshClusterIPMatching"
+            },
+            {
+              "name": "MeshHTTPRouteBackendRequestHeaderModification"
+            },
+            {
+              "name": "MeshHTTPRouteNamedRouteRule"
+            },
+            {
+              "name": "MeshHTTPRouteQueryParamMatching"
+            },
+            {
+              "name": "MeshHTTPRouteRedirectPath"
+            },
+            {
+              "name": "MeshHTTPRouteRedirectPort"
+            },
+            {
+              "name": "MeshHTTPRouteRewritePath"
+            },
+            {
+              "name": "MeshHTTPRouteSchemeRedirect"
+            }
+          ]
+        }
+      },
+      "featureCount": 16,
+      "pilot": {
+        "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a4c0e37f5140f00a242d914b3199cc2fc5d4c97bf071f2fe85d592dce8e6f20",
+        "generation": 2,
+        "status": {
+          "availableReplicas": 1,
+          "observedGeneration": 2,
+          "readyReplicas": 1,
+          "replicas": 1,
+          "updatedReplicas": 1
+        }
+      },
+      "manager": {
+        "running": true,
+        "executableSHA256": "71dd260e2cc6ad2fcc75538a2b1ce740d1e9938e79e8eb9ff4cd17706fab5640",
+        "reportingEnabled": true,
+        "channel": "experimental"
+      }
+    }
+  ],
+  "cleanup": {
+    "scenarioProcessesStopped": true,
+    "temporarySessionRemoved": true,
+    "manualRemovalOfToolCachesAfterRun": true
+  },
+  "testScope": [
+    "XMesh reporting using the local OCI manager and simulated readiness statuses"
+  ]
+}

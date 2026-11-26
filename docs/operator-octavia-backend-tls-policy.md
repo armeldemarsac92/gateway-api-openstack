@@ -226,6 +226,8 @@ This profile accepts one local Service target, one local ConfigMap CA reference 
 
 ## Authenticate a TCPRoute XBackend
 
+The released provider supports the TCP listener association for a single authenticated pool. [Octavia](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-tcp-default-pool-tls-30dc29021685) · [octavia-lib](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-tcp-default-pool-tls-89991fd0d6de) · [Observed server name and client identity changes](qualification/v1.7.0/provider/xbackend-grpc-tcp-transports/README.md#authenticate-the-origin-of-a-tcp-connection)
+
 Enable the Gateway API v1.7.0 Experimental bundle and run the controller with `--octavia-backend-tls-policy` and `--octavia-tcp-default-pool-tls`. The Amphora region must advertise `tcp_default_pool_tls_v1` and `backend_tls_hostname_v1`. The API and the serving Amphorae must support this association. A client connects to an ordinary Gateway `TCP` listener. Amphora opens a TLS connection to the XBackend and forwards the client's byte stream.
 
 Use an Endpoint GatewayClass with Unmanaged backend security. The XBackend may select Pods or use an ExternalHostname allowed by the class's routed IPv4 settings. The TCPRoute and XBackend share a namespace. Put exactly one positive-weight XBackend reference in the rule and omit `backendRef.port`. Other references may have weight zero and contribute to diagnostics.
@@ -252,6 +254,8 @@ Check the TCPRoute's `ResolvedRefs` and `<controller-domain>/Programmed` conditi
 With the singleton opt-in alone, a rule with several positive-weight backendRefs reserves the authenticated reference's weight for rejection when [proportional TCP connection rejection](operator-octavia-tcp-connection-rejection.md) is enabled and available. Plain backends keep their share. If the region cannot reject the affected share, the controller withdraws the affected default. Before rolling back scalar support in Octavia, disable `--octavia-tcp-default-pool-tls` and verify that each affected listener reports `tcp_default_pool_tls: false` and has stopped using its TLS pool.
 
 ### Mix authenticated and clear backends on one TCPRoute
+
+A local TCPRoute trial exercised the withdrawal and restoration of a client identity grant. [Route conditions and connection counts](qualification/v1.7.0/provider/tcproute-weighted-backend-pools/README.md) · [Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-tcp-weighted-default-pools-0e1cdf4b8599) · [Provider library release](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-tcp-weighted-default-pools-735564bb8701)
 
 Add `--octavia-tcp-weighted-default-pools` to the Experimental controller with the backend TLS and singleton opt-ins above. The flag defaults to off. The Amphora region must also advertise `tcp_weighted_default_pools_v1`. Every positive-weight backendRef gets its own pool or explicit rejection share when the route has several positive references and uses an authenticated XBackend. The Gateway still uses a clear TCP listener. An unavailable XBackend keeps its declared share while authorization or endpoints are being verified.
 

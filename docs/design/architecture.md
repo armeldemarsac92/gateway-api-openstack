@@ -272,9 +272,9 @@ Per-Gateway infrastructure settings, managed backend security, and per-backend p
 ## HTTP and HTTPS boundaries
 
 Gateway API matches are alternatives, with conjunctive conditions within each match.
-The current path mapping uses ordered Octavia policies and rules.
-PathPrefix `/foo` needs an exact `/foo` policy and a `/foo/` prefix policy so that `/foobar` does not match.
-Octavia limits each rule value to 255 characters. Exact paths can use all 255 characters, while a normalized non-root PathPrefix can use 254 because its second rule adds `/`. The controller reports `Accepted=False` with reason `UnsupportedValue` before binding a route that exceeds these limits.
+The controller maps path matches to ordered Octavia policies. The segment prefix `/foo` matches `/foo` and its descendants.
+Stock `PATH` rules have a 255-character value limit. A normalized non-root prefix can use 254 characters because its descendant comparison adds a slash. Without the literal-path option, the controller reports `Accepted=False/UnsupportedValue` for paths that exceed the stock limit or contain an apostrophe or ampersand.
+With `--octavia-literal-http-paths` and the regional `http_literal_path_v1` capability, an exact path or a segment prefix can use the full 1024 ASCII bytes allowed by Gateway API. The controller uses one `HTTP_PATH_LITERAL` rule when a path needs this capability. [Literal path configuration](../operator-octavia-http-actions.md#enable-literal-http-path-matches)
 
 The [conformance guide](../testing-conformance.md) records current Core gaps.
 The [feasibility assessment](conformance-feasibility.md) identifies Octavia API blockers and designs needed for the broader compiler.
