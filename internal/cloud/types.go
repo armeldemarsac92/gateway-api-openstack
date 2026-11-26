@@ -347,6 +347,9 @@ type HTTPBackend struct {
 	BackendRetryBudgetPending bool                `json:",omitempty"`
 	// XBackendClientCertificateReference is an authorized Barbican identity for this XBackend alone.
 	XBackendClientCertificateReference string `json:"-"`
+	// XBackendTCPHealthMonitor uses connection checks for application protocols
+	// without a mandatory plain HTTP GET health endpoint.
+	XBackendTCPHealthMonitor bool `json:",omitempty"`
 	// SessionCookieName enables an HTTP session cookie on an XBackend's pool.
 	SessionCookieName                string                     `json:",omitempty"`
 	ServiceSessionPersistence        *ServiceSessionPersistence `json:",omitempty"`

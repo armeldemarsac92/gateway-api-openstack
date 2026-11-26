@@ -1413,7 +1413,7 @@ func TestXBackendMutualTLSRotatesAndClearsOnlyAfterClosing(t *testing.T) {
 	route.BackendTLS = tls
 	const first = "https://barbican.example/v1/secrets/xbackend-first"
 	const rotated = "https://barbican.example/v1/secrets/xbackend-rotated"
-	desired := desiredRoute{spec: route, xBackend: true, xBackendClientCertificateReference: rotated}
+	desired := desiredRoute{identity: id, spec: route, xBackend: true, xBackendClientCertificateReference: rotated}
 	var writes []string
 	serviceClients := scalarBackendTLSClients(t, id.Value().OpenStackProjectID, http.NotFoundHandler(), &writes)
 	store := backendca.New(id.Value().ClusterID, serviceClients)
@@ -1427,6 +1427,17 @@ func TestXBackendMutualTLSRotatesAndClearsOnlyAfterClosing(t *testing.T) {
 	require.Equal(t, routeMutationCreatePool, create.kind)
 	require.Contains(t, *create.poolTags, xBackendTLSClientTag)
 	require.NotContains(t, *create.poolTags, backendTLSClientTag)
+	p.octavia = octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST /lbaas/pools", r.Method+" "+r.URL.Path)
+		var payload struct{ Pool map[string]any }
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.Equal(t, []any{"http/1.1"}, payload.Pool["alpn_protocols"])
+		require.Equal(t, true, payload.Pool["tls_enabled"])
+		require.NotContains(t, payload.Pool, "backend_tls_require_h2")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"pool":{}}`))
+	})))
+	require.NoError(t, p.executeRouteMutation(t.Context(), desired, *create))
 	plain := observedRouteGraph{pool: &pools.Pool{ID: "fallback", Protocol: "HTTP", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
 		backendTLS: octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, ClientRefObserved: true}}
 	enrollment := cloud.BackendClientCertificate{Reference: rotated}

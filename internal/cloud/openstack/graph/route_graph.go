@@ -1396,6 +1396,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 			}
 		}
 
+		monitorType := desired.monitorType()
 		switch {
 		case desired.healthMonitor == (cloud.HealthMonitorConfig{}):
 			if actual.monitor != nil {
@@ -1403,10 +1404,12 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 			}
 		case actual.monitor == nil:
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreateMonitor, parentID: pool.ID})
-		case actual.monitor.Type != desired.monitorType():
+		case actual.monitor.Type != monitorType:
 			// The observer has already proved that this monitor belongs to
 			// the pool. Octavia requires replacement to change its type.
-			if !desired.spec.GRPC || actual.monitor.Type != monitors.TypeHTTP {
+			httpToTCP := (desired.spec.GRPC || desired.xBackend) && actual.monitor.Type == monitors.TypeHTTP && monitorType == monitors.TypeTCP
+			tcpToHTTP := desired.xBackend && actual.monitor.Type == monitors.TypeTCP && monitorType == monitors.TypeHTTP
+			if !httpToTCP && !tcpToHTTP {
 				return nil, cloud.RouteState{}, fmt.Errorf("%w: health monitor %s has type %s", cloud.ErrOwnershipConflict, actual.monitor.ID, actual.monitor.Type)
 			}
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationDeleteMonitor, id: actual.monitor.ID, parentID: pool.ID})
