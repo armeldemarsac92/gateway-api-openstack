@@ -667,6 +667,17 @@ func h2cUnenrolledProvider(t *testing.T) *Provider {
 }
 
 func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) {
+		testExactHTTPHeaderRuleRequest(t, "X-Version", false)
+	})
+	t.Run("256-byte name", func(t *testing.T) {
+		testExactHTTPHeaderRuleRequest(t, strings.Repeat("X", 256), true)
+	})
+}
+
+func testExactHTTPHeaderRuleRequest(t *testing.T, headerName string, name256 bool) {
+	t.Helper()
+	key := strings.ToLower(headerName)
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
 	route := &spec.Routes[0].Spec
@@ -675,7 +686,7 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 		Namespace: "workloads", Name: "backend", Port: 8080, Members: route.Members,
 		Matches: []cloud.HTTPPathMatch{
 			{Hostname: "example.test", PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 1, Headers: []cloud.HTTPHeaderMatch{{Name: "X-Version", Value: "Three"}}},
-			{Hostname: "example.test", PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 0, Headers: []cloud.HTTPHeaderMatch{{Name: "X-Version", Value: "One, Two"}, {Name: "Color", Value: "orange"}}},
+			{Hostname: "example.test", PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 0, Headers: []cloud.HTTPHeaderMatch{{Name: headerName, Value: "One, Two"}, {Name: "Color", Value: "orange"}}},
 		},
 	}}
 	route.Members = nil
@@ -683,16 +694,15 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 		t.Fatalf("missing controller opt-in returned %v", err)
 	}
 
-	var advertise bool
+	advertised := []string{}
+	if name256 {
+		advertised = append(advertised, octavia.GatewayCapabilityHTTPHeaderExact)
+	}
 	var writes int
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
-			capabilities := []string{}
-			if advertise {
-				capabilities = []string{octavia.GatewayCapabilityHTTPHeaderExact}
-			}
-			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": advertised})
 		case request.Method == http.MethodPost && request.URL.Path == "/lbaas/l7policies/policy/rules":
 			writes++
 			var body struct {
@@ -712,7 +722,7 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 			rule := body.Rule
 			role, tagged := openstackidentity.ResourceRole(rule.Tags)
 			base, _, _, parsed := openstackidentity.ParseHTTPFragmentRole(role)
-			if rule.RuleType != "HTTP_HEADER_EXACT" || rule.CompareType != "EQUAL_TO" || rule.Key != "x-version" ||
+			if rule.RuleType != "HTTP_HEADER_EXACT" || rule.CompareType != "EQUAL_TO" || rule.Key != key ||
 				rule.Value != "One, Two" || !rule.AdminState || rule.Invert || !tagged || !parsed || base != openstackidentity.RoleRuleHTTPHeaderExact {
 				t.Fatalf("unexpected exact header predicate: %#v", rule)
 			}
@@ -723,7 +733,7 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{HTTPHeaderExact: true})
+	p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{HTTPHeaderExact: true, HTTPHeaderName256: name256})
 	desired, err := p.buildDesiredGatewayGraph(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -738,27 +748,35 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 	if conjunction.position != 1 || single.position != 2 || len(predicates) != 4 {
 		t.Fatalf("incorrect policy precedence or predicates: positions %d %d, rules %#v", conjunction.position, single.position, predicates)
 	}
-	header := predicates[slices.IndexFunc(predicates, func(rule desiredRule) bool { return rule.key == "x-version" })]
+	header := predicates[slices.IndexFunc(predicates, func(rule desiredRule) bool { return rule.key == key })]
 	lb := safetyObservedLoadBalancer()
 	lb.Provider = "amphora-region-alias"
-	actual := observedGatewayGraph{loadBalancer: lb}
+	actual := observedGatewayGraph{loadBalancer: lb, protocol: cloud.ListenerProtocolHTTP}
 	create := graphMutation{kind: graphRouteMutation, backendKey: part.backendKey,
 		route: routeMutation{kind: routeMutationCreateRule, parentID: "policy", rule: header}}
+	activationCapabilities := desiredHTTPRuleCapabilities(conjunction, "")
+	requiredCapability := octavia.GatewayCapabilityHTTPHeaderExact
+	if name256 {
+		requiredCapability = octavia.GatewayCapabilityHTTPHeaderName256
+		if port := spec.Gateway.Spec.ListenerPort; desired.httpRuleCapabilityPorts[port] != headerName256Capability {
+			t.Fatalf("listener %d has unexpected rule capabilities: %v", port, desired.httpRuleCapabilityPorts[port])
+		}
+	}
 	for _, step := range []routeMutation{create.route,
 		{kind: routeMutationCreatePolicy, policy: conjunction},
-		{kind: routeMutationEnablePolicy, requiresExactHeaders: true},
+		{kind: routeMutationEnablePolicy, requiresExactHeaders: true, httpRuleCapabilities: activationCapabilities},
 	} {
 		blocked := create
 		blocked.route = step
 		var missing *octavia.MissingGatewayCapability
-		if _, err := p.prepareGraphMutation(t.Context(), desired, actual, blocked); !errors.As(err, &missing) {
-			t.Fatalf("unadvertised capability allowed %v: %v", step.kind, err)
+		if _, err := p.prepareGraphMutation(t.Context(), desired, actual, blocked); !errors.As(err, &missing) || missing.Capability != requiredCapability {
+			t.Fatalf("unadvertised capability %q allowed %v: %v", requiredCapability, step.kind, err)
 		}
 	}
 	if writes != 0 {
 		t.Fatalf("provider received a write without advertising exact header matching: %d", writes)
 	}
-	advertise = true
+	advertised = append(advertised, requiredCapability)
 	prepared, err := p.prepareGraphMutation(t.Context(), desired, actual, create)
 	if err != nil {
 		t.Fatal(err)

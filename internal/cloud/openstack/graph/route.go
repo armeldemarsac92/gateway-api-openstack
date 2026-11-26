@@ -753,7 +753,7 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 			return cloud.HTTPPathMatch{}, fmt.Errorf("unknown HTTP method %q", match.Method)
 		}
 	}
-	headers, err := cloud.NormalizeHTTPHeaderMatches(match.Headers)
+	headers, err := cloud.NormalizeHTTPHeaderMatches(match.Headers, p.httpHeaderName256Enabled())
 	if err != nil {
 		return cloud.HTTPPathMatch{}, err
 	}

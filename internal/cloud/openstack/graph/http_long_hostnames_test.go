@@ -53,7 +53,7 @@ func TestLongHTTPHostnameRuleRequiresRegionalDiscovery(t *testing.T) {
 				Rule l7policies.Rule `json:"rule"`
 			}
 			require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
-			require.Equal(t, longHostnameCapability, requiredHTTPRuleCapability(l7policies.RuleType(body.Rule.RuleType), l7policies.CompareType(body.Rule.CompareType), body.Rule.Value))
+			require.Equal(t, longHostnameCapability, requiredHTTPRuleCapability(l7policies.RuleType(body.Rule.RuleType), l7policies.CompareType(body.Rule.CompareType), body.Rule.Key, body.Rule.Value))
 			require.False(t, body.Rule.Invert)
 			require.Empty(t, body.Rule.Key)
 			writes++
@@ -136,7 +136,7 @@ func TestLongHTTPHostnameIsolationKeepsOneInvertedRule(t *testing.T) {
 	rules := rulesFor(policy, "")
 	require.Len(t, rules, 2)
 	require.True(t, rules[1].invert)
-	require.Equal(t, longHostnameCapability, requiredHTTPRuleCapability(rules[1].ruleType, rules[1].compareType, rules[1].value))
+	require.Equal(t, longHostnameCapability, requiredHTTPRuleCapability(rules[1].ruleType, rules[1].compareType, rules[1].key, rules[1].value))
 	suffix := strings.TrimPrefix(hostname, "*.")
 	require.True(t, redirectGuardMatches(t, policy.httpHostExclusions[0], "x."+strings.ToUpper(suffix)+":8080", "/api"))
 	require.False(t, redirectGuardMatches(t, policy.httpHostExclusions[0], suffix, "/api"))

@@ -321,8 +321,15 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 }
 
 func (r *Reconciler) validateRouteMatches(rule gatewayv1.HTTPRouteRule, grpc bool) error {
+	capabilities := routeMatchCapabilities{
+		exactHeaders:     r.Config.HTTPHeaderExact,
+		headerName256:    r.Config.HTTPHeaderName256,
+		methodMatch:      r.Config.HTTPMethodMatch && !grpc,
+		exactQueryParams: r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc,
+		literalPaths:     r.Config.LiteralHTTPPaths,
+	}
 	for _, match := range rule.Matches {
-		if _, _, err := supportedMatch(match, r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && !grpc, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc, r.Config.LiteralHTTPPaths); err != nil {
+		if _, _, err := supportedMatch(match, capabilities); err != nil {
 			return err
 		}
 	}
@@ -1108,25 +1115,33 @@ func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSecti
 	return matches, route.Rules, nil
 }
 
-func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch, exactQueryParams, literalPaths bool) (cloud.PathMatchType, string, error) {
-	if len(match.Headers) != 0 && !exactHeaders {
+type routeMatchCapabilities struct {
+	exactHeaders     bool
+	headerName256    bool
+	methodMatch      bool
+	exactQueryParams bool
+	literalPaths     bool
+}
+
+func supportedMatch(match gatewayv1.HTTPRouteMatch, capabilities routeMatchCapabilities) (cloud.PathMatchType, string, error) {
+	if len(match.Headers) != 0 && !capabilities.exactHeaders {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "exact HTTP header matching requires --octavia-http-header-exact")
 	}
-	if match.Method != nil && !methodMatch {
+	if match.Method != nil && !capabilities.methodMatch {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "HTTP method matching requires --octavia-http-method-match")
 	}
-	if len(match.QueryParams) != 0 && !exactQueryParams {
+	if len(match.QueryParams) != 0 && !capabilities.exactQueryParams {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "exact HTTP query parameter matching requires --octavia-http-query-param-exact and --octavia-fixed-http-responses")
 	}
 	normalized, err := model.NormalizeMatch(match)
 	if err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
-	if _, err := cloud.NormalizeHTTPHeaderMatches(normalized.Headers); err != nil {
+	if _, err := cloud.NormalizeHTTPHeaderMatches(normalized.Headers, capabilities.headerName256); err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	pathType := cloud.PathMatchType(normalized.PathType)
-	if _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix, literalPaths); err != nil {
+	if _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix, capabilities.literalPaths); err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	return pathType, normalized.PathValue, nil

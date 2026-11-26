@@ -119,7 +119,7 @@ func run(ctx context.Context) error {
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
 	var l7PolicyConditionalRemoval bool
 	var frontendClientValidation, clusterTrustBundles bool
-	var httpRequestRedirect, longHTTPHostnames, literalHTTPPaths bool
+	var httpRequestRedirect, longHTTPHostnames, literalHTTPPaths, httpHeaderName256 bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
 	var tcpConnectionRejection, udpPacketDrop bool
@@ -144,6 +144,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&longHTTPHostnames, "octavia-long-http-hostnames", false, "use the advertised Octavia capability for long HTTP hostname matches")
 	flag.BoolVar(&literalHTTPPaths, "octavia-literal-http-paths", false, "use the advertised Octavia capability for HTTP path matches the stock renderer cannot represent")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
+	flag.BoolVar(&httpHeaderName256, "octavia-http-header-name-256", false, "use the advertised Octavia capability for exact matches on 256-byte HTTP header names (requires --octavia-http-header-exact)")
 	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&httpMethodMatch, "octavia-http-method-match", false, "use the advertised Octavia exact HTTP method matching capability (requires --octavia-fixed-http-responses)")
@@ -220,6 +221,9 @@ func run(ctx context.Context) error {
 			return fmt.Errorf("--istio-ambient-xmesh-name must be a valid Kubernetes object name")
 		}
 	}
+	if httpHeaderName256 && !exactHTTPHeaders {
+		return fmt.Errorf("--octavia-http-header-name-256 requires --octavia-http-header-exact")
+	}
 	if weightedTargets && !fixedHTTPResponses {
 		return fmt.Errorf("--octavia-weighted-http-targets requires --octavia-fixed-http-responses")
 	}
@@ -252,6 +256,7 @@ func run(ctx context.Context) error {
 		LongHTTPHostnames:             longHTTPHostnames,
 		LiteralHTTPPaths:              literalHTTPPaths,
 		HTTPHeaderExact:               exactHTTPHeaders,
+		HTTPHeaderName256:             httpHeaderName256,
 		HTTPQueryParamExact:           exactHTTPQueryParams,
 		HTTPRequestURLRewrite:         httpRequestURLRewrite,
 		HTTPRequestPolicy:             httpRequestPolicy,
@@ -337,6 +342,7 @@ func run(ctx context.Context) error {
 		LongHTTPHostnames:      longHTTPHostnames,
 		LiteralHTTPPaths:       literalHTTPPaths,
 		HTTPHeaderExact:        exactHTTPHeaders,
+		HTTPHeaderName256:      httpHeaderName256,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
 		HTTPRequestURLRewrite:  httpRequestURLRewrite,
 		HTTPRequestPolicy:      httpRequestPolicy,

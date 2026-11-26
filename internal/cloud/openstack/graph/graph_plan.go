@@ -802,7 +802,8 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		}
 	}
 	recordBlocked(first, blocked)
-	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
+	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact ||
+		blocked.capability == octavia.GatewayCapabilityHTTPHeaderName256 || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
 		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact || blocked.capability == octavia.GatewayCapabilityHTTPRequestRedirect ||
 		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityRequestCORS ||
 		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityTargetResponseHeaders ||
@@ -883,6 +884,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	var mirrorCapabilities []string
 	var reopeningPersistenceCapability string
 	var authBodySize int32
+	var headerName256 bool
 	fixed := desired.fixedHTTPResponses
 	switch step.kind {
 	case graphCreateLoadBalancer:
@@ -969,7 +971,17 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if binaryRequestMetadata {
 			required = append(required, octavia.GatewayCapabilityGRPCBinaryRequestMetadata)
 		}
-		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
+		headerName256 = step.route.requiresHTTPHeaderName256(part)
+		if headerName256 {
+			if !p.httpHeaderName256Enabled() {
+				return step, &unavailableRouteCapability{
+					error:      errors.New("exact HTTP matches with a 256-byte header name require --octavia-http-header-exact and --octavia-http-header-name-256"),
+					capability: octavia.GatewayCapabilityHTTPHeaderName256,
+				}
+			}
+			required = append(required, octavia.GatewayCapabilityHTTPHeaderName256)
+		}
+		if headerName256 || step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
 		}
@@ -1033,6 +1045,28 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		err = verify(ctx, desired, actual, required, authBodySize)
 	}
 	if err != nil {
+		var missingHeader *octavia.MissingGatewayCapability
+		if headerName256 && (!errors.As(err, &missingHeader) ||
+			missingHeader.Capability == octavia.GatewayCapabilityHTTPHeaderName256 || missingHeader.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
+			capability := octavia.GatewayCapabilityHTTPHeaderName256
+			if missingHeader != nil {
+				capability = missingHeader.Capability
+			}
+			// The regional capability can change after the port-wide check.
+			// Close before allowing a lower-priority policy to serve.
+			listeners, ports := httpGuardListeners(desired, actual)
+			port, bound := observedHTTPMutationPort(actual, ports, step)
+			if !bound {
+				port = httpURLPolicyRoutePort(desired, graphRoutePart(desired, step))
+			}
+			for _, listener := range listeners {
+				if listener.ProtocolPort == port && (listener.ProvisioningStatus == "ERROR" ||
+					listener.ProvisioningStatus == "ACTIVE" && (listener.AdminStateUp || !actual.adminObserved[listener.ID])) {
+					return closeGuardedHTTPListener(listener, "Waiting for Octavia to advertise "+capability), nil
+				}
+			}
+			return step, &unavailableRouteCapability{error: err, capability: capability}
+		}
 		// Removing a withdrawal predicate would expose a lower-priority
 		// route. Close its verified listener until the target is updated.
 		if withdrawTarget && step.routeIndex < len(actual.routes) {
