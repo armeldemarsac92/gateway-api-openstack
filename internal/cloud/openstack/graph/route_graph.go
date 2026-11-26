@@ -1158,6 +1158,11 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 }
 
 func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
+	if step, err := desired.planTCPDefaultPoolTLS(actual); step != nil {
+		return []routeMutation{*step}, routeStateFromObservation(actual), nil
+	} else if err != nil {
+		return nil, routeStateFromObservation(actual), err
+	}
 	if desired.tcpRejectionUnavailable {
 		return nil, routeStateFromObservation(actual), errTCPRejectionUnavailable
 	}
@@ -1949,6 +1954,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Description:    desired.identity.Description(desired.httpRole(rolePool, "")),
 			AdminStateUp:   boolPointer(true),
 			Tags:           tags,
+		}
+		if step.poolAdmin != nil {
+			opts.AdminStateUp = step.poolAdmin
 		}
 		if step.poolTags != nil {
 			opts.Tags = append(opts.Tags, (*step.poolTags)...)

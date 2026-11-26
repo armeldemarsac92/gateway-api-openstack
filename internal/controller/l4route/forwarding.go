@@ -46,6 +46,11 @@ func forwardingTarget(backends []transportBackend, groups []routebackend.Weighte
 	ports := spec.ScopedListenerPorts
 	spec.ScopedListenerPorts = nil
 	target, err := forwardingBackendTarget(backends, groups, weighted, spec)
+	if err == nil && spec.TCPXBackendClientCertificateReference != "" {
+		// Include the resolved identity in the checkpoint without serializing
+		// its location in the route's forwarding graph.
+		target, err = hashForwardingTarget("v3", []string{target, spec.TCPXBackendClientCertificateReference})
+	}
 	if err != nil || len(ports) == 0 {
 		return target, err
 	}

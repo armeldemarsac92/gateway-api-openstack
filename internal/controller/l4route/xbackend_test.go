@@ -18,6 +18,11 @@ package l4route
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/netip"
 	"sync/atomic"
@@ -377,4 +382,118 @@ func TestTCPExternalHostnameSharesConcurrentRefresh(t *testing.T) {
 		require.NotNil(t, plan.desired)
 		require.Equal(t, []cloud.Member{{Address: refreshed.String(), Port: 9000, RoutedExternal: true}}, plan.desired.Members)
 	})
+}
+
+type tcpXBackendCertificateResolver func(context.Context, gatewayv1.ObjectName, *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string)
+
+func (f tcpXBackendCertificateResolver) ResolveXBackendClientCertificate(ctx context.Context, class gatewayv1.ObjectName, backend *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string) {
+	return f(ctx, class, backend)
+}
+
+func TestAuthenticatedTCPXBackendSealsItsInputsAndRejectsItsShareInMixedRoutes(t *testing.T) {
+	r, gateway, route, backend, _ := tcpExternalHostnameAttachmentFixture(t)
+	r.Config.BackendTLSPolicy, r.Config.TCPDefaultPoolTLS, r.Config.XBackendClientCertificate = true, true, true
+	r.Config.TCPConnectionRejection = true
+	r.TCPConnectionRejectionAvailable = func(context.Context) (bool, error) { return true, nil }
+	r.TCPDefaultPoolTLSAvailable = func(context.Context) (bool, error) { return true, nil }
+	r.externalHostnames.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("198.51.100.11")}, nil
+	}
+
+	serviceRef, service, endpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "plain", 0, "10.1.2.3")
+	route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, serviceRef)
+	require.NoError(t, r.Update(t.Context(), route))
+	require.NoError(t, r.Create(t.Context(), service))
+	require.NoError(t, r.Create(t.Context(), endpoints))
+
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
+	require.NoError(t, err)
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: backend.Namespace, Name: "origin-ca", UID: "origin-ca-uid"},
+		Data: map[string]string{"ca.crt": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
+	require.NoError(t, r.Create(t.Context(), ca))
+	backend.Spec.TLS = &gatewayx.BackendTLS{
+		Mode: gatewayx.BackendTLSModeClientAndServer,
+		Validation: &gatewayv1.BackendTLSPolicyValidation{
+			Hostname:          "identity.example.test",
+			CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+		},
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "identity"},
+	}
+	require.NoError(t, r.Update(t.Context(), backend))
+	const identityA, identityB = "https://barbican.example/v1/secrets/identity-a", "https://barbican.example/v1/secrets/identity-b"
+	clientRef := identityA
+	r.XBackendClientCertificates = tcpXBackendCertificateResolver(func(_ context.Context, class gatewayv1.ObjectName, observed *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string) {
+		require.Equal(t, gateway.Spec.GatewayClassName, class)
+		require.Equal(t, backend.UID, observed.UID)
+		return clientRef, "", ""
+	})
+	identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	ready := readyRouteWriter(t, r)
+	r.Writer = ready
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
+	programmed := r.Config.Domain() + "/Programmed"
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+	deferred := true
+	r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		result, err := ready(ctx, request)
+		if err != nil {
+			return result, err
+		}
+		result.Outcome = cloud.ProgressingOutcome("Waiting for a neighboring listener", time.Second)
+		result.Routes[0].Result.Outcome = result.Outcome
+		result.Routes[0].Result.ObservationDeferred = deferred
+		return result, nil
+	})
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+	deferred = false
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionFalse, "Pending")
+	r.Writer = ready
+	route = reconcileTCPRoute(t, r, route)
+	ancestors, err := r.ObserveXBackendAncestors(t.Context(), backend)
+	require.NoError(t, err)
+	require.Equal(t, metav1.ConditionTrue, ancestors[client.ObjectKeyFromObject(gateway)].Status)
+	inspect := func() graph.RouteInputs {
+		t.Helper()
+		input, err := r.ObserveRouteGraph(t.Context(), viewRoute(route).graphRequest(identity, graph.Ensure, gateway), gateway)
+		require.NoError(t, err)
+		require.Len(t, input.Nodes, 1)
+		return input
+	}
+	current := inspect()
+	spec := current.Nodes[0].Spec
+	require.Equal(t, "identity.example.test", spec.BackendTLS.Hostname)
+	require.Equal(t, string(ca.UID), spec.BackendTLS.CAConfigMapUID)
+	require.Equal(t, identityA, spec.TCPXBackendClientCertificateReference)
+	require.Len(t, spec.Members, 1)
+	require.Equal(t, "198.51.100.11", spec.Members[0].Address)
+	require.True(t, spec.Members[0].RoutedExternal)
+
+	clientRef = identityB
+	require.ErrorIs(t, current.Validate(t.Context()), controller.ErrGraphInputChanged)
+	route = reconcileTCPRoute(t, r, route)
+	route = reconcileTCPRoute(t, r, route)
+	current = inspect()
+	require.Equal(t, identityB, current.Nodes[0].Spec.TCPXBackendClientCertificateReference)
+	require.NoError(t, r.Delete(t.Context(), ca))
+	require.ErrorIs(t, current.Validate(t.Context()), controller.ErrGraphInputChanged)
+
+	// An unimplemented mixture reserves the authenticated share while
+	// retaining the independently authorized clear Service.
+	route.Spec.Rules[0].BackendRefs[1].Weight = ptr.To(int32(3))
+	route.Generation++
+	require.NoError(t, r.Update(t.Context(), route))
+	route = reconcileTCPRoute(t, r, route)
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "UnsupportedValue")
+	spec = inspect().Nodes[0].Spec
+	require.Nil(t, spec.BackendTLS)
+	require.Empty(t, spec.TCPXBackendClientCertificateReference)
+	require.Equal(t, &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}, spec.TCPConnectionRejection)
+	require.Equal(t, []cloud.Member{{Address: "10.1.2.3", Port: 9090, Weight: 1}}, spec.Members)
 }

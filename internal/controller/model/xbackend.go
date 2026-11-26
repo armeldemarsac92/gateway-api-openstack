@@ -344,8 +344,6 @@ func ValidateTCPXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Di
 		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
 	case ptr.Deref(spec.Protocol, gatewayx.BackendProtocolTCP) != gatewayx.BackendProtocolTCP:
 		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "TCPRoute XBackend requires protocol TCP or an omitted protocol")
-	case spec.TLS != nil && (spec.TLS.Mode != gatewayx.BackendTLSModeNone || spec.TLS.Validation != nil || spec.TLS.ClientCertificateRef != nil):
-		return backendDiagnostic(unsupported, "TCP XBackend requires TLS mode None without validation or a client certificate")
 	case spec.SessionPersistence != nil:
 		return backendDiagnostic(unsupported, "HTTP Cookie and Header session persistence is unsupported on TCP XBackend")
 	}
@@ -358,7 +356,35 @@ func ValidateTCPXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Di
 	default:
 		return backendDiagnostic(unsupported, "TCP XBackend requires type EndpointSelector or ExternalHostname")
 	}
-	if diagnostic == nil && profile.MemberMode == "" {
+	if diagnostic != nil {
+		return diagnostic
+	}
+	if tls := spec.TLS; tls != nil {
+		switch tls.Mode {
+		case gatewayx.BackendTLSModeNone:
+			if tls.Validation != nil || tls.ClientCertificateRef != nil {
+				return backendDiagnostic(unsupported, "TCP XBackend TLS mode None does not accept validation or a client certificate")
+			}
+		case gatewayx.BackendTLSModeServerOnly, gatewayx.BackendTLSModeClientAndServer:
+			switch {
+			case !profile.ServerTLS:
+				return backendDiagnostic(unsupported, "Authenticated TCP XBackends require the controller's TCP default pool TLS opt-in")
+			case tls.Mode == gatewayx.BackendTLSModeClientAndServer && !profile.ClientTLS:
+				return backendDiagnostic(unsupported, "TCP XBackend TLS mode ClientAndServer requires the operator's XBackend client certificate map")
+			case (tls.Mode == gatewayx.BackendTLSModeClientAndServer) != (tls.ClientCertificateRef != nil):
+				return backendDiagnostic(unsupported, "TCP XBackend TLS requires a client certificate reference only in ClientAndServer mode")
+			case tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)):
+				return backendDiagnostic(unsupported, "Authenticated TCP XBackends require validation.hostname to be a precise DNS hostname")
+			case tls.Validation.WellKnownCACertificates != nil || len(tls.Validation.CACertificateRefs) != 1 ||
+				tls.Validation.CACertificateRefs[0].Group != "" || tls.Validation.CACertificateRefs[0].Kind != "ConfigMap" ||
+				len(tls.Validation.SubjectAltNames) != 0:
+				return backendDiagnostic(unsupported, "Authenticated TCP XBackends require one core ConfigMap CA reference and support hostname matching")
+			}
+		default:
+			return backendDiagnostic(unsupported, fmt.Sprintf("TCP XBackend TLS mode %q is unsupported", tls.Mode))
+		}
+	}
+	if profile.MemberMode == "" {
 		return backendDiagnostic(gatewayv1.RouteReasonPending, "Gateway member mode is pending")
 	}
 	return diagnostic

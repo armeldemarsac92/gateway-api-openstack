@@ -414,7 +414,7 @@ ExternalHostname and EndpointSelector support HTTP and HTTP/1.1. For a cleartext
 
 Use the Experimental bundle, the Amphora Endpoint GatewayClass with Unmanaged backend security, and the [same hostname class, IPv4 CIDR and Service DNS settings](#route-http-to-an-experimental-xbackend-hostname). The operator supplies the network path from Amphora to the external origin. When creating a routed member individually, the controller omits `subnet_id`. The weighted member batch used for TCP connection rejection sends `subnet_id: null` for routed members so Octavia can clear a previous local subnet binding.
 
-In the XBackend example above, set `spec.protocol: TCP` or let the backend inherit TCP from the route. Leave `spec.tls` omitted or set `spec.tls.mode: None`. Amphora forwards the TCP stream without originating TLS. The controller rejects `ServerOnly` and `ClientAndServer` on TCPRoute.
+In the XBackend example above, set `spec.protocol: TCP` or let the backend inherit TCP from the route. For clear forwarding, omit `spec.tls` or set `spec.tls.mode: None`. In regions that support authenticated TCP default pools, use the [TCPRoute XBackend TLS opt-in](../operator-octavia-backend-tls-policy.md#authenticate-a-tcproute-xbackend) for `ServerOnly` and `ClientAndServer`.
 
 Attach a TCPRoute to a TCP listener on the enabled class and place the following reference in its rule. The XBackend lives in the route's namespace and supplies the port.
 

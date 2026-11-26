@@ -495,6 +495,8 @@ type RouteSpec struct {
 	// carry transport on each HTTPBackend.
 	BackendH2C bool                  `json:",omitempty"`
 	BackendTLS *BackendTLSValidation `json:",omitempty"`
+	// TCPXBackendClientCertificateReference belongs to the singleton authenticated TCP XBackend.
+	TCPXBackendClientCertificateReference string `json:"-"`
 	// HTTPBackends carries the complete set of paths and backend groups when
 	// the HTTPRoute has several rules or alternative matches.
 	HTTPBackends      []HTTPBackend      `json:",omitempty"`

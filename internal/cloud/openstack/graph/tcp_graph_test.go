@@ -44,26 +44,28 @@ const (
 )
 
 type tcpGraphFixture struct {
-	t                       *testing.T
-	spec                    cloud.GatewayGraphSpec
-	inventory               map[string]map[string]any
-	writes                  []string
-	loseNextListenerUpdate  bool
-	loseNextListenerCreate  bool
-	hiddenChild             string
-	unreferencedChild       string
-	extraListedMembers      []map[string]any
-	rejectMonitorDelay      float64
-	tcpRejectionAPI         bool
-	tcpRejectionAdvertised  bool
-	tcpRejectionRejectCode  int
-	tcpRejectionRemovePool  bool
-	tcpRejectionNetworkDown bool
-	tcpRejectionWrites      []map[string]json.RawMessage
-	udpDropAPI              bool
-	udpDropAdvertised       bool
-	udpDiscoveryUnavailable bool
-	udpDropRenderBusy       bool
+	t                           *testing.T
+	spec                        cloud.GatewayGraphSpec
+	inventory                   map[string]map[string]any
+	writes                      []string
+	loseNextListenerUpdate      bool
+	loseNextListenerCreate      bool
+	hiddenChild                 string
+	unreferencedChild           string
+	extraListedMembers          []map[string]any
+	rejectMonitorDelay          float64
+	tcpRejectionAPI             bool
+	tcpRejectionAdvertised      bool
+	tcpRejectionRejectCode      int
+	tcpRejectionRemovePool      bool
+	tcpRejectionNetworkDown     bool
+	tcpRejectionWrites          []map[string]json.RawMessage
+	udpDropAPI                  bool
+	udpDropAdvertised           bool
+	udpDiscoveryUnavailable     bool
+	udpDropRenderBusy           bool
+	tcpDefaultPoolTLSAPI        bool
+	tcpDefaultPoolTLSAdvertised bool
 }
 
 func newTCPGraphFixture(t *testing.T) *tcpGraphFixture {
@@ -126,12 +128,15 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		safetyWriteJSON(f.t, w, map[string]any{"floatingips": []any{}})
 		return
 	}
-	if (f.tcpRejectionAPI || f.udpDropAPI) && req.Method == http.MethodGet && resource == "/v2/lbaas/providers/amphora/gateway_capabilities" {
+	if (f.tcpRejectionAPI || f.udpDropAPI || f.tcpDefaultPoolTLSAPI) && req.Method == http.MethodGet && resource == "/v2/lbaas/providers/amphora/gateway_capabilities" {
 		if f.udpDiscoveryUnavailable {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		capabilities := []string{}
+		if f.tcpDefaultPoolTLSAdvertised {
+			capabilities = append(capabilities, "tcp_default_pool_tls_v1", "backend_tls_hostname_v1")
+		}
 		if f.tcpRejectionAdvertised {
 			capabilities = append(capabilities, "tcp_connection_rejection_v1")
 		}
@@ -260,7 +265,22 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				data["vip_address"], data["vip_port_id"] = "127.0.0.1", "vip-port"
 			case tcpListeners:
 				data["default_pool_id"] = nil
+				if f.tcpDefaultPoolTLSAPI {
+					data["tcp_default_pool_tls"] = false
+				}
 			case tcpPools:
+				if f.tcpDefaultPoolTLSAPI && data["tls_enabled"] == true {
+					if data["admin_state_up"] != false || data["backend_tls_hostname"] == nil || data["ca_tls_container_ref"] == nil {
+						reject()
+						return
+					}
+					if _, present := data["tls_container_ref"]; !present {
+						data["tls_container_ref"] = nil
+					}
+					if _, present := data["alpn_protocols"]; !present {
+						data["alpn_protocols"] = []string{"h2", "http/1.1", "http/1.0"}
+					}
+				}
 				data["listeners"] = []map[string]any{}
 				if f.tcpRejectionAPI {
 					data["tcp_connection_rejection"] = nil
@@ -288,6 +308,17 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 			payload := body[kind.name]
+			if f.tcpDefaultPoolTLSAPI && listPath == tcpPools && entry["tls_enabled"] == true {
+				if slices.ContainsFunc(f.children(tcpListeners), func(listener map[string]any) bool {
+					return listener["default_pool_id"] == entry["id"]
+				}) || payload["admin_state_up"] == nil {
+					reject()
+					return
+				}
+				entry["admin_state_up"] = payload["admin_state_up"]
+				safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
+				return
+			}
 			if resource == tcpPool {
 				persistence, found := payload["session_persistence"]
 				if f.inventory[tcpListener]["default_pool_id"] != nil || !found || persistence != nil {
@@ -324,6 +355,19 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				f.inventory[tcpPools+"/"+entry["default_pool_id"].(string)]["udp_packet_drop"] != nil {
 				w.WriteHeader(http.StatusConflict)
 				return
+			}
+			if f.tcpDefaultPoolTLSAPI && listPath == tcpListeners && ok {
+				authenticated := target != nil && f.inventory[tcpPools+"/"+target.(string)]["tls_enabled"] == true
+				if authenticated || entry["tcp_default_pool_tls"] == true {
+					if payload["tcp_default_pool_tls"] != authenticated {
+						reject()
+						return
+					}
+				}
+				if enabled, present := payload["tcp_default_pool_tls"]; present {
+					entry["tcp_default_pool_tls"] = enabled
+					delete(payload, "tcp_default_pool_tls")
+				}
 			}
 			if listPath != tcpListeners || !ok || len(payload) != 1 || target != nil && !f.poolReady(target.(string)) {
 				reject()

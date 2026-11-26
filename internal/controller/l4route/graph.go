@@ -324,7 +324,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if collect {
 		mode = topology.Topology.MemberMode
 	}
-	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, r.tcpXBackendProfile(gateway, topology.Topology.MemberMode), collect)
+	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, r.tcpXBackendProfile(gateway, topology.Topology.MemberMode), gateway.Spec.GatewayClassName, singletonTCPReference(route), collect)
 	revisions.services = invalid.services
 	revisions.xBackends = invalid.xBackends
 	revisions.imports = invalid.imports

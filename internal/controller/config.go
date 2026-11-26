@@ -94,6 +94,8 @@ type Config struct {
 	BackendRetryBudget bool
 	// TCPConnectionRejection opts into proportional rejection on TCPRoute and TLSRoute pools.
 	TCPConnectionRejection bool
+	// TCPDefaultPoolTLS enables XBackend authentication on a clear TCP listener.
+	TCPDefaultPoolTLS bool
 	// UDPPacketDrop opts eligible UDPRoute pools into proportional packet discard.
 	UDPPacketDrop bool
 	// TelemetryPolicy enables Experimental Gateway tracing on a capable Octavia provider.
@@ -246,6 +248,9 @@ func (c Config) Validate() error {
 	}
 	if c.XBackendSessionPersistence && !c.XBackendEnabled() {
 		return fmt.Errorf("--octavia-xbackend-session-persistence requires --gateway-api-channel=experimental")
+	}
+	if c.TCPDefaultPoolTLS && (!c.XBackendEnabled() || !c.BackendTLSPolicy) {
+		return fmt.Errorf("--octavia-tcp-default-pool-tls requires --gateway-api-channel=experimental and --octavia-backend-tls-policy")
 	}
 	if c.XBackendClientCertificate && (!c.XBackendEnabled() || !c.BackendTLSPolicy) {
 		return fmt.Errorf("--xbackend-client-certificate-map requires --gateway-api-channel=experimental and --octavia-backend-tls-policy")

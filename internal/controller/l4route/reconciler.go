@@ -51,6 +51,8 @@ type Reconciler struct {
 	Coordinator                     *graph.Coordinator
 	Protocol                        gatewayv1.ProtocolType // TCP (including the zero value) or UDP.
 	TCPConnectionRejectionAvailable func(context.Context) (bool, error)
+	TCPDefaultPoolTLSAvailable      func(context.Context) (bool, error)
+	XBackendClientCertificates      graph.XBackendClientCertificateResolver
 	UDPPacketDropAvailable          func(context.Context) (bool, error)
 	externalHostnames               tcpExternalHostnameCache
 }
@@ -377,12 +379,12 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, r.tcpXBackendProfile(parent.gateway, topologyMode), collectShare)
+	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, r.tcpXBackendProfile(parent.gateway, topologyMode), parent.gateway.Spec.GatewayClassName, singletonTCPReference(route), collectShare)
 	if err != nil {
 		return routePlan{}, err
 	}
 	plan.serviceImports.imports = resolvedRejections.imports
-	if resolvedRejections.retryImports {
+	if resolvedRejections.retryImports || resolvedRejections.retryTLS {
 		plan.requeue = 5 * time.Second
 	}
 	activeRejection := cmp.Or(authRejections.active, resolvedRejections.active)
@@ -553,6 +555,10 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 			members = routedTCPMembers(answers[hostname], int(backend.xBackend.Spec.Port.Number))
 		} else {
 			members, diagnostic, err = r.transportMembers(ctx, backend, topology, gateway.Status.Addresses, matchVIPFamily)
+			if err != nil && backend.backendTLS != nil && ctx.Err() == nil {
+				diagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting to read the authenticated XBackend endpoints", NoReadyEndpoints: true}
+				err = nil
+			}
 		}
 		if err == nil && (r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
 			diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
@@ -598,6 +604,10 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		BackendSecurityGroupIDs: topology.Topology.BackendSecurityGroupIDs,
 		HealthMonitor:           topology.HealthMonitor, Members: members,
 		TCPConnectionRejection: rejection, UDPPacketDrop: drop,
+	}
+	if len(serving) == 1 && serving[0].backendTLS != nil {
+		spec.BackendTLS = serving[0].backendTLS
+		spec.TCPXBackendClientCertificateReference = serving[0].clientCertificate
 	}
 	if drop != nil {
 		// Octavia's guarded UDP pool uses EndpointSlice readiness only.

@@ -1352,7 +1352,12 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		err = p.octavia.SetListenerHTTPSVirtualHosts(ctx, listenerID, httpsVirtualHosts(step.scopedListener))
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
-		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
+		if step.tcpDefaultPoolTLS || actual.tcpDefaultPoolTLS[listenerID] ||
+			step.kind == graphClearListenerDefaultPool && actual.listenerHasManagedTCPDefaultPoolTLS(listenerID) {
+			err = p.octavia.SetTCPDefaultPoolTLS(ctx, listenerID, step.poolID, step.kind == graphSetListenerDefaultPool && step.tcpDefaultPoolTLS)
+		} else {
+			_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
+		}
 	case graphRouteMutation:
 		if step.route.kind == routeMutationClaimBackendCA {
 			if desired.spec.Gateway.ClaimBackendCA == nil {
