@@ -450,8 +450,8 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return invalid(errors.New("pending h2c requires a cleartext HTTP XBackend pool"))
 		}
 		if serviceImport && (backend.BackendTLS != nil || backend.BackendRetryBudget != nil || backend.BackendRetryBudgetPending ||
-			!unavailable && !backend.RoutedExternal || mirrorsUsed[index]) {
-			return invalid(errors.New("ServiceImport requires a primary routed pool without Service transport policies"))
+			!unavailable && !backend.RoutedExternal) {
+			return invalid(errors.New("ServiceImport requires a routed pool without Service transport policies"))
 		}
 		routedXBackend := xBackend && !spec.GRPC && backend.BackendRetryBudget == nil && !backend.InvalidReference
 		if backend.RoutedExternal && (spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 ||

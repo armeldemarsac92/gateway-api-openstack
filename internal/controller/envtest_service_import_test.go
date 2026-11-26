@@ -53,6 +53,7 @@ import (
 type serviceImportAPITestProbe struct {
 	failGet           atomic.Bool
 	failedGets        atomic.Int64
+	backendGets       atomic.Int64
 	discoveryRequests atomic.Int64
 }
 
@@ -72,6 +73,7 @@ func (t serviceImportAPITestTransport) RoundTrip(request *http.Request) (*http.R
 	case path == groupPath || path == "/apis/apiextensions.k8s.io/v1/customresourcedefinitions/serviceimports.multicluster.x-k8s.io":
 		t.probe.discoveryRequests.Add(1)
 	case request.Method == http.MethodGet && strings.HasPrefix(path, groupPath+"/namespaces/") && strings.Contains(path, "/serviceimports/"):
+		t.probe.backendGets.Add(1)
 		if t.probe.failGet.Load() {
 			t.probe.failedGets.Add(1)
 			return nil, errors.New("fixture: transient ServiceImport GET failure")
@@ -213,15 +215,13 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
 
 		remote.Labels[discoveryv1.LabelServiceName] = shared
-		remote.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(object, mcs.SchemeGroupVersion.WithKind("ServiceImport"))}
 		delete(remote.Labels, mcs.LabelSourceCluster)
 		require.NoError(t, c.Update(ctx, remote))
-		// Loss of MCS provenance withdraws the imported member. Its ownership
-		// still prevents the homonymous Service from picking up the address.
+		// The remaining MCS labels keep the ownerless slice separate from
+		// the homonymous Service while the import withdraws its address.
 		assertMembers(gatewayv1.RouteReasonResolvedRefs, true)
 		remote.Labels[mcs.LabelSourceCluster] = "east"
 		delete(remote.Labels, discoveryv1.LabelServiceName)
-		remote.OwnerReferences = nil
 		require.NoError(t, c.Update(ctx, remote))
 		assertMembers(gatewayv1.RouteReasonResolvedRefs, true, member)
 
@@ -350,6 +350,119 @@ func testServiceImportBackends(t *testing.T, restConfig *rest.Config, c client.C
 	setBetaServed(true)
 	assertRoutes(gatewayv1.RouteReasonResolvedRefs, initialVIP, true)
 
+	t.Run("RequestMirror destinations", func(t *testing.T) {
+		copyBackend := imported.BackendObjectReference
+		httpMirror := func(percent int32) gatewayv1.HTTPRouteFilter {
+			return gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestMirror,
+				RequestMirror: &gatewayv1.HTTPRequestMirrorFilter{BackendRef: copyBackend, Percent: &percent}}
+		}
+		grpcMirror := func(percent int32) gatewayv1.GRPCRouteFilter {
+			return gatewayv1.GRPCRouteFilter{Type: gatewayv1.GRPCRouteFilterRequestMirror,
+				RequestMirror: &gatewayv1.HTTPRequestMirrorFilter{BackendRef: copyBackend, Percent: &percent}}
+		}
+		zero := *local.DeepCopy()
+		zero.Weight = ptr.To(int32(0))
+		http.Spec.Rules = []gatewayv1.HTTPRouteRule{{
+			Filters: []gatewayv1.HTTPRouteFilter{httpMirror(23), httpMirror(0)},
+			BackendRefs: []gatewayv1.HTTPBackendRef{
+				{BackendRef: local, Filters: []gatewayv1.HTTPRouteFilter{httpMirror(41)}},
+				{BackendRef: zero, Filters: []gatewayv1.HTTPRouteFilter{httpMirror(99)}},
+			},
+		}}
+		grpc.Spec.Rules = []gatewayv1.GRPCRouteRule{{
+			Filters: []gatewayv1.GRPCRouteFilter{grpcMirror(23), grpcMirror(0)},
+			BackendRefs: []gatewayv1.GRPCBackendRef{
+				{BackendRef: local, Filters: []gatewayv1.GRPCRouteFilter{grpcMirror(41)}},
+				{BackendRef: zero, Filters: []gatewayv1.GRPCRouteFilter{grpcMirror(99)}},
+			},
+		}}
+		require.NoError(t, c.Update(ctx, http))
+		require.NoError(t, c.Update(ctx, grpc))
+
+		const resolved = gatewayv1.RouteReasonResolvedRefs
+		const denied = gatewayv1.RouteReasonRefNotPermitted
+		assertMirrors := func(httpReason, grpcReason gatewayv1.RouteConditionReason, members ...cloud.Member) {
+			t.Helper()
+			waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+				for _, entry := range []struct {
+					route  client.Object
+					reason gatewayv1.RouteConditionReason
+				}{{http, httpReason}, {grpc, grpcReason}} {
+					if err := c.Get(ctx, client.ObjectKeyFromObject(entry.route), entry.route); err != nil {
+						return false, err
+					}
+					_, parents, _ := controller.RouteParents(entry.route)
+					if len(parents) != 1 || !meta.IsStatusConditionTrue(parents[0].Conditions, "Accepted") ||
+						!meta.IsStatusConditionTrue(parents[0].Conditions, cfg.Domain()+"/Programmed") {
+						return false, nil
+					}
+					refs := meta.FindStatusCondition(parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+					if refs == nil || refs.Reason != string(entry.reason) || refs.ObservedGeneration != entry.route.GetGeneration() ||
+						(refs.Status == metav1.ConditionTrue) != (entry.reason == resolved) {
+						return false, nil
+					}
+					wantMembers := members
+					if entry.reason != resolved {
+						wantMembers = nil
+					}
+					if !serviceImportMirrorTestGraph(provider, entry.route, serviceEndpoint, wantMembers) {
+						return false, nil
+					}
+				}
+				return true, nil
+			})
+		}
+		assertMirrors(resolved, resolved, cloud.Member{Address: initialVIP, Port: 80, RoutedExternal: true})
+
+		bothKinds := slices.Clone(importGrant.Spec.From)
+		importGrant.Spec.From = bothKinds[1:]
+		require.NoError(t, c.Update(ctx, importGrant))
+		assertMirrors(denied, resolved, cloud.Member{Address: initialVIP, Port: 80, RoutedExternal: true})
+		require.NoError(t, c.Delete(ctx, importGrant))
+		assertMirrors(denied, denied)
+		gets := probe.backendGets.Load()
+		require.Never(t, func() bool { return probe.backendGets.Load() != gets }, 500*time.Millisecond, 20*time.Millisecond)
+
+		importGrant = &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: targets, Name: "allow-import"}, Spec: importGrant.Spec}
+		importGrant.Spec.From = bothKinds
+		require.NoError(t, c.Create(ctx, importGrant))
+		assertMirrors(resolved, resolved, cloud.Member{Address: initialVIP, Port: 80, RoutedExternal: true})
+
+		remote := mcsEndpointSlice(targets, shared, "east", "h2c", "10.2.0.31", 9080)
+		remote.Labels[discoveryv1.LabelServiceName] = shared
+		require.NoError(t, c.Create(ctx, remote))
+		object.Spec.Type, object.Spec.IPs = mcs.Headless, nil
+		require.NoError(t, c.Update(ctx, object))
+		assertMirrors(resolved, resolved, cloud.Member{Address: "10.2.0.31", Port: 9080, RoutedExternal: true})
+
+		remote.Ports[0].Port = ptr.To(int32(9081))
+		remote.Endpoints[0].Addresses[0] = "10.2.0.32"
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved, cloud.Member{Address: "10.2.0.32", Port: 9081, RoutedExternal: true})
+		remote.Endpoints[0].Conditions.Ready = ptr.To(false)
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved)
+
+		remote.Endpoints[0].Conditions.Ready = ptr.To(true)
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved, cloud.Member{Address: "10.2.0.32", Port: 9081, RoutedExternal: true})
+
+		manager := remote.Labels[discoveryv1.LabelManagedBy]
+		delete(remote.Labels, discoveryv1.LabelManagedBy)
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved)
+		remote.Labels[discoveryv1.LabelManagedBy] = manager
+		require.NoError(t, c.Update(ctx, remote))
+		assertMirrors(resolved, resolved, cloud.Member{Address: "10.2.0.32", Port: 9081, RoutedExternal: true})
+
+		require.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(http), http))
+		require.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(grpc), grpc))
+		http.Spec.Rules = []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: local}, {BackendRef: imported}}}}
+		grpc.Spec.Rules = []gatewayv1.GRPCRouteRule{{BackendRefs: []gatewayv1.GRPCBackendRef{{BackendRef: local}, {BackendRef: imported}}}}
+		require.NoError(t, c.Update(ctx, http))
+		require.NoError(t, c.Update(ctx, grpc))
+	})
+
 	require.NoError(t, c.Delete(ctx, &crd))
 	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
 		err := c.Get(ctx, client.ObjectKeyFromObject(&crd), &crd)
@@ -391,6 +504,47 @@ func serviceImportTestGraph(provider *recordingProvider, route client.Object, se
 				imported.Namespace == service.Namespace && imported.Name == service.Name && imported.Port == service.Port &&
 				identity.HTTPBackendPoolKey(imported) != identity.HTTPBackendPoolKey(service) &&
 				imported.Unavailable == (len(members) == 0) && slices.Equal(imported.Members, members)
+		}
+	}
+	return false
+}
+
+func serviceImportMirrorTestGraph(provider *recordingProvider, route client.Object, serviceEndpoint string, members []cloud.Member) bool {
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	for _, observation := range slices.Backward(provider.graphSpecs) {
+		for _, node := range observation.Routes {
+			spec := node.Spec
+			if spec.Identity.RouteUID != string(route.GetUID()) {
+				continue
+			}
+			_, grpc := route.(*gatewayv1.GRPCRoute)
+			if node.Disposition != cloud.GraphEnsure || spec.GRPC != grpc || len(spec.WeightedHTTPRules) != 1 {
+				return false
+			}
+			rule := spec.WeightedHTTPRules[0]
+			if len(rule.Matches) != 1 || len(rule.Targets) != 2 || rule.Targets[0].Weight != 2 || rule.Targets[1].Weight != 0 ||
+				rule.Targets[0].BackendIndex == nil || len(rule.Targets[1].RequestMirrors) != 0 {
+				return false
+			}
+			service := spec.HTTPBackends[*rule.Targets[0].BackendIndex]
+			if service.Kind != "" || service.RoutedExternal || len(service.Members) != 1 ||
+				service.Members[0].Address != serviceEndpoint || service.Members[0].Port != 8080 {
+				return false
+			}
+			ruleCopies, backendCopies := rule.Matches[0].RequestMirrors, rule.Targets[0].RequestMirrors
+			if len(members) == 0 {
+				return len(ruleCopies) == 0 && len(backendCopies) == 0 && len(spec.HTTPBackends) == 1
+			}
+			if len(ruleCopies) != 1 || len(backendCopies) != 1 || ruleCopies[0].BackendIndex != backendCopies[0].BackendIndex ||
+				ruleCopies[0].Numerator != 23 || ruleCopies[0].Denominator != 100 ||
+				backendCopies[0].Numerator != 41 || backendCopies[0].Denominator != 100 {
+				return false
+			}
+			imported := spec.HTTPBackends[ruleCopies[0].BackendIndex]
+			return imported.Kind == cloud.HTTPBackendKindServiceImport && imported.RoutedExternal && imported.BackendH2C &&
+				imported.Namespace == service.Namespace && imported.Name == service.Name && imported.Port == service.Port &&
+				identity.HTTPBackendPoolKey(imported) != identity.HTTPBackendPoolKey(service) && slices.Equal(imported.Members, members)
 		}
 	}
 	return false

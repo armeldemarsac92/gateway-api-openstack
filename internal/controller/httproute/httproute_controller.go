@@ -386,6 +386,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	httpRoute := scope.route
 	graphResult, err := r.ensureRouteGraph(ctx, httpRoute, parent.gateway)
 	scope.corsFallback = graphResult.corsFallback
+	scope.serviceImports = graphResult.serviceImports
 	if graphResult.selection != nil {
 		scope.parentSelection = graphResult.selection
 		scope.rejectedSections = graphResult.rejectedSections
@@ -514,7 +515,6 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	scope.statusPlan.persistenceRevision = graphResult.persistenceRevision
 	scope.statusPlan.servicePersistenceRevision = graphResult.servicePersistenceRevision
 	scope.statusPlan.xBackendTransportRevision = graphResult.xBackendTransportRevision
-	scope.statusPlan.serviceImports = graphResult.serviceImports
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: resyncAfter}, nil
 }
