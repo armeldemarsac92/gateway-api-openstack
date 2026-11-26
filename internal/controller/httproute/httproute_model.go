@@ -37,6 +37,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 type routeErrorKind string
@@ -939,7 +940,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			default:
 				result.diagnostic = serviceImportTransportIssue(backend, spec.MemberMode, inputs.serviceImportH2CIssue)
 				if result.diagnostic.Reason == "" {
-					members = []cloud.Member{{Address: backend.ServiceImportVIP, Port: int(backend.Port.Port)}}
+					members = routebackend.ServiceImportMembers(backend.ServiceImportDestinations)
 				}
 			}
 		case backend.Diagnostic != nil && spec.GRPC:

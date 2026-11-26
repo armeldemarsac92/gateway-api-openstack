@@ -108,7 +108,7 @@ func testTLSRouteServiceImportBackends(t *testing.T, restConfig *rest.Config, c 
 		require.NoError(t, c.Create(ctx, object), "%T %s", object, object.GetName())
 	}
 	serviceAllowed := true
-	assertRoute := func(route *gatewayv1.TLSRoute, reason gatewayv1.RouteConditionReason, importedUID, address string, programmed bool) {
+	assertDestination := func(route *gatewayv1.TLSRoute, reason gatewayv1.RouteConditionReason, importedUID, address string, port int, programmed bool) {
 		t.Helper()
 		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
 			if err := c.Get(ctx, client.ObjectKeyFromObject(route), route); err != nil {
@@ -138,14 +138,14 @@ func testTLSRouteServiceImportBackends(t *testing.T, restConfig *rest.Config, c 
 			if route == independent {
 				return (address == "" && !found) || found && target.ServiceUID == importedUID && target.ServicePort == 9443 &&
 					target.BackendSubnetID == "" && target.BackendTLS == nil &&
-					slices.Equal(target.Members, []cloud.Member{{Address: address, Port: 9443, RoutedExternal: true}}), nil
+					slices.Equal(target.Members, []cloud.Member{{Address: address, Port: port, RoutedExternal: true}}), nil
 			}
 			if !found || target.BackendSubnetID == "" || target.BackendTLS != nil {
 				return false, nil
 			}
 			if !serviceAllowed {
 				return slices.Equal(target.BackendServices, []cloud.TLSBackendService{{UID: importedUID, Port: 443}}) &&
-					slices.Equal(target.Members, []cloud.Member{{Address: address, Port: 443, Weight: 1, RoutedExternal: true}}) &&
+					slices.Equal(target.Members, []cloud.Member{{Address: address, Port: port, Weight: 1, RoutedExternal: true}}) &&
 					target.TCPConnectionRejection != nil && *target.TCPConnectionRejection == (cloud.TCPConnectionRejection{RejectWeight: 2, TotalWeight: 5}), nil
 			}
 			serviceWeight := 2
@@ -162,8 +162,16 @@ func testTLSRouteServiceImportBackends(t *testing.T, restConfig *rest.Config, c 
 			}
 			return target.TCPConnectionRejection == nil && len(target.BackendServices) == 2 && len(target.Members) == 2 &&
 				slices.Contains(target.BackendServices, cloud.TLSBackendService{UID: importedUID, Port: 443}) &&
-				slices.Contains(target.Members, cloud.Member{Address: address, Port: 443, Weight: 3, RoutedExternal: true}), nil
+				slices.Contains(target.Members, cloud.Member{Address: address, Port: port, Weight: 3, RoutedExternal: true}), nil
 		})
+	}
+	assertRoute := func(route *gatewayv1.TLSRoute, reason gatewayv1.RouteConditionReason, importedUID, address string, programmed bool) {
+		t.Helper()
+		port := 443
+		if route == independent {
+			port = 9443
+		}
+		assertDestination(route, reason, importedUID, address, port, programmed)
 	}
 	checkAvailable := func(object *mcs.ServiceImport, vip string) {
 		t.Helper()
@@ -187,6 +195,32 @@ func testTLSRouteServiceImportBackends(t *testing.T, restConfig *rest.Config, c 
 	object := &mcs.ServiceImport{ObjectMeta: metav1.ObjectMeta{Namespace: targets, Name: shared}, Spec: *spec.DeepCopy()}
 	require.NoError(t, c.Create(ctx, object))
 	checkAvailable(object, initialVIP)
+	t.Run("Headless TLS endpoint lifecycle", func(t *testing.T) {
+		const remoteIP = "10.4.0.31"
+		remote := mcsEndpointSlice(targets, shared, "east", "tls", remoteIP, 7443)
+		remote.Ports = append(remote.Ports, discoveryv1.EndpointPort{Name: ptr.To("other"), Port: ptr.To(int32(10443))})
+		require.NoError(t, c.Create(ctx, remote))
+		object.Spec.Type = mcs.Headless
+		object.Spec.IPs = nil
+		require.NoError(t, c.Update(ctx, object))
+		uid := string(object.UID)
+		assertDestination(weighted, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 7443, true)
+		assertDestination(independent, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 10443, true)
+
+		remote.Endpoints[0].Conditions.Ready = ptr.To(false)
+		require.NoError(t, c.Update(ctx, remote))
+		assertRoute(weighted, gatewayv1.RouteReasonResolvedRefs, "", "", true)
+		assertRoute(independent, gatewayv1.RouteReasonResolvedRefs, "", "", false)
+		remote.Endpoints[0].Conditions.Ready = ptr.To(true)
+		require.NoError(t, c.Update(ctx, remote))
+		assertDestination(weighted, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 7443, true)
+		assertDestination(independent, gatewayv1.RouteReasonResolvedRefs, uid, remoteIP, 10443, true)
+
+		object.Spec = *spec.DeepCopy()
+		require.NoError(t, c.Update(ctx, object))
+		checkAvailable(object, initialVIP)
+		require.NoError(t, c.Delete(ctx, remote))
+	})
 
 	importGrant.Spec.To[0].Name = ptr.To(gatewayv1.ObjectName("another"))
 	require.NoError(t, c.Update(ctx, importGrant))

@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-TCPRoute can forward raw TCP connections to Pods selected by an Experimental XBackend. [Build record](image.json) · [TCP traffic and Pod eligibility](provider/tcproute-xbackend/README.md)
+Gateway routes can forward to IPv4 endpoints of a Headless ServiceImport. [Build record](image.json) · [HTTP, gRPC and TLS observations](provider/headless-service-imports/README.md)
+
+TCPRoute can forward raw TCP connections to Pods selected by an Experimental XBackend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-62ac0896591cc64c266d9159453f143c4fc6d05c/image.json) · [TCP traffic and Pod eligibility](provider/tcproute-xbackend/README.md)
 
 TLSRoute can forward connections to an MCS ClusterSetIP in IPv4 Endpoint mode. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-adcc77aa0cc17bda1550d2cb376436a4e8c19f6b/image.json) · [ServiceImport TLS traffic](provider/tlsroute-service-imports/README.md)
 

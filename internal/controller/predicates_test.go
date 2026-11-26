@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
+	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1beta1"
 )
 
 func TestGatewayReconcilePredicate(t *testing.T) {
@@ -366,6 +367,9 @@ func TestEndpointSlicePredicate(t *testing.T) {
 	controlled := base.DeepCopy()
 	controlled.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: "backend", UID: "previous", Controller: ptr.To(true)}}
 	testPredicateUpdate(t, pred, base, controlled, true, "controlling Service added")
+	importOwned := base.DeepCopy()
+	importOwned.OwnerReferences = []metav1.OwnerReference{{APIVersion: mcs.SchemeGroupVersion.String(), Kind: "ServiceImport", Name: "backend", UID: "import"}}
+	testPredicateUpdate(t, pred, base, importOwned, true, "explicit ServiceImport owner excludes the slice from the local Service")
 	ownerChanged := controlled.DeepCopy()
 	ownerChanged.OwnerReferences[0].UID = "current"
 	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service UID changed")
