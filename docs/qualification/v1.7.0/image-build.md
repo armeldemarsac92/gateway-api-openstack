@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The Experimental XMesh reporter recognizes the producer and consumer ServiceImport pilots. [Build record](image.json) · [Namespace-scoped imported Service routing](provider/mesh-consumer-service-imports/README.md)
+This controller can retire HTTPRoute policies after regional confirmation of the listener closure. [Build record](image.json) · [Redirect case reports](provider/closed-listener-policy-removal/README.md)
+
+The Experimental XMesh reporter recognizes the producer and consumer ServiceImport pilots. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-c624b69a60e82da95597ad856b63ef3efd5b1044/image.json) · [Namespace-scoped imported Service routing](provider/mesh-consumer-service-imports/README.md)
 
 A Gateway reports the conflicting protocol on each affected listener when a TCP and HTTP listener share a port. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0cc92b4ab3ea59ec2f9211a4853ca6901b5872f2/image.json) · [Listener conditions and TCP traffic](provider/shared-tcp-port-conflict/README.md)
 

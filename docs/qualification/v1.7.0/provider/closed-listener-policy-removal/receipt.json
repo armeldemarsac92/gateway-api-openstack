@@ -1,0 +1,249 @@
+{
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "case": "HTTPRouteRedirectPortAndScheme",
+  "caseTimeoutOverrides": {},
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "0e729b171594b058f09783aede6b7221eb62e85d",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:bbec8f5c750e247ea79cdc79d28735c8c64ad3b498d7ac5548128500d0058af7",
+    "configDigest": "sha256:ce9436d19a9ca552c6fefb850c76951713ecbf71e0aa01c2d3fba1957f8a3376",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "a57bc77a2d8d485876dd98a44145c07aba01c0af1b3a9c0bc17b51ec38516a75",
+    "managerSHA256": "8743f3aa3425725e880e882e699d13e6e4b4a94e0e45c4dcb70fa0353a95b98b",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "octavia": {
+    "source": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+    "wheelSHA256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5"
+  },
+  "octaviaLib": {
+    "source": "735564bb8701e13495cc79554170ab65ceb1a811",
+    "wheelSHA256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b"
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "closedListenerOptIn": true,
+      "case": "HTTPRouteRedirectPortAndScheme",
+      "upstreamExit": 0,
+      "fixtureExit": 0,
+      "officialVerdict": "PASS",
+      "statistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 62
+      },
+      "officialReportSHA256": "1c15dc70f2da6d489750e2a8559e384a5b85539d327f3c8f358091248a95f00e",
+      "runReceiptSHA256": "b91e1f2b37c1d5d55ef82aac3adcc42910f82adf941866ee771c2f03340c4181",
+      "caseTimeoutOverrides": {},
+      "successfulRedirectSubtests": {
+        "http-listener-on-80": 6,
+        "http-listener-on-8080": 3,
+        "https-listener-on-443": 6
+      },
+      "upstreamSource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "upstreamProgramSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+      "channelBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "managerSHA256": "8743f3aa3425725e880e882e699d13e6e4b4a94e0e45c4dcb70fa0353a95b98b",
+      "controller": {
+        "source": "0e729b171594b058f09783aede6b7221eb62e85d",
+        "manifestDigest": "sha256:bbec8f5c750e247ea79cdc79d28735c8c64ad3b498d7ac5548128500d0058af7"
+      },
+      "octavia": {
+        "source": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+        "wheelSHA256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5"
+      },
+      "octaviaLib": {
+        "source": "735564bb8701e13495cc79554170ab65ceb1a811",
+        "wheelSHA256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b"
+      },
+      "officialCleanupPassed": true,
+      "kubernetes443Watch": {
+        "seenRouteUIDs": 0,
+        "readerFinished": true,
+        "eventsObserved": 0,
+        "deletionEvent": false,
+        "readAfterDeletionNotFound": null,
+        "watchSHA256": "ab050a0bb57888329c9d11f011592a223dd231b44455ebe91e41d31ffd66bc2e",
+        "firstTerminatingFinalizers": null,
+        "observerError": "ValueError"
+      },
+      "nativeMutationSummary": {
+        "acknowledgedClosures": 1,
+        "distinctListenersWithGuardedRemoval": 1,
+        "removedPoliciesWithCurrentClosure": 24,
+        "guardedRemovalCalls": 24,
+        "rawSHA256": "de1efd19b20becf266f3cc7a9c4e8343b95b0142e1f49d25c194b117d3ef43be"
+      },
+      "upstreamCleanupLog": {
+        "deletionLogSHA256": "b14116c1f935bd054ca43f82038a39677047149e9d4a54dcc4ca821d6a8f1319",
+        "secondsFrom443DeletionStartToNextRouteDeletionStart": 18.412334
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "closedListenerOptIn": true,
+      "case": "HTTPRouteRedirectPortAndScheme",
+      "upstreamExit": 0,
+      "fixtureExit": 0,
+      "officialVerdict": "PASS",
+      "statistics": {
+        "Failed": 0,
+        "Passed": 1,
+        "Skipped": 63
+      },
+      "officialReportSHA256": "a9ce65226769c77a6c359c04bd770a9ac07777bcc97267b67bd9b3e60b7eaee3",
+      "runReceiptSHA256": "151eb12aa55b7e7a8e266afe19b9fffe0c83770ec75c2d607358e3dc1333af32",
+      "caseTimeoutOverrides": {},
+      "successfulRedirectSubtests": {
+        "http-listener-on-80": 6,
+        "http-listener-on-8080": 3,
+        "https-listener-on-443": 6
+      },
+      "upstreamSource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "upstreamProgramSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+      "channelBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "managerSHA256": "8743f3aa3425725e880e882e699d13e6e4b4a94e0e45c4dcb70fa0353a95b98b",
+      "controller": {
+        "source": "0e729b171594b058f09783aede6b7221eb62e85d",
+        "manifestDigest": "sha256:bbec8f5c750e247ea79cdc79d28735c8c64ad3b498d7ac5548128500d0058af7"
+      },
+      "octavia": {
+        "source": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+        "wheelSHA256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5"
+      },
+      "octaviaLib": {
+        "source": "735564bb8701e13495cc79554170ab65ceb1a811",
+        "wheelSHA256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b"
+      },
+      "officialCleanupPassed": true,
+      "kubernetes443Watch": {
+        "seenRouteUIDs": 1,
+        "readerFinished": true,
+        "eventsObserved": 8,
+        "deletionEvent": true,
+        "readAfterDeletionNotFound": true,
+        "watchSHA256": "0b98eb71733484528f339e4c7ac0523686e9e9fecdcb2c71dc0efc03659eb7cb",
+        "firstTerminatingFinalizers": [
+          "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d",
+          "gateway-api-openstack.github.io/httproute-binding-9c0d66d4745d-15bfe59cf224-h-6c1dfeb3efda"
+        ],
+        "secondsFromFirstObservedTerminationToConfirmedAbsence": 18.594059,
+        "observerError": null
+      },
+      "nativeMutationSummary": {
+        "acknowledgedClosures": 2,
+        "distinctListenersWithGuardedRemoval": 1,
+        "removedPoliciesWithCurrentClosure": 24,
+        "guardedRemovalCalls": 24,
+        "rawSHA256": "7258503c5b2d2d6a2e6340ad537f92d424f3fc9d193bcb7b6780ab2ff9e366b0"
+      },
+      "upstreamCleanupLog": {
+        "deletionLogSHA256": "031568127dbc1babc396718b90c1252fe62bbd825068dd5bb5efbffab68b6526",
+        "secondsFrom443DeletionStartToNextRouteDeletionStart": 18.609898
+      }
+    }
+  },
+  "samePairStandardWithoutOptIn": {
+    "channel": "standard",
+    "closedListenerOptIn": false,
+    "case": "HTTPRouteRedirectPortAndScheme",
+    "upstreamExit": 1,
+    "fixtureExit": 1,
+    "officialVerdict": "FAIL",
+    "statistics": {
+      "Failed": 1,
+      "Passed": 0,
+      "Skipped": 62
+    },
+    "officialReportSHA256": "b3d8746019d628a55aad36ba5d18d80c9309bdec7f9e689f8f73815b9139afd6",
+    "runReceiptSHA256": "4722f3a2c1348cddfd9b5d1614c5daa02d73716c108dfb5d3852e7ea09353efe",
+    "caseTimeoutOverrides": {},
+    "successfulRedirectSubtests": {},
+    "upstreamSource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "upstreamProgramSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+    "channelBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "managerSHA256": "8743f3aa3425725e880e882e699d13e6e4b4a94e0e45c4dcb70fa0353a95b98b",
+    "controller": {
+      "source": "0e729b171594b058f09783aede6b7221eb62e85d",
+      "manifestDigest": "sha256:bbec8f5c750e247ea79cdc79d28735c8c64ad3b498d7ac5548128500d0058af7"
+    },
+    "octavia": {
+      "source": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+      "wheelSHA256": "6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5"
+    },
+    "octaviaLib": {
+      "source": "735564bb8701e13495cc79554170ab65ceb1a811",
+      "wheelSHA256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b"
+    },
+    "officialCleanupPassed": false,
+    "kubernetes443Watch": {
+      "seenRouteUIDs": 1,
+      "readerFinished": true,
+      "eventsObserved": 8,
+      "deletionEvent": false,
+      "readAfterDeletionNotFound": null,
+      "watchSHA256": "6773cbbae4165c64b459f5892c0e202c0ccb3392fc81451a3b1638cd492f2d68",
+      "firstTerminatingFinalizers": [
+        "gateway-api-openstack.github.io/httproute-finalizer-9c0d66d4745d",
+        "gateway-api-openstack.github.io/httproute-binding-9c0d66d4745d-8fc29a41cbb6-h-1f5169635541"
+      ],
+      "observerError": null
+    },
+    "nativeMutationSummary": {
+      "acknowledgedClosures": 0,
+      "distinctListenersWithGuardedRemoval": 0,
+      "removedPoliciesWithCurrentClosure": 0,
+      "guardedRemovalCalls": 0,
+      "rawSHA256": "8cdd2af1169d8a9722c468183056661d950cd78115a3193cf4b09893bc900184"
+    },
+    "upstreamCleanupLog": {
+      "deletionLogSHA256": "4302b4fccea9282e4e9a63baf5f593c16b401b1bc2c9e32d297f140ddefcee5c",
+      "secondsFrom443DeletionStartToNextRouteDeletionStart": 30.00049
+    }
+  },
+  "nativeSiblingUpdate": {
+    "previousSHA256": "732962e913a6e69ba5cefae0a9dc00c316e49490187b71bf98cd13b704961801",
+    "correctedSHA256": "37553226ccc1458168e49d5469dd0cd0e04ac198d908109e5e02ab37199ba14f",
+    "allocatedAmphoraPeers": 1,
+    "previousReloads": 0,
+    "updatedSibling": {
+      "rpc": "update_l7policy",
+      "taskOriginalPolicyAndListenerIDs": true,
+      "rpcHasListenerRevision": false,
+      "listenersUpdateCalls": 1,
+      "amphoraDriverUpdateCalls": 1,
+      "taskSource": "octavia/controller/worker/v2/tasks/amphora_driver_tasks.py",
+      "taskSHA256": "6a76a1e1a429692ffaf9a6a51c08d7a0a76cf35579b1f8651c66abdc08c9c4ec",
+      "nativeReloads": 1,
+      "priorConfigSHA256": "90e0aff18c72b49e682a22d8eb86266b181ae40aa736b7714100b80cd66b1422",
+      "activeConfigSHA256": "42683d13b55651a47258d943c1d2654a68622dd62188ecc819c91e38f75adfbe",
+      "httpStatus": 302,
+      "apiProvisioningStatus": "ACTIVE",
+      "apiRedirectURL": "http://example.test/sibling-changed",
+      "locationBeforePUT": "http://example.test/sibling",
+      "locationAfterPUT": "http://example.test/sibling-changed"
+    },
+    "mismatchedPublicationRejected": true
+  },
+  "boundary": "Disposable local kind, installed Octavia WSGI and SQLite, native Amphora task and HAProxy with one fixture peer. Regional active-active delivery and database row locking remain to be measured.",
+  "octaviaPublication": {
+    "pr": "https://github.com/armeldemarsac92/octavia/pull/62",
+    "stable": "460570fb9060fafcedba2907f7a24dc6ab83e7e8",
+    "master": "002556728c0c0277057504fb10be4b7969e2d494",
+    "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-l7policy-closed-listener-removal-460570fb9060",
+    "assets": {
+      "master-qualification.json": "sha256:714455ddf0df01d3914953a4dd1d984e269797556bc7485d0195dd7142c6fc94",
+      "octavia-19.0.1.dev112-py3-none-any.whl": "sha256:6de5d7483091e4c687ba258e7ff4eeaf5b42ce3861737a9c5bfb0310bec540d5",
+      "octavia-19.0.1.dev112.tar.gz": "sha256:08f7d9114d02f7924c07ec115ea0335da3499deca708587378ccb8263c6ae0fb",
+      "octavia-19.1.0.dev239-py3-none-any.whl": "sha256:3208eadabaa1196a05b0dd2f1951e6f8e4a5e88d71bc41eab20092e20fd04f73",
+      "octavia-19.1.0.dev239.tar.gz": "sha256:3ede84d4de774b6461564bca79618bbbf135518e94ebe994f3fed3db51e9294f",
+      "octavia-grpc-authz-linux-amd64": "sha256:4dd3095799f67fc6bdfb2e5b0bd11c2880d979b065ab2fa267536bb46eac51c7",
+      "SHA256SUMS": "sha256:98521874eb62cb6c42513fa332a84543682a8ee8c0f6cfa230c6525d2de2e10d",
+      "stable-qualification.json": "sha256:dc493142b8c002113e35e47cea5d20bedf2f1926a9a391fed04387f76b89d1e3"
+    }
+  }
+}

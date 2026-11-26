@@ -27,18 +27,20 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
-// PolicyRemovalSnapshot binds a closed policy and its complete rules to their load balancer.
+// PolicyRemovalSnapshot binds a policy and its complete rules to their load balancer.
 type PolicyRemovalSnapshot struct {
-	LoadBalancerID string
+	LoadBalancerID           string
+	ListenerClosureConfirmed bool
 	PolicySnapshot
 }
 
 func (s *Service) ObservePolicyRemoval(ctx context.Context, policyID string) (PolicyRemovalSnapshot, error) {
 	var response struct {
 		Removal struct {
-			LoadBalancerID string          `json:"loadbalancer_id"`
-			Revision       string          `json:"revision"`
-			Policy         json.RawMessage `json:"policy"`
+			LoadBalancerID           string          `json:"loadbalancer_id"`
+			ListenerClosureConfirmed bool            `json:"listener_closure_confirmed"`
+			Revision                 string          `json:"revision"`
+			Policy                   json.RawMessage `json:"policy"`
 		} `json:"l7policy_removal"`
 	}
 	url := s.client.ServiceURL("lbaas", "l7policies", policyID, "conditional_removal")
@@ -54,16 +56,25 @@ func (s *Service) ObservePolicyRemoval(ctx context.Context, policyID string) (Po
 		return PolicyRemovalSnapshot{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 			errors.New("incomplete Octavia L7 policy removal identity"))
 	}
-	return PolicyRemovalSnapshot{LoadBalancerID: wire.LoadBalancerID, PolicySnapshot: snapshot}, nil
+	return PolicyRemovalSnapshot{
+		LoadBalancerID: wire.LoadBalancerID, ListenerClosureConfirmed: wire.ListenerClosureConfirmed, PolicySnapshot: snapshot,
+	}, nil
+}
+
+// PolicyRemoval identifies the revision to remove and the required listener state.
+type PolicyRemoval struct {
+	PolicyID                string `json:"-"`
+	ExpectedRevision        string `json:"expected_revision"`
+	RequireListenerDisabled bool   `json:"require_listener_disabled,omitempty"`
 }
 
 // RemovePolicyRevision requests deletion only while the observed revision is current.
-func (s *Service) RemovePolicyRevision(ctx context.Context, policyID, revision string) error {
-	if !validPolicyRevision(revision) {
-		return errors.New("invalid Octavia L7 policy removal revision")
+func (s *Service) RemovePolicyRevision(ctx context.Context, removal PolicyRemoval) error {
+	if removal.PolicyID == "" || !validPolicyRevision(removal.ExpectedRevision) {
+		return errors.New("invalid Octavia L7 policy removal identity or revision")
 	}
-	body := map[string]any{"l7policy_removal": map[string]string{"expected_revision": revision}}
-	url := s.client.ServiceURL("lbaas", "l7policies", policyID, "conditional_removal")
+	body := map[string]PolicyRemoval{"l7policy_removal": removal}
+	url := s.client.ServiceURL("lbaas", "l7policies", removal.PolicyID, "conditional_removal")
 	_, err := s.client.Post(ctx, url, body, nil, &gophercloud.RequestOpts{OkCodes: []int{http.StatusAccepted}})
 	if err != nil {
 		return fmt.Errorf("request conditional Octavia L7 policy removal: %w", err)
