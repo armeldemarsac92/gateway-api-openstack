@@ -30,6 +30,8 @@ The [Magnum operator guide](magnum-operator.md) covers how to build the patch, s
 
 ## Profile records
 
+The Standard GATEWAY-HTTP Extended selection on signed controller `aba071b9` passed 60 of 63 with the 10-minute OpenStack resync and zero skips. The invalid CA reference, backend certificate SAN and ListenerSet namespace cases passed their traffic and status assertions, then timed out while waiting for HTTPRoute deletion. [Original YAML and case comparison](common-gateway/aba071b9-460570fb/README.md)
+
 On the signed controller `597d921f` and Octavia `300b2638` source pair, the local Standard GATEWAY-HTTP Core suite passed 40/40. Two local Standard Extended runs passed 50/63 with default Go test parallelism and 53/63 with `-test.parallel=1`. Eight Extended cases failed under both settings. [Original reports and fixture scope](common-gateway/597d921f-300b2638/README.md) · [Per-case results](common-gateway/597d921f-300b2638/parallelism-comparison.json)
 
 The same revisions passed 40/40 Experimental GATEWAY-HTTP Core cases and 53/64 Experimental Extended cases. [Experimental reports](common-gateway/597d921f-300b2638/README.md#experimental-http-with-default-parallelism)
