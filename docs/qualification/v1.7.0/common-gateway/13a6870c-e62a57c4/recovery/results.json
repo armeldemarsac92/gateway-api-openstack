@@ -1,0 +1,584 @@
+{
+  "inputs": {
+    "upstream": {
+      "bundles": {
+        "experimental": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "standard": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1"
+      },
+      "conformanceSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+      "registrySHA256": "9e636e9da4db8ba2cb7058860786b5f55442db792b0dbe872ce2c348c81632e0",
+      "source": "e26d183dbbc1bb782b78addbd26faba03955c152"
+    },
+    "controller": {
+      "configDigest": "sha256:5cc100ea9ef23981ca42f1f583343d267863035347b43316aede92fba33500ec",
+      "entrypoint": "/openstack-gateway-controller",
+      "managerSHA256": "503fb37ac7f738c3e1fe55853423472bff8966c67c0fd44ca6a203e9c7dcb3f1",
+      "manifestDigest": "sha256:3c4eb3b1be49b95133f447be47b107a56730d3046b1dd995895108bf5e5f713b",
+      "ociArchiveSHA256": "70ac3cde8b42981aac14c41edfea4ae75b092ae2e01e47a282310478bb98b24d",
+      "ociSignatureVerified": false,
+      "platform": "linux/amd64",
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "13a6870cb63abafa131527b7b1b67048d962cd57",
+      "tree": "4794552a3ece9e1a6ee009751c8c46f60eb8678a",
+      "user": "65532:65532"
+    },
+    "octavia": {
+      "source": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543",
+      "tree": "145c9243a903117e4cdc6707bd5c0ffcd0184896",
+      "wheelSHA256": "33cc7ef8de6f0372e711ce4a7b1f23bf6a8b07a34c30808b7ff442e9b4c82f90"
+    },
+    "octaviaLib": {
+      "source": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+      "tree": "503a73ff7e5e70fd4cd60dbb97c3c71e28f42060",
+      "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+    },
+    "haproxy": {
+      "luaSHA256": "7427a714f36548c20f426d28ee45938e05854c08e4cf6b38fb52680a70a2f6d1",
+      "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f"
+    },
+    "adapters": {
+      "tls": {
+        "extendedRuntimeSHA256": "140ae5907b62ffacc143945a173b3ac8171f07c29cbaa7f0d3d1bfc8ad86be88",
+        "kind_relay.py": {
+          "originalSHA256": "b2fce2863ae5c2857e5e26628a566cbf0806cfde1623f2f005f9584c6d1d3054",
+          "stagedSHA256": "b2fce2863ae5c2857e5e26628a566cbf0806cfde1623f2f005f9584c6d1d3054"
+        },
+        "kind_wire.py": {
+          "originalSHA256": "99ad2c29a0aefdf3d39729d8d4f41b60fc7618257bd7519d17cb313b4ac29d45",
+          "stagedSHA256": "99ad2c29a0aefdf3d39729d8d4f41b60fc7618257bd7519d17cb313b4ac29d45"
+        },
+        "member-tunnel.py": {
+          "originalSHA256": "90ed345026f9e4e297a025fc96ef1c2835afb61a04534baeba815d55964c3eb3",
+          "stagedSHA256": "90ed345026f9e4e297a025fc96ef1c2835afb61a04534baeba815d55964c3eb3"
+        },
+        "native_cloud.py": {
+          "originalSHA256": "b218ecc66f8ba509a8de16389f68a7ee79e32fc4a6fca2f389630de3cca840d5",
+          "stagedSHA256": "b6e8833cc4bf3582c1d89205d19fb9865e9bf72e177f6f1431a57ad6a650ac67"
+        },
+        "network.sh": {
+          "originalSHA256": "94e48c453b4d3ae644de6d0a8adb759aeab1e7149f135b451e1d530c5137dd52",
+          "stagedSHA256": "94e48c453b4d3ae644de6d0a8adb759aeab1e7149f135b451e1d530c5137dd52"
+        },
+        "run-kind-vm.sh": {
+          "originalSHA256": "8ec5da796b7ff12984a08b667ff72f48d787821742d123eae5143a9213e33a93",
+          "stagedSHA256": "0560c4fa1c6089b35f85a1b848bdd01f99a9dc40efe4634ae79acadfdaba1b03"
+        },
+        "run.sh": {
+          "originalSHA256": "cbf905dfd07f1b05cc18d97070dde2b1ee6e3a5a6dddf9564d5e97328ef9eb90",
+          "stagedSHA256": "a69fed821c3a55b02c66fb1a5058910edcf79fdc12b6ecc93ca273c836db99ee"
+        },
+        "scenario.py": {
+          "originalSHA256": "bd892ae0db4b5a81ef9ffe145a079899c6f1a2c5b2b592e50bebd3acd9c3df82",
+          "stagedSHA256": "f0ace0fa8c5f2355d06aa0616aab37e734724db151664a2738e8a8c1c73e935b"
+        },
+        "selectionRuntimeSHA256": "df1abd67fccdedc37685603bbb9bceef6e63c4893c90469e57de0478dbfeb998"
+      },
+      "udp": {
+        "extendedRuntimeSHA256": "140ae5907b62ffacc143945a173b3ac8171f07c29cbaa7f0d3d1bfc8ad86be88",
+        "kind_relay.py": {
+          "originalSHA256": "b2fce2863ae5c2857e5e26628a566cbf0806cfde1623f2f005f9584c6d1d3054",
+          "stagedSHA256": "b2fce2863ae5c2857e5e26628a566cbf0806cfde1623f2f005f9584c6d1d3054"
+        },
+        "kind_wire.py": {
+          "originalSHA256": "a024eac214a6eadacd71dfecc8b4da041be94543ca8f74d2e96bd6037072589c",
+          "stagedSHA256": "a024eac214a6eadacd71dfecc8b4da041be94543ca8f74d2e96bd6037072589c"
+        },
+        "member-tunnel.py": {
+          "originalSHA256": "d27c36ab83d1474c3f9eff95d19e6726d220b591a5a4f71c011ae73ba1f23a41",
+          "stagedSHA256": "d27c36ab83d1474c3f9eff95d19e6726d220b591a5a4f71c011ae73ba1f23a41"
+        },
+        "native_cloud.py": {
+          "originalSHA256": "e01e2e92c7a8d5aad16a0cab7c15762bd6853d64a6c07166ad743ec29b3b1cf5",
+          "stagedSHA256": "8dc42bd03ecbac884fad99559dee2d7dc834feb734689ed8732d533adf044e9d"
+        },
+        "network.sh": {
+          "originalSHA256": "d3160b2c60a03cce290880f750c2d57cd1fad143318c9a4a96a2ec8eba67039d",
+          "stagedSHA256": "d3160b2c60a03cce290880f750c2d57cd1fad143318c9a4a96a2ec8eba67039d"
+        },
+        "run-kind-vm.sh": {
+          "originalSHA256": "bead4b315ff8d03ed065964d7b771dd3a46d0978f78a931e6b2a6249b892b877",
+          "stagedSHA256": "65ffd1d857807c1a819615f5e29eb1e6c419f53ba74d958caec037ce74d1d4bc"
+        },
+        "run.sh": {
+          "originalSHA256": "2a993b4202ab256abe83139926b0dc605172ffce63d3aa3363228b2049085e70",
+          "stagedSHA256": "65827a2725e347530514be0c66c125f9a5f1688eacbe91b0b1cbdca3f92089cb"
+        },
+        "scenario.py": {
+          "originalSHA256": "6ffe6daaff522c57c289412a71cb8035bc1257abf0e12f68a9758f5625db0ba6",
+          "stagedSHA256": "7c7f0d8154cd9d745d4324cbf57c0b372353482bd15b3a9dda02366901d662d5"
+        },
+        "selectionRuntimeSHA256": "df1abd67fccdedc37685603bbb9bceef6e63c4893c90469e57de0478dbfeb998",
+        "udp-guest.sh": {
+          "originalSHA256": "0e89ed083ad2fba836a8746f9e49b56132f591f34b20eb246864e8dbb594d549",
+          "stagedSHA256": "0e89ed083ad2fba836a8746f9e49b56132f591f34b20eb246864e8dbb594d549"
+        },
+        "udp_check.sh": {
+          "originalSHA256": "e852c04778de895b99a42d28ef2476a8ef68867cb956cdc9d989a9a317cda2d7",
+          "stagedSHA256": "e852c04778de895b99a42d28ef2476a8ef68867cb956cdc9d989a9a317cda2d7"
+        }
+      }
+    }
+  },
+  "plannedCells": 5,
+  "finishedCells": 5,
+  "cells": [
+    {
+      "profile": "GATEWAY-TLS",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "default",
+      "runnerExit": 1,
+      "excluded": {
+        "TLSRouteListenerMixedTerminationNotSupported": {
+          "dependency": "Disable mixed TCP TLS while keeping Terminate enabled.",
+          "reason": "deployment",
+          "variant": "terminate-only"
+        }
+      },
+      "features": [
+        "BackendTLSPolicy",
+        "Gateway",
+        "GatewayAddressEmpty",
+        "GatewayInfrastructure",
+        "GatewayRouteHostnameIntersectionPrecedence",
+        "GatewayStaticAddresses",
+        "ListenerSet",
+        "ReferenceGrant",
+        "TLSRoute",
+        "TLSRouteModeMixed",
+        "TLSRouteModeTerminate"
+      ],
+      "requiredNestedAssertions": {},
+      "upstreamExit": 1,
+      "durationSeconds": 309.56,
+      "upstreamSubset": {
+        "failedTests": [
+          "BackendTLSPolicyTLSRouteTerminate"
+        ],
+        "result": "failure",
+        "skippedTests": [
+          "TLSRouteListenerMixedTerminationNotSupported"
+        ],
+        "statistics": {
+          "Failed": 1,
+          "Passed": 16,
+          "Skipped": 1
+        },
+        "supportedFeatures": [
+          "BackendTLSPolicy",
+          "GatewayAddressEmpty",
+          "GatewayInfrastructure",
+          "GatewayRouteHostnameIntersectionPrecedence",
+          "GatewayStaticAddresses",
+          "ListenerSet",
+          "TLSRouteModeMixed",
+          "TLSRouteModeTerminate"
+        ],
+        "unsupportedFeatures": [
+          "BackendTLSPolicySANValidation",
+          "ClusterTrustBundle",
+          "GatewayAddressRoutability",
+          "GatewayAddressRoutabilityCluster",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayListenerFilters",
+          "GatewayPort8080"
+        ]
+      },
+      "rawReceiptSHA256": "be91728a251db914e6b43bd7106c57e29319bab93c978b81b7515d7281205b3f",
+      "report": "gateway-tls-experimental-extended-default.yaml",
+      "reportSHA256": "73a5684258f11f80e01a5b8785a2753d3cc69e1211a9e68f013dfe4b99ed89c8",
+      "officialStatistics": {
+        "Failed": 1,
+        "Passed": 16,
+        "Skipped": 1
+      },
+      "additionalStaticAddressObservations": {
+        "caseLogVerdict": "PASS",
+        "usableAddressAllocated": true,
+        "unusableAddressReachedAllocator": false
+      },
+      "originalReceiptCounts": {
+        "ASSERTION-NOT-OBSERVED": 1,
+        "FAIL": 1,
+        "PASS": 15
+      },
+      "outcomes": {
+        "BackendTLSPolicyTLSRouteTerminate": "FAIL",
+        "GatewayInfrastructureMetadata": "PASS",
+        "GatewayInvalidParametersRef": "PASS",
+        "GatewayOptionalAddressValue": "PASS",
+        "GatewayStaticAddresses": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS",
+        "ListenerSetAllowedNamespaceSame": "PASS",
+        "ListenerSetAllowedNamespaceSelector": "PASS",
+        "ListenerSetAllowedRoutesSupportedKinds": "PASS",
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetHostnameConflict": "PASS",
+        "ListenerSetProtocolConflict": "PASS",
+        "ListenerSetReferenceGrant": "PASS",
+        "TLSRouteListenerTerminateSupportedKinds": "PASS",
+        "TLSRouteMixedTerminationSameNamespace": "PASS",
+        "TLSRouteMultipleRoutesAttachmentSameHostnameIntersection": "PASS",
+        "TLSRouteTerminateSimpleSameNamespace": "PASS"
+      },
+      "counts": {
+        "FAIL": 1,
+        "PASS": 16
+      }
+    },
+    {
+      "profile": "GATEWAY-UDP",
+      "channel": "standard",
+      "subset": "core",
+      "variant": "default",
+      "runnerExit": 1,
+      "excluded": {},
+      "features": [
+        "Gateway",
+        "ReferenceGrant",
+        "TLSRoute",
+        "UDPRoute"
+      ],
+      "requiredNestedAssertions": {
+        "UDPRouteNotAllowedByListeners": [
+          "UDPRoute_should_have_Accepted=False_with_reason_NotAllowedByListeners",
+          "Gateway_should_have_0_Routes_attached_on_the_TLS_listener"
+        ]
+      },
+      "upstreamExit": 1,
+      "durationSeconds": 409.65,
+      "upstreamSubset": {
+        "failedTests": [
+          "UDPRouteParentRefAttachAllListeners"
+        ],
+        "result": "failure",
+        "statistics": {
+          "Failed": 1,
+          "Passed": 20,
+          "Skipped": 0
+        }
+      },
+      "rawReceiptSHA256": "5af5dd724c9659a7d26d0c3f3dd08ba927de95481b33df57f44a889491dfa6ca",
+      "report": "gateway-udp-standard-core-default.yaml",
+      "reportSHA256": "5c787d34c98345dbc7940b51968b03a5e1ec3056a55c915eabf8deae2fc0d1b5",
+      "officialStatistics": {
+        "Failed": 1,
+        "Passed": 20,
+        "Skipped": 0
+      },
+      "outcomes": {
+        "GatewayClassObservedGenerationBump": "PASS",
+        "GatewayInvalidRouteKind": "PASS",
+        "GatewayInvalidTLSConfiguration": "PASS",
+        "GatewayListenerUnsupportedProtocol": "PASS",
+        "GatewayModifyListeners": "PASS",
+        "GatewayNameMaximumLength": "PASS",
+        "GatewayObservedGenerationBump": "PASS",
+        "GatewayPreserveForeignConditions": "PASS",
+        "GatewaySecretInvalidReferenceGrant": "PASS",
+        "GatewaySecretMissingReferenceGrant": "PASS",
+        "GatewaySecretReferenceGrantAllInNamespace": "PASS",
+        "GatewaySecretReferenceGrantSpecific": "PASS",
+        "UDPRoute": "PASS",
+        "UDPRouteInvalidBackendRefNonexistent": "PASS",
+        "UDPRouteInvalidCrossNamespaceBackendRef": "PASS",
+        "UDPRouteMultipleRoutesAttachment": "PASS",
+        "UDPRouteNotAllowedByListeners": "PASS",
+        "UDPRouteParentRefAttachAllListeners": "FAIL",
+        "UDPRouteParentRefPortAndSectionName": "PASS",
+        "UDPRouteReferenceGrant": "PASS",
+        "UDPRouteWeightedRouting": "PASS"
+      },
+      "counts": {
+        "PASS": 20,
+        "FAIL": 1
+      }
+    },
+    {
+      "profile": "GATEWAY-UDP",
+      "channel": "standard",
+      "subset": "extended",
+      "variant": "default",
+      "runnerExit": 1,
+      "excluded": {},
+      "features": [
+        "Gateway",
+        "GatewayAddressEmpty",
+        "GatewayInfrastructure",
+        "GatewayStaticAddresses",
+        "ListenerSet",
+        "ReferenceGrant",
+        "UDPRoute"
+      ],
+      "requiredNestedAssertions": {},
+      "upstreamExit": 0,
+      "durationSeconds": 51.31,
+      "upstreamSubset": {
+        "result": "success",
+        "statistics": {
+          "Failed": 0,
+          "Passed": 11,
+          "Skipped": 0
+        },
+        "supportedFeatures": [
+          "GatewayAddressEmpty",
+          "GatewayInfrastructure",
+          "GatewayStaticAddresses",
+          "ListenerSet",
+          "UDPRoute"
+        ],
+        "unsupportedFeatures": [
+          "ClusterTrustBundle",
+          "GatewayAddressRoutability",
+          "GatewayAddressRoutabilityCluster",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayListenerFilters",
+          "GatewayPort8080",
+          "GatewayRouteHostnameIntersectionPrecedence"
+        ]
+      },
+      "rawReceiptSHA256": "5376313c4ac941893ed75a3b1a54f61db717915dc5952e265b0cf96a595a7dbb",
+      "report": "gateway-udp-standard-extended-default.yaml",
+      "reportSHA256": "4cc0a25f3b797faa2669275df0a48c4f41db07cd76fa11b80e711f1fc1376f35",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "additionalStaticAddressObservations": {
+        "caseLogVerdict": "PASS",
+        "usableAddressAllocated": true,
+        "unusableAddressReachedAllocator": false
+      },
+      "originalReceiptCounts": {
+        "ASSERTION-NOT-OBSERVED": 1,
+        "PASS": 10
+      },
+      "outcomes": {
+        "GatewayInfrastructureMetadata": "PASS",
+        "GatewayInvalidParametersRef": "PASS",
+        "GatewayOptionalAddressValue": "PASS",
+        "GatewayStaticAddresses": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS",
+        "ListenerSetAllowedNamespaceSame": "PASS",
+        "ListenerSetAllowedNamespaceSelector": "PASS",
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetHostnameConflict": "PASS",
+        "ListenerSetProtocolConflict": "PASS",
+        "ListenerSetReferenceGrant": "PASS"
+      },
+      "counts": {
+        "PASS": 11
+      }
+    },
+    {
+      "profile": "GATEWAY-UDP",
+      "channel": "experimental",
+      "subset": "core",
+      "variant": "default",
+      "runnerExit": 0,
+      "excluded": {},
+      "features": [
+        "Gateway",
+        "ReferenceGrant",
+        "TLSRoute",
+        "UDPRoute"
+      ],
+      "requiredNestedAssertions": {
+        "UDPRouteNotAllowedByListeners": [
+          "UDPRoute_should_have_Accepted=False_with_reason_NotAllowedByListeners",
+          "Gateway_should_have_0_Routes_attached_on_the_TLS_listener"
+        ]
+      },
+      "upstreamExit": 0,
+      "durationSeconds": 269.98,
+      "upstreamSubset": {
+        "result": "success",
+        "statistics": {
+          "Failed": 0,
+          "Passed": 21,
+          "Skipped": 0
+        }
+      },
+      "rawReceiptSHA256": "bb1886a46bcb50d522b0759011a8a7b0e6046bfdbf9f51e41b438ff85857c1d4",
+      "report": "gateway-udp-experimental-core-default.yaml",
+      "reportSHA256": "af95a0b51b30a7138c09e6dbdecd2a65bab835ac27b5993bdf62688417e39e82",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 21,
+        "Skipped": 0
+      },
+      "outcomes": {
+        "GatewayClassObservedGenerationBump": "PASS",
+        "GatewayInvalidRouteKind": "PASS",
+        "GatewayInvalidTLSConfiguration": "PASS",
+        "GatewayListenerUnsupportedProtocol": "PASS",
+        "GatewayModifyListeners": "PASS",
+        "GatewayNameMaximumLength": "PASS",
+        "GatewayObservedGenerationBump": "PASS",
+        "GatewayPreserveForeignConditions": "PASS",
+        "GatewaySecretInvalidReferenceGrant": "PASS",
+        "GatewaySecretMissingReferenceGrant": "PASS",
+        "GatewaySecretReferenceGrantAllInNamespace": "PASS",
+        "GatewaySecretReferenceGrantSpecific": "PASS",
+        "UDPRoute": "PASS",
+        "UDPRouteInvalidBackendRefNonexistent": "PASS",
+        "UDPRouteInvalidCrossNamespaceBackendRef": "PASS",
+        "UDPRouteMultipleRoutesAttachment": "PASS",
+        "UDPRouteNotAllowedByListeners": "PASS",
+        "UDPRouteParentRefAttachAllListeners": "PASS",
+        "UDPRouteParentRefPortAndSectionName": "PASS",
+        "UDPRouteReferenceGrant": "PASS",
+        "UDPRouteWeightedRouting": "PASS"
+      },
+      "counts": {
+        "PASS": 21
+      }
+    },
+    {
+      "profile": "GATEWAY-UDP",
+      "channel": "experimental",
+      "subset": "extended",
+      "variant": "default",
+      "runnerExit": 1,
+      "excluded": {},
+      "features": [
+        "Gateway",
+        "GatewayAddressEmpty",
+        "GatewayInfrastructure",
+        "GatewayStaticAddresses",
+        "ListenerSet",
+        "ReferenceGrant",
+        "UDPRoute"
+      ],
+      "requiredNestedAssertions": {},
+      "upstreamExit": 0,
+      "durationSeconds": 81.56,
+      "upstreamSubset": {
+        "result": "success",
+        "statistics": {
+          "Failed": 0,
+          "Passed": 11,
+          "Skipped": 0
+        },
+        "supportedFeatures": [
+          "GatewayAddressEmpty",
+          "GatewayInfrastructure",
+          "GatewayStaticAddresses",
+          "ListenerSet",
+          "UDPRoute"
+        ],
+        "unsupportedFeatures": [
+          "ClusterTrustBundle",
+          "GatewayAddressRoutability",
+          "GatewayAddressRoutabilityCluster",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayListenerFilters",
+          "GatewayPort8080",
+          "GatewayRouteHostnameIntersectionPrecedence"
+        ]
+      },
+      "rawReceiptSHA256": "7514a33da23142618f8f80fc30875bb8c8b6f6ae93a9de492f6f6804e917cacc",
+      "report": "gateway-udp-experimental-extended-default.yaml",
+      "reportSHA256": "93468eaf2114396f9517edf6228934da0bd3790eb94adec6cd1f26f270a9e143",
+      "officialStatistics": {
+        "Failed": 0,
+        "Passed": 11,
+        "Skipped": 0
+      },
+      "additionalStaticAddressObservations": {
+        "caseLogVerdict": "PASS",
+        "usableAddressAllocated": true,
+        "unusableAddressReachedAllocator": false
+      },
+      "originalReceiptCounts": {
+        "ASSERTION-NOT-OBSERVED": 1,
+        "PASS": 10
+      },
+      "outcomes": {
+        "GatewayInfrastructureMetadata": "PASS",
+        "GatewayInvalidParametersRef": "PASS",
+        "GatewayOptionalAddressValue": "PASS",
+        "GatewayStaticAddresses": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS",
+        "ListenerSetAllowedNamespaceSame": "PASS",
+        "ListenerSetAllowedNamespaceSelector": "PASS",
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetHostnameConflict": "PASS",
+        "ListenerSetProtocolConflict": "PASS",
+        "ListenerSetReferenceGrant": "PASS"
+      },
+      "counts": {
+        "PASS": 11
+      }
+    }
+  ],
+  "deduplicatedCounts": {
+    "IGNORED-DEPLOYMENT": 1,
+    "FAIL": 2,
+    "PASS": 68
+  },
+  "originalReceiptDeduplicatedCounts": {
+    "IGNORED-DEPLOYMENT": 1,
+    "FAIL": 2,
+    "PASS": 66,
+    "ASSERTION-NOT-OBSERVED": 2
+  },
+  "scope": "Local Kubernetes with the unchanged upstream suite and installed OpenStack code. TLS used HAProxy. UDP used the local Keepalived and IPVS fixture. Regional qualification is open.",
+  "regionalDeployment": false,
+  "originalCampaignAttempts": [
+    {
+      "originalAttempt": "17-tls-e",
+      "followUpAttempt": "01-tls-e",
+      "originalFixtureExit": 1,
+      "originalSetupFailure": "kubeadm timed out creating the administrator ClusterRoleBinding before the test cluster was ready.",
+      "identicalSelectionSHA256": "a104e80e47b46fa5e8f2a921806cef093933ee734dd74b5efb0414aa27866d50"
+    },
+    {
+      "originalAttempt": "19-udp-c",
+      "followUpAttempt": "02-udp-c",
+      "originalFixtureExit": 1,
+      "originalSetupFailure": "The staged UDP runner read an obsolete selection variable before starting the upstream executable.",
+      "identicalSelectionSHA256": "c053096843f4c613ff5cd4511f68066fb191b16945e203cc0754acd84579a480"
+    },
+    {
+      "originalAttempt": "20-udp-e",
+      "followUpAttempt": "03-udp-e",
+      "originalFixtureExit": 1,
+      "originalSetupFailure": "The staged UDP runner read an obsolete selection variable before starting the upstream executable.",
+      "identicalSelectionSHA256": "3f9a20f37fc7f1d7a44d60dfe7c064c9e565cba0753b715267e18708e8f1cb78"
+    },
+    {
+      "originalAttempt": "21-udp-c",
+      "followUpAttempt": "04-udp-c",
+      "originalFixtureExit": 1,
+      "originalSetupFailure": "The staged UDP runner read an obsolete selection variable before starting the upstream executable.",
+      "identicalSelectionSHA256": "71d1faccf4a8da6c7309bac8f9a1bcaeac44a0a9b4013adf453735077867ca2f"
+    },
+    {
+      "originalAttempt": "22-udp-e",
+      "followUpAttempt": "05-udp-e",
+      "originalFixtureExit": 1,
+      "originalSetupFailure": "The staged UDP runner read an obsolete selection variable before starting the upstream executable.",
+      "identicalSelectionSHA256": "ad0ff575dcafdaa8e9b75265f08a19d2c76a8133afa8986583d261b4ef6dcf5c"
+    }
+  ],
+  "udpFixtureChange": {
+    "originalSHA256": "a7fa231f3f0f841b766257570710230dd54fa440b4fdcd3cbe57a856c19a2add",
+    "correctedSHA256": "7c7f0d8154cd9d745d4324cbf57c0b372353482bd15b3a9dda02366901d662d5",
+    "selectionUnchanged": true
+  }
+}
