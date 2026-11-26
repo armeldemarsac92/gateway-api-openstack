@@ -1,0 +1,5 @@
+# Istio 1.31.0 with the Hibiscus consumer GRPCRoute patch, linux/amd64.
+image: ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fd69a489e859f50fa82e297bd11ce55caf9db83764264da6b651aaad1be1e2b6
+pilot:
+  env:
+    PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC: "true"

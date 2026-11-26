@@ -328,11 +328,12 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	acceptClass()
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
 
-	// An existing installation can retain the published producer-only ServiceImport pilot.
+	// Every supported pilot reports the same features after its rollout.
 	for _, image := range []string{
 		ambientComponentImage(t, "consumer-routes.yaml"),
 		"ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ec5e60e39ceda1929d9b28d299a816c88e7fbac62602f97bc114fd19c9e86849",
 		ambientComponentImage(t, "service-import-parents.yaml"),
+		ambientComponentImage(t, "grpc-consumer-routes.yaml"),
 	} {
 		pilot.Spec.Template.Spec.Containers[0].Image = image
 		update(pilot)

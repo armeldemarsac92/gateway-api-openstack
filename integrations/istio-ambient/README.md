@@ -23,13 +23,88 @@ Use the namespace and class creation commands once. If either name already exist
 
 Append `--consumer-routes` to the render or install command to select the Hibiscus build of Istio 1.31.0. This changes the istiod image. The workload nodes need access to the pinned linux/amd64 image. [Pilot image](consumer-routes.yaml) · [Source patch and image archive](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-istio-953e8af36734) · [Qualification](../../docs/qualification/v1.7.0/provider/ambient-waypoint.md#httproutes-owned-by-a-client-namespace)
 
-A client namespace on an enrolled, single-network mesh can set literal response headers for calls to a Kubernetes Service. Give the HTTPRoute a parent in the destination Service namespace, one `ResponseHeaderModifier` per rule and one backend that references the same Service and port. A parent without a port uses the backend port for that rule. The waypoint selects the route using the calling workload’s authenticated namespace. Other callers continue to receive the producer’s response. Foreign rerouting, GRPCRoute consumer attachments and Services configured for ingress forwarding through a waypoint report `Accepted=False/UnsupportedValue`.
+A client namespace on an enrolled, single-network mesh can set literal response headers for calls to a Kubernetes Service. Give the HTTPRoute a parent in the destination Service namespace, one `ResponseHeaderModifier` per rule and one backend that references the same Service and port. A parent without a port uses the backend port for that rule. The waypoint selects the route using the calling workload’s authenticated namespace. Other callers continue to receive the producer’s response. Foreign rerouting and Services configured for ingress forwarding through a waypoint report `Accepted=False/UnsupportedValue`. Consumer GRPCRoutes require the separate option below.
 
 To return to the standard pilot, remove the consumer routes and verify the producer response from both namespaces. Rerun the install command with its four original arguments.
 
+## Enable GRPCRoutes owned by a client namespace
+
+Append `--grpc-consumer-routes` to the render or install command. This selects the pinned Hibiscus Istio 1.31.0 pilot for Linux amd64 and sets `PILOT_ENABLE_AMBIENT_WAYPOINT_CONSUMER_GRPC=true`. The pilot also includes consumer HTTPRoute support for Services, so `--consumer-routes` is optional with this switch. Add `--service-import-parents` to retain the ServiceImport HTTPRoute settings. Only the gRPC switch enables consumer GRPCRoutes, whose parent must be a Kubernetes Service. [Pinned pilot image](grpc-consumer-routes.yaml)
+
+Enroll both namespaces in a single-network ambient mesh. Bind the destination Service to one active, addressed Istio Service waypoint with an HBONE listener on port 15008. The Service must have a ClusterIP and a TCP port identified as gRPC or HTTP/2, for example `appProtocol: kubernetes.io/h2c`. Waypoint canary forwarding with positive weight and ingress forwarding are outside this profile. The route must be visible from the waypoint namespace under Istio’s route export policy.
+
+Create the route in the calling workload’s namespace. The parent and each rule’s sole backend use the same Service and explicit port. The backend weight defaults to one and must be positive. The direct reference to the parent Service requires no ReferenceGrant. In this example, an authenticated caller in `cart` invoking `proto.EchoTestService/Echo` with `x-operation=lookup` receives the initial response metadata `x-route-choice=cart`. The last rule forwards other gRPC calls from `cart` directly.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: catalog
+  namespace: cart
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      namespace: store
+      name: catalog
+      port: 7070
+  rules:
+    - matches:
+        - method:
+            type: Exact
+            service: proto.EchoTestService
+            method: Echo
+          headers:
+            - type: Exact
+              name: x-operation
+              value: lookup
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: x-route-choice
+                value: cart
+      backendRefs:
+        - group: ""
+          kind: Service
+          namespace: store
+          name: catalog
+          port: 7070
+    - backendRefs:
+        - group: ""
+          kind: Service
+          namespace: store
+          name: catalog
+          port: 7070
+```
+
+Method matches use `Exact` with a gRPC service name and an optional method. Request metadata matches use literal values. Each rule can forward directly or use one `ResponseHeaderModifier` on ordinary initial response metadata. Use printable ASCII values and at most one set, add or remove operation per case-insensitive name. Reserved response fields include names starting with `grpc-`, names ending in `-bin`, `content-type` and `content-encoding`. Backend filters, alternate backends and session persistence are outside this profile.
+
+An applicable consumer GRPCRoute takes precedence over a consumer HTTPRoute for the same caller namespace, Service and port. The HTTPRoute can retain its attachments on other ports. A namespace without its own consumer rules uses the producer’s rules. Once the waypoint selects a namespace’s gRPC rules, every rule requires a POST with a gRPC content type. An ordinary HTTP request or a gRPC request that matches no rule receives a local no-route response. The waypoint ends route selection there. The last rule in the example handles the remaining gRPC POSTs for that namespace, Service and port.
+
+The waypoint’s internal HTTP connection manager uses `AUTO` codec selection. An HTTP/1.1 POST with a matching gRPC content type can select a rule. Use a native gRPC client over HTTP/2 to verify the call and response metadata.
+
+Check `Accepted=True`, `ResolvedRefs=True` and `ResolvedWaypoints=True` for the Service parent at the current route generation, then verify calls from the route namespace and another enrolled namespace. Regional and multi-network traffic are outside this profile.
+
+To opt out, remove the owned consumer GRPCRoutes and rerun the install command without `--grpc-consumer-routes`. Use `--consumer-routes` to keep consumer HTTPRoutes on Services, including when the previous command used only `--grpc-consumer-routes`. Use `--service-import-parents` to keep ServiceImport HTTPRoutes. That option also includes consumer HTTPRoutes on Services. For the stock pilot, omit all three switches. After the istiod rollout finishes, verify the remaining HTTPRoute or producer behavior from the affected namespaces.
+
 ## Report mesh capabilities on Experimental
 
-On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. Pin the reporting controller image from this release and enable `--istio-ambient-xmesh`. When upgrading to a Hibiscus ServiceImport pilot, roll out the updated reporting controller before istiod. Earlier reporting controllers leave XMesh at `Programmed=Unknown/Pending` with zero features when they see either ServiceImport pilot digest. Use the existing cluster ID and OpenStack settings. [Controller image digest](../../docs/qualification/v1.7.0/image.json) An installation already based on Experimental can add the `config/components/istio-ambient-xmesh` component to its overlay. The component passes the flag and adds the API permissions for reporting.
+On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. An installation already based on Experimental can add the `config/components/istio-ambient-xmesh` component instead. Both pass `--istio-ambient-xmesh` and add the API permissions for reporting. Use the existing cluster ID and OpenStack settings.
+
+When upgrading to a Hibiscus ServiceImport or gRPC consumer pilot, roll out a reporting controller that recognizes the pilot digest before istiod. For the gRPC pilot, the controller source listed as `sourceRevision` in the release image receipt must recognize the exact digest pinned in `grpc-consumer-routes.yaml` in its ambient image allowlist. The controller built from `c624b69a60e82da95597ad856b63ef3efd5b1044` leaves XMesh at `Programmed=Unknown`, reason `Pending`, with zero features for that pilot. [Controller image receipt](../../docs/qualification/v1.7.0/image.json) · [Controller image allowlist](../../internal/controller/ambientmesh/observations.go) · [gRPC pilot values](grpc-consumer-routes.yaml)
+
+Pin the reporting controller to the receipt’s `repository@manifestDigest`. Run the following from the repository root to check the image on the reporting Deployment after its rollout. If your overlay renames the Deployment or namespace, use those names in the commands.
+
+```sh
+receipt=docs/qualification/v1.7.0/image.json
+expected_image=$(rtk jq -er '.repository + "@" + .manifestDigest' "$receipt")
+rtk kubectl --kubeconfig "$kubeconfig" --context "$context" -n openstack-gateway-system \
+  rollout status deployment/openstack-gateway-controller --timeout=120s
+deployed_image=$(rtk kubectl --kubeconfig "$kubeconfig" --context "$context" -n openstack-gateway-system \
+  get deployment openstack-gateway-controller -o 'jsonpath={.spec.template.spec.containers[?(@.name=="controller")].image}')
+test "$deployed_image" = "$expected_image"
+```
 
 For Magnum, render the dedicated workload overlay from the repository root. Record the exact rendered file's SHA-256 in `gateway_api_manifest_sha256` and the compatible controller image digest in `gateway_api_controller_image`. [Magnum addon configuration](../../docs/qualification/v1.7.0/magnum-operator.md#build-and-configure)
 
@@ -48,7 +123,7 @@ rtk kubectl --kubeconfig "$kubeconfig" --context "$context" get xmesh hibiscus-i
 
 The XMesh controller identity is `gateway-api-openstack.github.io/istio-ambient`. Every XMesh selecting it is reconciled. `Accepted=True` at the XMesh's generation means the reporting configuration was accepted. This integration has no XMesh parameters, so setting `spec.parametersRef` produces `Accepted=False` with reason `InvalidParameters`.
 
-`Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The stock pilot, the limited Service consumer pilot and both Hibiscus ServiceImport pilot releases advertise these same 16 features when their rollouts are ready. The consumer pilot extension supports the limited cross-namespace response header behavior described above.
+`Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The stock pilot and the pinned Hibiscus HTTP consumer, ServiceImport and gRPC consumer pilots advertise these same 16 features when their rollouts are ready.
 
 The module sets `AMBIENT_ENABLED=true` and `AMBIENT_IPV6=false` directly in the CNI Pod template. Existing Pods keep their startup environment when a ConfigMap changes. For an installation that still reads these two values from a ConfigMap, rerun the module's install command with the same options. XMesh waits for the updated DaemonSet to finish rolling out before advertising features.
 
