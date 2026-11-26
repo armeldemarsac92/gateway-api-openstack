@@ -91,6 +91,8 @@ type observedGatewayGraph struct {
 	adminObserved            map[string]bool
 	defaultPoolsObserved     bool
 	tcpDefaultPoolTLS        map[string]bool
+	tcpDefaultTargets        map[string]octavia.TCPDefaultTargetObservation
+	tcpWeightedOmittedEmpty  map[string]bool
 	state                    cloud.GatewayState
 	addressAbsent            bool
 	deletionFrontendActive   bool
@@ -121,6 +123,7 @@ const (
 	graphSetListenerNotFound
 	graphClearListenerDefaultPool
 	graphSetListenerDefaultPool
+	graphSetTCPDefaultTargets
 	graphRouteMutation
 	graphEnableListener
 	graphEnableLoadBalancer
@@ -135,6 +138,9 @@ const (
 type graphMutation struct {
 	listenerFilters    listenerFilterMutation
 	grpcAuthTransition *grpcAuthTransitionPlan
+
+	tcpDefaultTargets     []octavia.TCPDefaultTarget
+	clearScalarTCPDefault bool
 
 	kind               graphMutationKind
 	routeIndex         int
@@ -337,6 +343,15 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result.Outcome.MutationSubmitted = true
 		return result, nil
 	}
+	if err != nil && !errors.Is(err, cloud.ErrOwnershipConflict) {
+		step, withdrawalErr := p.observeFailedTCPWeightedWithdrawal(ctx, desired, &actual)
+		if withdrawalErr != nil {
+			return result, errors.Join(err, withdrawalErr)
+		}
+		if step != nil {
+			return p.applyTCPWeightedWithdrawal(ctx, desired, actual, *step)
+		}
+	}
 	if err != nil {
 		step, withdrawalErr := p.observeFailedTCPDefaultPoolTLSWithdrawal(ctx, desired, &actual)
 		if withdrawalErr != nil {
@@ -367,6 +382,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		p.recordGraphMutationOutcome(&result, *step)
 		return result, nil
+	}
+	if step := p.prepareTCPWeightedDefaultPools(ctx, &desired, actual); step != nil {
+		return p.applyTCPWeightedWithdrawal(ctx, desired, actual, *step)
 	}
 	if step := p.prepareTCPDefaultPoolTLS(ctx, &desired, actual); step != nil {
 		if validate := spec.ValidateMutation; validate != nil {
@@ -454,6 +472,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if actual.outcome.State == cloud.OutcomeProgressing {
 		result := p.pendingGraphResult(ctx, desired, actual)
 		if (len(actual.httpsServingPorts) != 0 || hasTCPDefaultPoolTLSTarget(desired) ||
+			hasTCPWeightedTarget(desired) || hasTCPWeightedReadback(actual) ||
 			hasTCPRejectionTarget(desired) || hasUDPDropTarget(desired) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
 			// Busy Octavia can prove a serving subset without a write. Apply
 			// the same Kubernetes snapshot fence before publishing that proof.
@@ -545,7 +564,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
-		if (hasTCPDefaultPoolTLSTarget(desired) || hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
+		if (hasTCPDefaultPoolTLSTarget(desired) || hasTCPWeightedTarget(desired) || hasTCPWeightedReadback(actual) || hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
 			if err := spec.ValidateMutation(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err
 			}
@@ -766,6 +785,12 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 			return port == step.scopedListener.Port
 		})
 	}
+	if step.kind == graphSetTCPDefaultTargets {
+		result.Outcome.MutationSubmitted = true
+		if step.routeIndex >= 0 && step.routeIndex < len(result.Routes) {
+			result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
+		}
+	}
 	if step.kind == graphSNIMutation || step.kind == graphPublishFrontendCA || step.kind == graphDisableFrontendClientAuthFallback {
 		result.Outcome.MutationSubmitted = true
 	}
@@ -953,6 +978,9 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 		}
 		if (len(route.httpParts) == 0 || len(route.policies) != 0) && !route.backendTLS.denies() && !deniedPorts[scopedHTTPRoutePort(route)] {
 			routes = append(routes, route.spec)
+		}
+		for _, backend := range route.tcpParts {
+			routes = append(routes, backend.spec)
 		}
 		for _, backend := range route.httpParts {
 			port := httpURLPolicyRoutePort(desired, backend)
@@ -1871,12 +1899,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			return actual, nil
 		}
 	}
-	if actual.protocol == cloud.ListenerProtocolHTTP {
+	switch actual.protocol {
+	case cloud.ListenerProtocolHTTP:
 		if err := p.observeListenerFilterGraph(ctx, desired, &actual); err != nil {
 			return actual, err
 		}
 		actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.httpPools.loadBalancer, actual.listener, actual.protocol, nil, actual.httpPools.routes, nil, actual.httpsIsolationPolicies)
-	} else {
+	case cloud.ListenerProtocolTCP:
+		actual.routes, err = p.observeTCPRouteGraphs(ctx, &actual, owners)
+	default:
 		actual.routes, err = p.observeRouteGraphs(ctx, owners, lb, actual.listener, actual.protocol)
 	}
 	if err != nil {
@@ -1915,6 +1946,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	actual.adminObserved = inventory.AdminStatesObserved
 	actual.defaultPoolsObserved = inventory.DefaultPoolsObserved
 	actual.tcpDefaultPoolTLS = inventory.TCPDefaultPoolTLS
+	actual.tcpDefaultTargets = inventory.TCPDefaultTargets
 	actual.frontendsObservedClosed = !slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
 		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
 	})

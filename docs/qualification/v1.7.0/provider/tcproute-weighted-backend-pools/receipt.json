@@ -1,0 +1,666 @@
+{
+  "controller": {
+    "sourceRevision": "3713c168078895b2dcb1eae8ad3a1a83b19c785a",
+    "manifestDigest": "sha256:947b9c05e4f98b30adbf3e93eb7d9722d04cd606e1b3f7147f9816e4a8168a8b",
+    "configDigest": "sha256:c14baee648170f4e7e3972701e61094c55f59d1695d78df55ea63464344bdf55",
+    "managerSHA256": "23f6298e9a0dcf049e99ab1e5aa6eaaf432abb062004fa2b3b3e1eb163707cb3",
+    "ociArchiveSHA256": "c2b91b70da52fa2175ad4acd980021088c116d9caaf5a0d6b0ddf19b9bf6b006"
+  },
+  "octavia": {
+    "source": "0e1cdf4b8599981fe7a617ef22e789cec438966f",
+    "version": "19.0.1.dev111",
+    "wheelSHA256": "0b2eaf8fcae2e6ced531259cb70273868bc2b526143939e934cc6814d25763cc"
+  },
+  "octaviaLib": {
+    "source": "735564bb8701e13495cc79554170ab65ceb1a811",
+    "version": "3.12.1.dev24",
+    "wheelSHA256": "39cf7a6d9e0db2ff27972c77434ba13262a9a2c27a7bb8107cacf6215849d69b"
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+    "sha256": "5030950e4a9e5afda60ab4ad82fb49c70b08d6ad18fa5660073c4765ac8603dd"
+  },
+  "barbican": {
+    "version": "23.0.0",
+    "transport": "local HTTPS with verification"
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kubernetesVersion": "v1.36.2",
+  "samplePlan": {
+    "samplesPerWeightedPhase": 384,
+    "quarterInterval": [
+      62,
+      130
+    ]
+  },
+  "regionalMicroversion": "2.30",
+  "regionalCapabilities": {
+    "tcp_default_pool_tls_v1": true,
+    "backend_tls_hostname_v1": true,
+    "tcp_weighted_default_pools_v1": true
+  },
+  "amphoraCapabilities": {
+    "status": 200,
+    "apiVersion": "1.0",
+    "HAProxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1-http-header-name-256-v1",
+    "backend_tls_hostname_v1": true,
+    "tcp_default_pool_tls_v1": true,
+    "tcp_weighted_default_pools_v1": true
+  },
+  "originPKI": {
+    "serverCAFingerprintSHA256": "7beab7ad761d9d665ba65e686919c0327af0ea6dd56bb2496a054dea12971fa6",
+    "clientCAFingerprintSHA256": "9193400d2f9e4e57315047cb833d786a47a80e7e7ffa8ee2befb31016588c940",
+    "xBackendClientFingerprintSHA256": "9c3a203dd215cd360ff7d1c51d60fd05c0378771436c3931568e474ee27cfd48",
+    "serverLeaf": {
+      "san": "tcp-origin.example.test",
+      "sha256": "490e88c19031c5c990379726fac5b5b496bc6efdb90e2b2614326dcf028ed51d"
+    },
+    "originLeafCommonName": "tcp-origin.example.test"
+  },
+  "directHostnameRejection": {
+    "attemptedName": "other-origin.example.test",
+    "verificationResult": "hostname mismatch"
+  },
+  "channels": {
+    "standard": {
+      "passed": true,
+      "profile": "standard",
+      "receiptSHA256": "9d9d4fdb0e8eb7122e448dc1a7bcb4ac34ce70efd7891100f8360e13b92f6cb1",
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=standard",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "xBackendCRD": false,
+      "phases": {
+        "standard": {
+          "routeGeneration": {
+            "control": 1
+          },
+          "routeConditions": {
+            "control": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            }
+          },
+          "gatewayListenerAttachedRoutes": {
+            "control": 1
+          },
+          "listenerIDs": {
+            "control": "798324fe-a18d-44fd-8906-b8a833816cb2"
+          },
+          "scalarPoolIDs": {
+            "control": "57a31d4d-837f-4e45-899c-490217cbb39e"
+          },
+          "mixedTargets": null,
+          "mixedTargetsStatus": null,
+          "mixedTargetsRetryable": null,
+          "mixedPools": null,
+          "revokedPool": null,
+          "traffic": {
+            "control": {
+              "control": 8
+            }
+          },
+          "originTLS": {},
+          "siblingEchoesDuringTransition": 0,
+          "servingConfigSHA256": "cac97cf6222d6356422f65821484fa0f30266a41ac1f9a77672880d59c7c7394"
+        }
+      }
+    },
+    "experimental": {
+      "passed": true,
+      "profile": "weighted",
+      "receiptSHA256": "1da5fdbef463371b86a69972020aee13e21665d4e77ff87313523b46cd4d20c5",
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s",
+        "--octavia-backend-tls-policy",
+        "--octavia-tcp-default-pool-tls",
+        "--octavia-tcp-weighted-default-pools"
+      ],
+      "xBackendCRD": true,
+      "phases": {
+        "matching-origins": {
+          "routeGeneration": {
+            "control": 1,
+            "mixed": 1
+          },
+          "routeConditions": {
+            "control": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            },
+            "mixed": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            }
+          },
+          "gatewayListenerAttachedRoutes": {
+            "control": 1,
+            "mixed": 1
+          },
+          "listenerIDs": {
+            "control": "d19fc1f5-fc5d-48c7-88c3-9c893e8b13e6",
+            "mixed": "c9090c25-28e8-4438-8ec8-371f330c7328"
+          },
+          "scalarPoolIDs": {
+            "control": "35c1da4f-c08d-4434-9308-19e65d04c187"
+          },
+          "mixedTargets": [
+            {
+              "pool_id": "9cfa89ad-65de-4e30-9782-7754a8c69b73",
+              "weight": 3
+            },
+            {
+              "pool_id": "49817f10-0070-4304-90fc-0b8301c235a0",
+              "weight": 1
+            }
+          ],
+          "mixedTargetsStatus": "ACTIVE",
+          "mixedTargetsRetryable": false,
+          "mixedPools": {
+            "clear": {
+              "id": "9cfa89ad-65de-4e30-9782-7754a8c69b73",
+              "protocol": "TCP",
+              "listeners": [
+                {
+                  "id": "c9090c25-28e8-4438-8ec8-371f330c7328"
+                }
+              ],
+              "member": {
+                "address": "198.51.100.5",
+                "port": 18443,
+                "weight": 1
+              },
+              "renderedTLS": {
+                "ssl": false,
+                "sni": null,
+                "verifyHostStrict": null,
+                "verifyMode": null,
+                "clientCertificate": false
+              },
+              "tlsEnabled": false,
+              "backendTLSHostname": null,
+              "caRefSHA256": null,
+              "clientRefSHA256": null
+            },
+            "mutual": {
+              "id": "49817f10-0070-4304-90fc-0b8301c235a0",
+              "protocol": "TCP",
+              "listeners": [
+                {
+                  "id": "c9090c25-28e8-4438-8ec8-371f330c7328"
+                }
+              ],
+              "member": {
+                "address": "198.51.100.6",
+                "port": 18446,
+                "weight": 1
+              },
+              "renderedTLS": {
+                "ssl": true,
+                "sni": "str(tcp-origin.example.test)",
+                "verifyHostStrict": "tcp-origin.example.test",
+                "verifyMode": "required",
+                "clientCertificate": true,
+                "caFingerprintSHA256": "7beab7ad761d9d665ba65e686919c0327af0ea6dd56bb2496a054dea12971fa6",
+                "clientFingerprintSHA256": "9c3a203dd215cd360ff7d1c51d60fd05c0378771436c3931568e474ee27cfd48"
+              },
+              "tlsEnabled": true,
+              "backendTLSHostname": "tcp-origin.example.test",
+              "caRefSHA256": "c386927908e58c0d7df61acb99eaf452279893c376570793fb8c8492a6779138",
+              "clientRefSHA256": "f25103b01a4b89c84ad44c7227f18fb8333c221b0b96eb0a8410bfa6ff87da93"
+            }
+          },
+          "revokedPool": null,
+          "traffic": {
+            "control": {
+              "control": 8
+            },
+            "mixed": {
+              "mutual": 89,
+              "control": 295
+            }
+          },
+          "originTLS": {
+            "mutual": {
+              "accept": 89,
+              "handshake": 89,
+              "payload": 89,
+              "tls-error": 0
+            }
+          },
+          "siblingEchoesDuringTransition": 0,
+          "servingConfigSHA256": "b32f4dcebc97221639dd3bb9b6a5025d16c89b7aee6bdc3c2f8fe8c32c931e4e"
+        },
+        "identity-grant-withdrawn": {
+          "routeGeneration": {
+            "control": 1,
+            "mixed": 1
+          },
+          "routeConditions": {
+            "control": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            },
+            "mixed": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            }
+          },
+          "gatewayListenerAttachedRoutes": {
+            "control": 1,
+            "mixed": 1
+          },
+          "listenerIDs": {
+            "control": "d19fc1f5-fc5d-48c7-88c3-9c893e8b13e6",
+            "mixed": "c9090c25-28e8-4438-8ec8-371f330c7328"
+          },
+          "scalarPoolIDs": {
+            "control": "35c1da4f-c08d-4434-9308-19e65d04c187"
+          },
+          "mixedTargets": [
+            {
+              "pool_id": "9cfa89ad-65de-4e30-9782-7754a8c69b73",
+              "weight": 3
+            },
+            {
+              "reject": true,
+              "weight": 1
+            }
+          ],
+          "mixedTargetsStatus": "ACTIVE",
+          "mixedTargetsRetryable": false,
+          "mixedPools": {
+            "clear": {
+              "id": "9cfa89ad-65de-4e30-9782-7754a8c69b73",
+              "protocol": "TCP",
+              "listeners": [
+                {
+                  "id": "c9090c25-28e8-4438-8ec8-371f330c7328"
+                }
+              ],
+              "member": {
+                "address": "198.51.100.5",
+                "port": 18443,
+                "weight": 1
+              },
+              "renderedTLS": {
+                "ssl": false,
+                "sni": null,
+                "verifyHostStrict": null,
+                "verifyMode": null,
+                "clientCertificate": false
+              },
+              "tlsEnabled": false,
+              "backendTLSHostname": null,
+              "caRefSHA256": null,
+              "clientRefSHA256": null
+            }
+          },
+          "revokedPool": {
+            "id": "49817f10-0070-4304-90fc-0b8301c235a0",
+            "present": false,
+            "listeners": []
+          },
+          "traffic": {
+            "control": {
+              "control": 8
+            },
+            "mixed": {
+              "control": 305,
+              "closed": 79
+            }
+          },
+          "originTLS": {
+            "mutual": {
+              "accept": 0,
+              "handshake": 0,
+              "payload": 0,
+              "tls-error": 0
+            }
+          },
+          "siblingEchoesDuringTransition": 11,
+          "servingConfigSHA256": "be3832fc16c8313bf2a745ab41e30541dacc8e6f9655717f707414bd7336e2c4"
+        },
+        "identity-grant-restored": {
+          "routeGeneration": {
+            "control": 1,
+            "mixed": 1
+          },
+          "routeConditions": {
+            "control": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            },
+            "mixed": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+            }
+          },
+          "gatewayListenerAttachedRoutes": {
+            "control": 1,
+            "mixed": 1
+          },
+          "listenerIDs": {
+            "control": "d19fc1f5-fc5d-48c7-88c3-9c893e8b13e6",
+            "mixed": "c9090c25-28e8-4438-8ec8-371f330c7328"
+          },
+          "scalarPoolIDs": {
+            "control": "35c1da4f-c08d-4434-9308-19e65d04c187"
+          },
+          "mixedTargets": [
+            {
+              "pool_id": "9cfa89ad-65de-4e30-9782-7754a8c69b73",
+              "weight": 3
+            },
+            {
+              "pool_id": "b00e46f2-0f98-4edb-ba4b-4365b3f1b9e8",
+              "weight": 1
+            }
+          ],
+          "mixedTargetsStatus": "ACTIVE",
+          "mixedTargetsRetryable": false,
+          "mixedPools": {
+            "clear": {
+              "id": "9cfa89ad-65de-4e30-9782-7754a8c69b73",
+              "protocol": "TCP",
+              "listeners": [
+                {
+                  "id": "c9090c25-28e8-4438-8ec8-371f330c7328"
+                }
+              ],
+              "member": {
+                "address": "198.51.100.5",
+                "port": 18443,
+                "weight": 1
+              },
+              "renderedTLS": {
+                "ssl": false,
+                "sni": null,
+                "verifyHostStrict": null,
+                "verifyMode": null,
+                "clientCertificate": false
+              },
+              "tlsEnabled": false,
+              "backendTLSHostname": null,
+              "caRefSHA256": null,
+              "clientRefSHA256": null
+            },
+            "mutual": {
+              "id": "b00e46f2-0f98-4edb-ba4b-4365b3f1b9e8",
+              "protocol": "TCP",
+              "listeners": [
+                {
+                  "id": "c9090c25-28e8-4438-8ec8-371f330c7328"
+                }
+              ],
+              "member": {
+                "address": "198.51.100.6",
+                "port": 18446,
+                "weight": 1
+              },
+              "renderedTLS": {
+                "ssl": true,
+                "sni": "str(tcp-origin.example.test)",
+                "verifyHostStrict": "tcp-origin.example.test",
+                "verifyMode": "required",
+                "clientCertificate": true,
+                "caFingerprintSHA256": "7beab7ad761d9d665ba65e686919c0327af0ea6dd56bb2496a054dea12971fa6",
+                "clientFingerprintSHA256": "9c3a203dd215cd360ff7d1c51d60fd05c0378771436c3931568e474ee27cfd48"
+              },
+              "tlsEnabled": true,
+              "backendTLSHostname": "tcp-origin.example.test",
+              "caRefSHA256": "4735e31e44ab49f4cbd52dd0142a637431697559047cc34f722ad4b876ec5f3c",
+              "clientRefSHA256": "f25103b01a4b89c84ad44c7227f18fb8333c221b0b96eb0a8410bfa6ff87da93"
+            }
+          },
+          "revokedPool": null,
+          "traffic": {
+            "control": {
+              "control": 8
+            },
+            "mixed": {
+              "mutual": 101,
+              "control": 283
+            }
+          },
+          "originTLS": {
+            "mutual": {
+              "accept": 101,
+              "handshake": 101,
+              "payload": 101,
+              "tls-error": 0
+            }
+          },
+          "siblingEchoesDuringTransition": 13,
+          "servingConfigSHA256": "8694266bfc187ea26cf34730358b942f5eff5c24fc1864eb953cbeb886e5c216"
+        }
+      }
+    }
+  },
+  "disabled": {
+    "passed": true,
+    "profile": "disabled",
+    "receiptSHA256": "3502376f62ce2fb97ec7f5e3cf2019261cbc8a809f08148565bcd76b695ce365",
+    "controllerFlags": [
+      "--leader-elect=false",
+      "--metrics-bind-address=0",
+      "--health-probe-bind-address=0",
+      "--gateway-api-channel=experimental",
+      "--octavia-microversion=2.30",
+      "--openstack-resync-interval=2s",
+      "--openstack-poll-interval=50ms",
+      "--openstack-api-qps=120",
+      "--openstack-api-burst=160",
+      "--openstack-operation-timeout=30s",
+      "--octavia-backend-tls-policy",
+      "--octavia-tcp-default-pool-tls"
+    ],
+    "xBackendCRD": true,
+    "phases": {
+      "disabled": {
+        "routeGeneration": {
+          "control": 1,
+          "mixed": 1,
+          "server": 1
+        },
+        "routeConditions": {
+          "control": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          },
+          "mixed": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/UnsupportedValue",
+            "gateway-api-openstack.github.io/Programmed": "False/UnsupportedValue"
+          },
+          "server": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "gatewayListenerAttachedRoutes": {
+          "control": 1,
+          "mixed": 1,
+          "server": 1
+        },
+        "listenerIDs": {
+          "control": "ad86f7f1-8ffe-4e80-ab39-31e05d508748",
+          "server": "111afe73-a997-4be1-8f6a-b356cbca5a75",
+          "mixed": "9706fd65-6845-4e72-b716-d36649ddf668"
+        },
+        "scalarPoolIDs": {
+          "control": "897cb553-d561-4ed8-95ac-122b33e3615e",
+          "server": "f653eb80-08ae-494f-ac7d-b768dbf58e67"
+        },
+        "mixedTargets": [],
+        "mixedTargetsStatus": null,
+        "mixedTargetsRetryable": null,
+        "mixedPools": {},
+        "revokedPool": null,
+        "traffic": {
+          "control": {
+            "control": 8
+          },
+          "mixed": {
+            "closed": 8
+          },
+          "server": {
+            "server": 8
+          }
+        },
+        "originTLS": {
+          "mutual": {
+            "accept": 0,
+            "handshake": 0,
+            "payload": 0,
+            "tls-error": 0
+          }
+        },
+        "siblingEchoesDuringTransition": 0,
+        "servingConfigSHA256": "44e94c6a387f5460cd5122c4e2f172d3c55be0d4eb1d3cd8a72fe6d35ea8b68c"
+      }
+    }
+  },
+  "predecessor": {
+    "passed": true,
+    "profile": "predecessor",
+    "receiptSHA256": "f954c51f1953694f8b16bd3ffd54ae1a8e760955b89f19116b3497dfcf33a9d2",
+    "controllerFlags": [
+      "--leader-elect=false",
+      "--metrics-bind-address=0",
+      "--health-probe-bind-address=0",
+      "--gateway-api-channel=experimental",
+      "--octavia-microversion=2.30",
+      "--openstack-resync-interval=2s",
+      "--openstack-poll-interval=50ms",
+      "--openstack-api-qps=120",
+      "--openstack-api-burst=160",
+      "--openstack-operation-timeout=30s",
+      "--octavia-backend-tls-policy",
+      "--octavia-tcp-default-pool-tls"
+    ],
+    "xBackendCRD": true,
+    "phases": {
+      "predecessor": {
+        "routeGeneration": {
+          "control": 1,
+          "mixed": 1,
+          "server": 1
+        },
+        "routeConditions": {
+          "control": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          },
+          "mixed": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/UnsupportedValue",
+            "gateway-api-openstack.github.io/Programmed": "False/UnsupportedValue"
+          },
+          "server": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "gatewayListenerAttachedRoutes": {
+          "control": 1,
+          "mixed": 1,
+          "server": 1
+        },
+        "listenerIDs": {
+          "control": "6be9f916-02ba-4306-a1d0-be08ece11094",
+          "server": "a3712b4f-ff3b-40f2-9859-75d470be3ab0",
+          "mixed": "032fd92d-dbd7-404f-92b5-6ccab5746fe3"
+        },
+        "scalarPoolIDs": {
+          "control": "39e1c7e9-364e-4d16-a0e0-715f489ab017",
+          "server": "6fff53cc-addb-4777-aa1b-9e05a39307fd"
+        },
+        "mixedTargets": null,
+        "mixedTargetsStatus": null,
+        "mixedTargetsRetryable": null,
+        "mixedPools": {},
+        "revokedPool": null,
+        "traffic": {
+          "control": {
+            "control": 8
+          },
+          "mixed": {
+            "closed": 8
+          },
+          "server": {
+            "server": 8
+          }
+        },
+        "originTLS": {
+          "mutual": {
+            "accept": 0,
+            "handshake": 0,
+            "payload": 0,
+            "tls-error": 0
+          }
+        },
+        "siblingEchoesDuringTransition": 0,
+        "servingConfigSHA256": "f35defd3d9b9bdd2b20b085c4445251e1bbedc629f4ba4c579f207d1476866f6"
+      }
+    },
+    "controller": {
+      "sourceRevision": "442157f8152196f4a9b35b2b08c864c7cd759f22",
+      "manifestDigest": "sha256:acdf6a90a7139191848f74d44063a72e8a52238b5f6c4a44a475a397df35a0b1",
+      "configDigest": "sha256:63bbb5fece565338e8683bf7a558a27421a5916431a06340421348932337a983",
+      "managerSHA256": "8097996668d76ab0598db40890772a4ef6746306df486731677f8a5098705910",
+      "ociArchiveSHA256": "0b020b33be463351e9ee606b6d030bdfdb60e88fccbea654bc480a0da7d5da43"
+    },
+    "octavia": {
+      "source": "30dc29021685e385f538ef636c55a83721b780bc",
+      "version": "19.0.1.dev110",
+      "wheelSHA256": "60ff3b434f20df9b1d2dcd6ba280e12511784ce8c806ddb1879e74f6e6bd182e"
+    },
+    "octaviaLib": {
+      "source": "89991fd0d6de66fe1ca9c74e6d885b3963fe93ad",
+      "version": "3.12.1.dev23",
+      "wheelSHA256": "9eebc5e616cca34d694d56c2c94d8eed3822fbcb90d91a0447f50a69acbef456"
+    }
+  },
+  "boundary": "Private mount, network and PID namespaces with envtest API/etcd and a synthetic ready Pod address. Octavia REST/SQLite, Amphora API handler and renderer, installed TCP member-batch worker when used, real HAProxy with native origin sockets, and Barbican through verified HTTPS. The signed weighted path confirms publication for one allocated standalone Amphora recorded in SQLite. Local adapters provide Keystone, Neutron, RPC provisioning completion, Amphora transport and service control."
+}

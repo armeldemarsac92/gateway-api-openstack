@@ -448,9 +448,20 @@ func (r UDPPacketDrop) Valid() bool {
 
 func (r UDPPacketDrop) DropsAll() bool { return r.Numerator == r.Denominator }
 
+// TCPWeightedBackend is one positive share in a clear TCP listener's ordered
+// selection. An empty Key explicitly rejects that share.
+type TCPWeightedBackend struct {
+	Key                        string `json:",omitempty"`
+	Weight                     int
+	Members                    []Member              `json:",omitempty"`
+	BackendTLS                 *BackendTLSValidation `json:",omitempty"`
+	ClientCertificateReference string                `json:"-"`
+}
+
 // RouteSpec describes the traffic configuration owned by one route.
 type RouteSpec struct {
 	TCPConnectionRejection *TCPConnectionRejection `json:",omitempty"`
+	TCPWeightedBackends    []TCPWeightedBackend    `json:",omitempty"`
 	UDPPacketDrop          *UDPPacketDrop          `json:",omitempty"`
 	BackendRetryBudget     *BackendRetryBudget     `json:",omitempty"`
 	// BackendRetryBudgetPending waits for a reservable Gateway ancestor.

@@ -45,16 +45,17 @@ import (
 // Reconciler converges one transport route kind in an Octavia Gateway graph.
 type Reconciler struct {
 	client.Client
-	APIReader                       client.Reader
-	Config                          controller.Config
-	Writer                          graph.Reconciler
-	Coordinator                     *graph.Coordinator
-	Protocol                        gatewayv1.ProtocolType // TCP (including the zero value) or UDP.
-	TCPConnectionRejectionAvailable func(context.Context) (bool, error)
-	TCPDefaultPoolTLSAvailable      func(context.Context) (bool, error)
-	XBackendClientCertificates      graph.XBackendClientCertificateResolver
-	UDPPacketDropAvailable          func(context.Context) (bool, error)
-	externalHostnames               tcpExternalHostnameCache
+	APIReader                        client.Reader
+	Config                           controller.Config
+	Writer                           graph.Reconciler
+	Coordinator                      *graph.Coordinator
+	Protocol                         gatewayv1.ProtocolType // TCP (including the zero value) or UDP.
+	TCPConnectionRejectionAvailable  func(context.Context) (bool, error)
+	TCPDefaultPoolTLSAvailable       func(context.Context) (bool, error)
+	TCPWeightedDefaultPoolsAvailable func(context.Context) (bool, error)
+	XBackendClientCertificates       graph.XBackendClientCertificateResolver
+	UDPPacketDropAvailable           func(context.Context) (bool, error)
+	externalHostnames                tcpExternalHostnameCache
 }
 
 type routePlan struct {
@@ -301,7 +302,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 			return plan, nil
 		}
 	}
-	collectTCP := r.tcpConnectionRejectionEnabled()
+	collectTCP := r.tcpWeightedCandidate(route) || r.tcpConnectionRejectionEnabled()
 	// Collect known UDP denials before election so a failed election read
 	// cannot leave a revoked target serving. Full eligibility follows election.
 	collectUDP := r.protocol() == gatewayv1.UDPProtocolType && r.Config.UDPPacketDrop
@@ -379,7 +380,7 @@ func (r *Reconciler) planParents(ctx context.Context, route *transportRoute, par
 		plan.detach = bound
 		return plan, nil
 	}
-	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, r.tcpXBackendProfile(parent.gateway, topologyMode), parent.gateway.Spec.GatewayClassName, singletonTCPReference(route), collectShare)
+	backends, resolvedRejections, err := r.resolveBackends(ctx, refs, inactiveMode, activeMode, r.tcpXBackendProfile(parent.gateway, topologyMode), parent.gateway.Spec.GatewayClassName, r.tcpXBackendTLSEligible(route), collectShare)
 	if err != nil {
 		return routePlan{}, err
 	}
@@ -538,6 +539,7 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gatew
 
 func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []transportBackend, rejectWeight int, topology classconfig.Resolved, dns *tcpExternalHostnameObservations, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
+	weightedPools := r.needsTCPWeightedPools(route, backends)
 	udpDrop := r.udpPacketDropEnabled(gateway, topology, listenerPorts)
 	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
 	groups := make([]routebackend.WeightedServiceMembers, 0, len(backends))
@@ -560,7 +562,7 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 				err = nil
 			}
 		}
-		if err == nil && (r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
+		if err == nil && (weightedPools || r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
 			diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
 			rejectWeight += int(backend.ref.weight)
 			if noEndpoints == nil {
@@ -574,13 +576,18 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		serving = append(serving, backend)
 		groups = append(groups, routebackend.WeightedServiceMembers{Weight: backend.ref.weight, Members: members})
 	}
-	rejection, drop, diagnostic, err := r.backendUnavailableShare(ctx, route, rejectWeight, udpDrop, noEndpoints)
-	if diagnostic != nil || err != nil {
-		return cloud.RouteSpec{}, "", diagnostic, err
+	var rejection *cloud.TCPConnectionRejection
+	var drop *cloud.UDPPacketDrop
+	if !weightedPools {
+		var diagnostic *model.Diagnostic
+		rejection, drop, diagnostic, err = r.backendUnavailableShare(ctx, route, rejectWeight, udpDrop, noEndpoints)
+		if diagnostic != nil || err != nil {
+			return cloud.RouteSpec{}, "", diagnostic, err
+		}
 	}
 
 	var members []cloud.Member
-	if weighted {
+	if weighted && !weightedPools {
 		var err error
 		members, err = routebackend.WeightedMembers(string(r.protocol()), groups)
 		if errors.Is(err, routebackend.ErrBackendWithoutReadyEndpoints) {
@@ -589,7 +596,7 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		if err != nil {
 			return cloud.RouteSpec{}, "", &model.Diagnostic{Condition: "Programmed", Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}, nil
 		}
-	} else if len(groups) != 0 {
+	} else if !weightedPools && len(groups) != 0 {
 		members = groups[0].Members
 	}
 	spec := cloud.RouteSpec{
@@ -605,7 +612,9 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		HealthMonitor:           topology.HealthMonitor, Members: members,
 		TCPConnectionRejection: rejection, UDPPacketDrop: drop,
 	}
-	if len(serving) == 1 && serving[0].backendTLS != nil {
+	if weightedPools {
+		spec.TCPWeightedBackends = buildTCPWeightedBackends(route, serving, groups)
+	} else if len(serving) == 1 && serving[0].backendTLS != nil {
 		spec.BackendTLS = serving[0].backendTLS
 		spec.TCPXBackendClientCertificateReference = serving[0].clientCertificate
 	}

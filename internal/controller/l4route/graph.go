@@ -260,9 +260,10 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			node.Disposition = cloud.GraphEnsure
 			node.Spec = *spec
 			node.RetainListenerPorts = nil
-		} else if r.canRetainObservedTarget(winner.route, target, checkpoint) {
-			// The provider must confirm the existing pool still matches
-			// the freshly authorized backend before keeping listener edges.
+		} else if len(spec.TCPWeightedBackends) != 0 || r.canRetainObservedTarget(winner.route, target, checkpoint) {
+			// For weighted routes the new snapshot can withdraw individual shares
+			// before the forwarding checkpoint permits admission. The provider
+			// confirms each retained pool against the fresh backend snapshot.
 			node.Spec = *spec
 			node.RetainListenerPorts = ports
 		}
@@ -314,7 +315,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	}
 	// Zero-weight references affect status only. Their authorization and
 	// revisions cannot change the serving destinations of the sealed graph.
-	collect := r.tcpConnectionRejectionEnabled() || r.udpPacketDropEnabled(gateway, topology, ports)
+	collect := r.tcpWeightedCandidate(route) || r.tcpConnectionRejectionEnabled() || r.udpPacketDropEnabled(gateway, topology, ports)
 	refs, auth, err := r.authorizedBackends(ctx, route, false, collect)
 	revisions.grants = auth.grants
 	if err != nil || auth.active != nil && auth.rejectWeight == 0 || auth.active != nil && !collect {
@@ -324,7 +325,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if collect {
 		mode = topology.Topology.MemberMode
 	}
-	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, r.tcpXBackendProfile(gateway, topology.Topology.MemberMode), gateway.Spec.GatewayClassName, singletonTCPReference(route), collect)
+	backends, invalid, err := r.resolveBackends(ctx, refs, "", mode, r.tcpXBackendProfile(gateway, topology.Topology.MemberMode), gateway.Spec.GatewayClassName, r.tcpXBackendTLSEligible(route), collect)
 	revisions.services = invalid.services
 	revisions.xBackends = invalid.xBackends
 	revisions.imports = invalid.imports

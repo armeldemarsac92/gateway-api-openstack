@@ -111,6 +111,11 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		if route.pool != nil && route.pool.CATLSContainerRef != "" {
 			attached[route.pool.CATLSContainerRef] = true
 		}
+		for _, backend := range route.tcpParts {
+			if backend.pool != nil && backend.pool.CATLSContainerRef != "" {
+				attached[backend.pool.CATLSContainerRef] = true
+			}
+		}
 		for _, backend := range route.httpParts {
 			if backend.pool != nil && backend.pool.CATLSContainerRef != "" {
 				attached[backend.pool.CATLSContainerRef] = true
@@ -163,6 +168,9 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		if node.Disposition == cloud.GraphEnsure {
 			for spec := range node.Spec.HTTPPortSpecs() {
 				selectRevision(spec.BackendTLS)
+				for _, backend := range spec.TCPWeightedBackends {
+					selectRevision(backend.BackendTLS)
+				}
 				selectAuthorizers := func(matches []cloud.HTTPPathMatch) {
 					for _, match := range matches {
 						if match.ExternalAuth != nil {

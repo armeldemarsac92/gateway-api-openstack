@@ -110,6 +110,8 @@ type desiredRoute struct {
 	policies                    []desiredPolicy
 	hostnameRuleValue           string
 	httpParts                   []desiredRoute
+	tcpParts                    []desiredRoute
+	tcpWeightedPlan             tcpWeightedRoutePlan
 	mirrorAvailability          requestMirrorAvailability
 	mirrorUnavailableCapability string
 	requestPolicyWithdrawals    map[string]bool
@@ -165,6 +167,9 @@ func (r desiredRoute) monitorType() string {
 }
 
 func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error) {
+	if len(spec.TCPWeightedBackends) != 0 {
+		return p.buildDesiredTCPWeightedRoute(spec)
+	}
 	if len(spec.HTTPRedirects) != 0 {
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("HTTP redirects require the complete Gateway routing snapshot"))
 	}
@@ -770,6 +775,9 @@ func (r desiredRoute) httpRole(base, match string) string {
 func httpResourceRole(base, backend, match string) string {
 	if backend == "" {
 		return base
+	}
+	if strings.HasPrefix(backend, tcpWeightedPartPrefix) {
+		return tcpWeightedResourceRole(base, backend)
 	}
 	return openstackidentity.HTTPFragmentRole(base, backend, match)
 }
