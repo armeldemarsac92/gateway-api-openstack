@@ -49,14 +49,15 @@ jobs:
           cp "$inputs" result/
           printf '%s\n' "$GITHUB_SHA" > result/pilot-source.txt
           git -C istio write-tree > result/pilot-tree.txt
-      - name: Validate HTTPRoute status and waypoint configuration
+      - name: Validate ServiceImport projection, HTTPRoute status, and waypoint configuration
         working-directory: istio
         run: |
           set -euo pipefail
           export REPO_ROOT="$PWD"
           go test -count=1 -v ./pilot/pkg/config/kube/gateway -run '^Test(ServiceImportRouteReconciliation|ServiceImportRouteOptOutPreservesForeignStatus|WaypointConsumerHTTPRouteContract)$' | tee ../result/gateway-tests.log
+          go test -count=1 -v ./pilot/pkg/serviceregistry/ambient ./pkg/config/gateway/kube -run '^Test(AmbientServiceEntryFilterHandlesDeleteTombstone|ReadMCSImportRejectsUnsupportedTraffic)$' | tee ../result/projection-tests.log
           go test -count=1 -v ./pilot/pkg/xds -run '^Test(WaypointServiceImportProducerRoute|WaypointServiceConsumerRoute)$' | tee ../result/waypoint-tests.log
-          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointServiceImportProducerRoute; do
+          for test in ServiceImportRouteReconciliation ServiceImportRouteOptOutPreservesForeignStatus WaypointConsumerHTTPRouteContract AmbientServiceEntryFilterHandlesDeleteTombstone ReadMCSImportRejectsUnsupportedTraffic WaypointServiceImportProducerRoute WaypointServiceConsumerRoute; do
             grep -F -- "--- PASS: Test$test (" ../result/*-tests.log
           done
       - name: Build pilot-discovery from the verified tree
