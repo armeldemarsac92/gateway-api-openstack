@@ -80,6 +80,9 @@ func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 	}
 	seen := make(map[string]bool, len(input.Headers))
 	for _, header := range input.Headers {
+		if err := cloud.ValidateHTTPHeaderMatchName(string(header.Name)); err != nil {
+			return Match{}, unsupported(err.Error(), ScopeRule)
+		}
 		name := strings.ToLower(string(header.Name))
 		// Gateway API uses the first case-equivalent header entry.
 		if seen[name] {

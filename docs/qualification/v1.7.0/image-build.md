@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An enrolled Amphora region can route exact HTTP paths and segment prefixes up to 1024 bytes. [Build record](image.json) · [Gateway traffic](provider/literal-http-paths/README.md)
+An enrolled Amphora region can route exact HTTPRoute and GRPCRoute matches on 256-byte header names. [Build record](image.json) · [Gateway traffic](provider/exact-http-header-name-256/README.md)
+
+An enrolled Amphora region can route exact HTTP paths and segment prefixes up to 1024 bytes. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-93f73f9e24db8d4a0a1b7a82c11e21477a505dd1/image.json) · [Gateway traffic](provider/literal-http-paths/README.md)
 
 An enrolled Amphora region can route a 253-character HTTP hostname. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-bb7d9e7f72ab5fa9c4d745f228ca0c39c30cad66/image.json) · [Gateway traffic](provider/long-http-hostnames/README.md)
 

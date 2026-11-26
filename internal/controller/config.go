@@ -47,8 +47,10 @@ type Config struct {
 	GatewayInfrastructureMetadata bool
 	// ClusterGatewayAddresses enables Service ClusterIPs for explicit Cluster requests.
 	ClusterGatewayAddresses bool
-	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
+	// HTTPHeaderExact enables exact HTTP and gRPC request header matching on capable Amphora providers.
 	HTTPHeaderExact bool
+	// HTTPHeaderName256 enables exact matches on 256-byte header names with HTTPHeaderExact.
+	HTTPHeaderName256 bool
 	// LongHTTPHostnames allows host match expressions above the stock Octavia limit.
 	LongHTTPHostnames bool
 	// LiteralHTTPPaths permits paths that the stock Octavia renderer cannot represent.

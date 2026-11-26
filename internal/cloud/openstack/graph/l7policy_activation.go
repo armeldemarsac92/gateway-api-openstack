@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
@@ -33,9 +32,10 @@ import (
 var errPolicyActivationSnapshotBusy = errors.New("waiting for an available Octavia L7 policy activation snapshot")
 
 type l7PolicyActivationBatch struct {
-	listenerID   string
-	request      octavia.PolicyActivationBatch
-	routeIndices []int
+	listenerID            string
+	request               octavia.PolicyActivationBatch
+	routeIndices          []int
+	predicateCapabilities []string
 }
 
 func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation, plan []graphMutation) (*l7PolicyActivationBatch, error) {
@@ -60,7 +60,6 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 
 	batch := &l7PolicyActivationBatch{listenerID: listener.ID}
 	selected := make(map[string]bool)
-	requiresExactHeaders := false
 	// A batch starts at the first planned mutation and stays within the
 	// activation prefix. Activations on other listeners have independent order.
 	for _, candidate := range plan {
@@ -80,6 +79,7 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 			observed = *part
 		}
 		if candidate.route.requiresExactHeaders && !p.httpHeaderExact ||
+			candidate.route.httpRuleCapabilities&headerName256Capability != 0 && !p.httpHeaderName256Enabled() ||
 			desired.spec.Routes[candidate.routeIndex].Disposition != cloud.GraphEnsure || observed.pool == nil ||
 			observed.pool.ProjectID != p.projectID || validateBoundPoolParent(*observed.pool, actual.loadBalancer.ID, cloud.ListenerProtocolHTTP) != nil ||
 			!plainActivationPool(observed) ||
@@ -87,7 +87,6 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 			break
 		}
 		selected[candidate.route.id] = true
-		requiresExactHeaders = requiresExactHeaders || candidate.route.requiresExactHeaders
 		batch.routeIndices = append(batch.routeIndices, candidate.routeIndex)
 		if len(selected) == octavia.MaxPolicyActivationBatch {
 			break
@@ -143,21 +142,33 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 		}
 	}
 
-	budget := 3 * time.Second
-	if deadline, ok := ctx.Deadline(); ok {
-		budget = min(budget, time.Until(deadline)/3)
+	// A port can depend on predicates outside the selected policies.
+	_, ports := httpGuardListeners(desired, actual)
+	port := ports[listener.ID]
+	ruleDependencies := httpRuleDependencies(desired, actual, ports)[port]
+	for _, feature := range p.httpRuleFeatures() {
+		if ruleDependencies&feature.bit == 0 {
+			continue
+		}
+		if !feature.enabled {
+			return nil, errPolicyActivationSnapshotBusy
+		}
+		batch.predicateCapabilities = append(batch.predicateCapabilities, feature.capabilities...)
 	}
-	discovery, cancel := context.WithTimeout(ctx, budget)
-	required := []string{octavia.GatewayCapabilityL7PolicyBatchActivation}
-	if requiresExactHeaders {
-		// Verify the traffic predicate first when both capabilities disappear.
-		required = []string{octavia.GatewayCapabilityHTTPHeaderExact, octavia.GatewayCapabilityL7PolicyBatchActivation}
+	if !slices.Contains(batch.predicateCapabilities, octavia.GatewayCapabilityHTTPHeaderExact) {
+		exactHeaders := guardedHTTPListeners(desired, actual, ports, exactHTTPHeaderPredicate)[port]
+		if exactHeaders.desired || exactHeaders.installed {
+			batch.predicateCapabilities = append(batch.predicateCapabilities, octavia.GatewayCapabilityHTTPHeaderExact)
+		}
 	}
+
+	discovery, cancel := boundedGatewayCapabilityDiscovery(ctx)
+	required := append(slices.Clone(batch.predicateCapabilities), octavia.GatewayCapabilityL7PolicyBatchActivation)
 	err := p.octavia.VerifyGatewayCapabilities(discovery, actual.loadBalancer.Provider, required...)
 	cancel()
 	var missing *octavia.MissingGatewayCapability
 	if errors.As(err, &missing) || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		if requiresExactHeaders && (missing == nil || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
+		if len(batch.predicateCapabilities) != 0 && (missing == nil || slices.Contains(batch.predicateCapabilities, missing.Capability)) {
 			// Reobserve the listener before enabling even a path-only sibling.
 			return nil, errPolicyActivationSnapshotBusy
 		}
@@ -172,7 +183,7 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 		return nil, errPolicyActivationSnapshotBusy
 	}
 	if gophercloud.ResponseCodeIs(err, http.StatusNotImplemented) {
-		return nil, nil
+		return nil, p.verifyPolicyActivationFallback(ctx, actual, batch)
 	}
 	if err != nil {
 		return nil, err
@@ -201,6 +212,25 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 	}
 	batch.request.ExpectedGraphRevision = snapshot.Revision
 	return batch, nil
+}
+
+// HTTP 501 can report a withdrawn traffic predicate or an unavailable
+// batch operation. Verify the port's predicates before an individual PUT.
+func (p *Provider) verifyPolicyActivationFallback(ctx context.Context, actual observedGatewayGraph, batch *l7PolicyActivationBatch) error {
+	if len(batch.predicateCapabilities) == 0 {
+		return nil
+	}
+	discovery, cancel := boundedGatewayCapabilityDiscovery(ctx)
+	defer cancel()
+	err := p.octavia.VerifyGatewayCapabilities(discovery, actual.loadBalancer.Provider, batch.predicateCapabilities...)
+	var missing *octavia.MissingGatewayCapability
+	if errors.As(err, &missing) || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return errPolicyActivationSnapshotBusy
+	}
+	if err != nil {
+		return fmt.Errorf("verify Octavia L7 policy activation fallback capabilities in region %q: %w", p.region, err)
+	}
+	return nil
 }
 
 func policyActivationStep(step graphMutation) bool {

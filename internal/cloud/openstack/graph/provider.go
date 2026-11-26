@@ -79,6 +79,7 @@ type ProviderConfig struct {
 	LongHTTPHostnames      bool
 	LiteralHTTPPaths       bool
 	HTTPHeaderExact        bool
+	HTTPHeaderName256      bool
 	HTTPQueryParamExact    bool
 	HTTPRequestRedirect    bool
 	HTTPRequestURLRewrite  bool
@@ -124,6 +125,7 @@ type Provider struct {
 	longHTTPHostnames      bool
 	literalHTTPPaths       bool
 	httpHeaderExact        bool
+	httpHeaderName256      bool
 	httpQueryParamExact    bool
 	httpRequestRedirect    bool
 	httpRequestURLRewrite  bool
@@ -180,6 +182,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		longHTTPHostnames:      cfg.LongHTTPHostnames,
 		literalHTTPPaths:       cfg.LiteralHTTPPaths,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
+		httpHeaderName256:      cfg.HTTPHeaderName256,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
 		httpRequestURLRewrite:  cfg.HTTPRequestURLRewrite,
 		httpRequestPolicy:      cfg.HTTPRequestPolicy,

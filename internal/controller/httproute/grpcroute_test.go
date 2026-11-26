@@ -73,7 +73,8 @@ func TestGRPCRouteIgnoresListenerSetAlongsideDirectParent(t *testing.T) {
 
 func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T) {
 	cfg := testConfig()
-	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.HTTPHeaderExact = true, true, true
+	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.HTTPHeaderExact, cfg.HTTPHeaderName256 = true, true, true, true
+	longName := strings.Repeat("x", 256)
 	_, gateway := providerRouteParentObjects(cfg)
 	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "route-uid"}}
 	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
@@ -86,7 +87,7 @@ func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T
 		),
 		grpcRule("v2", gatewayv1.GRPCRouteMatch{
 			Method:  &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To("Echo")},
-			Headers: []gatewayv1.GRPCHeaderMatch{{Name: "version", Value: "two"}},
+			Headers: []gatewayv1.GRPCHeaderMatch{{Name: gatewayv1.GRPCHeaderName(longName), Value: "two"}},
 		}),
 	}
 	v1, endpointsV1, node := validNodePortBackend(gateway.Namespace, "v1")
@@ -108,7 +109,7 @@ func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T
 			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 4, Headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "green"}}},
 		},
 		"v2": {
-			{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0, Headers: []cloud.HTTPHeaderMatch{{Name: "version", Value: "two"}}},
+			{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0, Headers: []cloud.HTTPHeaderMatch{{Name: longName, Value: "two"}}},
 			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 2, Headers: []cloud.HTTPHeaderMatch{{Name: "version", Value: "two"}}},
 		},
 	}
@@ -510,6 +511,9 @@ func TestGRPCExactHeadersRejectDisabledCapabilityAndUnsupportedMatches(t *testin
 		message  string
 	}{
 		{name: "opt-in disabled", match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "--octavia-http-header-exact"},
+		{name: "256 without extension", enrolled: true, match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{{
+			Name: gatewayv1.GRPCHeaderName(strings.Repeat("x", 256)), Value: "two",
+		}}}, message: "--octavia-http-header-name-256"},
 		{name: "regex", enrolled: true, match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{{Type: ptr.To(gatewayv1.GRPCHeaderMatchRegularExpression), Name: "version", Value: "t.*"}}}, message: "RegularExpression"},
 		{name: "method without a service", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Method: ptr.To("Echo")}, Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "exact service"},
 		{name: "empty method object", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{}}, message: "exact service"},
